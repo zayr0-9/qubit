@@ -28,6 +28,12 @@ const storagePath = join(dataDir, "sessions.sqlite");
 const indexPath = join(dataDir, "session-index.json");
 const keyIndexPath = join(dataDir, "api-key-index.json");
 const settingsPath = join(dataDir, "settings.json");
+const promptsDir = join(rootDir, "prompts");
+const baseInstructions = "You are Qubit, a concise terminal coding assistant MVP. Be helpful, direct, and practical. Keep answers brief unless the user asks for detail.";
+const defaultModePrompts = {
+  plan: "You are in plan mode: reason carefully and propose changes before editing.",
+  edit: "You are in edit mode: implement changes directly and validate them.",
+};
 const defaultSessionId = process.env.QUBIT_SESSION_ID || "qubit-default";
 const providerDefinitions = {
   glm: {
@@ -69,6 +75,7 @@ const providerDefinitions = {
 const providerAliasMap = new Map(Object.entries(providerDefinitions).flatMap(([name, definition]) => [name, ...(definition.aliases || [])].map((alias) => [alias, name])));
 const providerNames = Object.keys(providerDefinitions);
 let settings = await loadSettings();
+const modePrompts = await loadModePrompts();
 const defaultProviderName = normalizeProvider(process.env.QUBIT_PROVIDER || settings.defaultProvider || "glm");
 let activeProviderName = defaultProviderName;
 let model = defaultModelForProvider(activeProviderName);
@@ -146,14 +153,37 @@ try {
   keytarLoadError = error;
 }
 
-function createQubitAgent() {
+function createQubitAgent(mode = "plan") {
   return defineAgent({
     name: "qubit-chat",
-    instructions:
-      "You are Qubit, a concise terminal coding assistant MVP. Be helpful, direct, and practical. Keep answers brief unless the user asks for detail.",
+    instructions: instructionsForMode(mode),
     model,
     tools: qubitTools,
   });
+}
+
+function instructionsForMode(mode) {
+  const normalized = normalizePromptMode(mode);
+  const modePrompt = modePrompts[normalized] || defaultModePrompts[normalized];
+  return [baseInstructions, modePrompt].filter(Boolean).join("\n\n");
+}
+
+function normalizePromptMode(mode) {
+  const normalized = String(mode || "").trim().toLowerCase();
+  if (["edit", "always", "always_allow", "always-allow", "allow"].includes(normalized)) return "edit";
+  return "plan";
+}
+
+async function loadModePrompts() {
+  const entries = await Promise.all(Object.keys(defaultModePrompts).map(async (mode) => {
+    try {
+      const content = (await readFile(join(promptsDir, `${mode}.md`), "utf8")).trim();
+      return [mode, content || defaultModePrompts[mode]];
+    } catch {
+      return [mode, defaultModePrompts[mode]];
+    }
+  }));
+  return Object.fromEntries(entries);
 }
 
 const storage = new SqliteStorage({
@@ -213,7 +243,7 @@ const hooks = {
 
 let apiKeyIndex = await loadApiKeyIndex();
 const codexTokenStore = new QubitCodexTokenStore({ dataDir, keychainService, keytar });
-let runtimeState = await createRuntimeState();
+let runtimeState = await createRuntimeState("plan");
 let sessionIndex = await loadSessionIndex();
 let activeSessionId = sessionIndex.activeSessionId;
 
@@ -340,7 +370,7 @@ async function handleLine(line) {
         settings.defaultModels[activeProviderName] = model;
         await saveSettings();
       }
-      runtimeState = await createRuntimeState();
+      runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
       const defaultStatus = request.persistDefault === true ? " Saved as default." : "";
       await writeModelUpdated(request.id, `Using ${runtimeState.providerName} model ${model}.${defaultStatus}`);
     } catch (error) {
@@ -351,21 +381,21 @@ async function handleLine(line) {
 
   if (request.type === "key.set") {
     await setApiKey({ provider: request.provider, alias: request.alias, apiKey: request.apiKey });
-    runtimeState = await createRuntimeState();
+    runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
     await writeKeyUpdated(request.id, `Saved and activated ${normalizeProvider(request.provider || defaultProviderName)}/${request.alias || ""}.`);
     return;
   }
 
   if (request.type === "key.use") {
     await activateApiKey({ provider: request.provider, alias: request.alias });
-    runtimeState = await createRuntimeState();
+    runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
     await writeKeyUpdated(request.id, `Activated ${normalizeProvider(request.provider || defaultProviderName)}/${request.alias || ""}.`);
     return;
   }
 
   if (request.type === "key.delete") {
     await deleteApiKey({ provider: request.provider, alias: request.alias });
-    runtimeState = await createRuntimeState();
+    runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
     await writeKeyUpdated(request.id, `Deleted ${normalizeProvider(request.provider || defaultProviderName)}/${request.alias || ""}.`);
     return;
   }
@@ -495,6 +525,11 @@ async function handleLine(line) {
     activeSessionId = runSessionId;
   }
 
+  const promptMode = normalizePromptMode(request.systemPromptMode || request.mode);
+  if (runtimeState.promptMode !== promptMode) {
+    runtimeState = await createRuntimeState(promptMode);
+  }
+
   activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, controller, runtime: runtimeState.runtime });
   write({ type: "run_started", id: request.id, runId, sessionId: runSessionId });
 
@@ -576,11 +611,12 @@ function handlePermissionResponse(request) {
   );
 }
 
-async function createRuntimeState() {
+async function createRuntimeState(promptMode = "plan") {
+  const normalizedPromptMode = normalizePromptMode(promptMode);
   const providerConfig = await resolveActiveProviderConfig(activeProviderName);
   const provider = createProvider(providerConfig);
   const runtime = createRuntime({
-    agent: createQubitAgent(),
+    agent: createQubitAgent(normalizedPromptMode),
     provider,
     storage,
     toolPermission: {
@@ -588,7 +624,7 @@ async function createRuntimeState() {
     },
     hooks,
   });
-  return { runtime, ...providerConfig };
+  return { runtime, promptMode: normalizedPromptMode, ...providerConfig };
 }
 
 function createProvider(config) {
@@ -888,7 +924,7 @@ async function switchProvider(id, provider, persistDefault = false) {
       await saveSettings();
     }
     model = defaultModelForProvider(normalizedProvider);
-    runtimeState = await createRuntimeState();
+    runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
     const defaultStatus = persistDefault ? " Saved as default provider." : "";
     await writeModelUpdated(id, `Using provider ${runtimeState.providerName} with model ${model}.${defaultStatus}`);
   } catch (error) {
@@ -966,7 +1002,7 @@ async function handleCodexLoginStart(id) {
     });
     write({ type: "codex.login.started", id, authUrl: login.authUrl, localPort: login.localPort });
     login.completed.then(async (result) => {
-      if (activeProviderName === "codex") runtimeState = await createRuntimeState();
+      if (activeProviderName === "codex") runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
       write({
         type: "codex.login.completed",
         id,
@@ -991,7 +1027,7 @@ async function handleCodexLoginCancel(id) {
 
 async function handleCodexLogout(id) {
   await codexTokenStore.delete();
-  runtimeState = await createRuntimeState();
+  runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
   write({
     type: "codex.logout.completed",
     id,
@@ -1440,8 +1476,9 @@ async function loadSessionMessages(sessionId) {
 
 async function buildSessionTreeNodes(focalSessionId = activeSessionId) {
   const previewCache = new Map();
-  const nodes = [];
   const sessions = relatedForkSessions(sessionIndex.sessions, focalSessionId);
+  const messageNodesBySession = await buildMessageTreeNodesForSessions(sessions, previewCache);
+  const nodes = [];
   for (const session of sessions) {
     const node = {
       id: session.id,
@@ -1455,6 +1492,10 @@ async function buildSessionTreeNodes(focalSessionId = activeSessionId) {
       messageCount: Number.isFinite(session.messageCount) ? session.messageCount : 0,
       messageRole: "",
       messageContent: "",
+      assistantRole: "",
+      assistantContent: "",
+      lineageMessages: [],
+      messageNodes: messageNodesBySession.get(session.id) || [],
     };
 
     let preview = null;
@@ -1468,9 +1509,145 @@ async function buildSessionTreeNodes(focalSessionId = activeSessionId) {
       node.messageRole = preview.role;
       node.messageContent = preview.content;
     }
+    const assistantPreview = await assistantTextPreviewForSession(session.id, previewCache);
+    if (assistantPreview) {
+      node.assistantRole = assistantPreview.role;
+      node.assistantContent = assistantPreview.content;
+      if (!node.messageContent) {
+        node.messageRole = assistantPreview.role;
+        node.messageContent = assistantPreview.content;
+      }
+    }
+    node.lineageMessages = await lineageTextMessagesForSession(session.id, previewCache);
     nodes.push(node);
   }
   return nodes;
+}
+
+async function buildMessageTreeNodesForSessions(sessions, cache) {
+  const byId = new Map();
+  for (const session of sessions) {
+    if (session?.id) byId.set(session.id, session);
+  }
+
+  const rawMessagesBySession = new Map();
+  const sessionMessages = new Map();
+  for (const session of sessions) {
+    const rawMessages = await rawSessionMessagesCached(session.id, cache);
+    rawMessagesBySession.set(session.id, rawMessages);
+    sessionMessages.set(session.id, textTreeMessagesFromRawMessages(rawMessages));
+  }
+
+  const rootSessions = sessions
+    .filter((session) => !session?.forkedFromSessionId || !byId.has(session.forkedFromSessionId))
+    .sort(compareSessionsForTree);
+  const childSessions = new Map();
+  for (const session of sessions) {
+    const parentId = session?.forkedFromSessionId;
+    if (!parentId || !byId.has(parentId)) continue;
+    const children = childSessions.get(parentId) || [];
+    children.push(session);
+    childSessions.set(parentId, children);
+  }
+  for (const children of childSessions.values()) {
+    children.sort(compareSessionsForTree);
+  }
+
+  const nodesBySession = new Map();
+  const globalNodeIds = new Map();
+  const visited = new Set();
+
+  const addNode = (session, message, index, parentId, continued = false) => {
+    const key = `${session.id}:${index}`;
+    const id = `msg:${session.id}:${index}`;
+    globalNodeIds.set(key, id);
+    const node = {
+      id,
+      parentId: parentId || "",
+      sessionId: session.id,
+      sessionTitle: session.title || "Untitled chat",
+      role: message.role,
+      content: message.content,
+      messageIndex: index,
+      continued,
+    };
+    const nodes = nodesBySession.get(session.id) || [];
+    nodes.push(node);
+    nodesBySession.set(session.id, nodes);
+    return id;
+  };
+
+  const walkSession = (session, inheritedParentId = "") => {
+    if (!session?.id || visited.has(session.id)) return;
+    visited.add(session.id);
+
+    const messages = sessionMessages.get(session.id) || [];
+    const rawForkIndex = Number.isFinite(session.forkedFromMessageIndex) ? Math.trunc(session.forkedFromMessageIndex) : 0;
+    const startsAt = session.forkedFromSessionId && byId.has(session.forkedFromSessionId)
+      ? textTreeStartIndexForRawIndex(rawMessagesBySession.get(session.id) || [], rawForkIndex)
+      : 0;
+
+    let parentId = inheritedParentId;
+    if (session.forkedFromSessionId && byId.has(session.forkedFromSessionId)) {
+      parentId = forkParentMessageNodeId(session, rawMessagesBySession, globalNodeIds) || inheritedParentId;
+    }
+
+    for (let index = startsAt; index < messages.length; index += 1) {
+      parentId = addNode(session, messages[index], index, parentId, index >= startsAt);
+    }
+
+    for (const child of childSessions.get(session.id) || []) {
+      walkSession(child, parentId);
+    }
+  };
+
+  for (const root of rootSessions) {
+    walkSession(root, "");
+  }
+  for (const session of sessions) {
+    walkSession(session, "");
+  }
+
+  return nodesBySession;
+}
+
+function forkParentMessageNodeId(session, rawMessagesBySession, globalNodeIds) {
+  const parentId = session?.forkedFromSessionId || "";
+  if (!parentId) return "";
+  const parentRawMessages = rawMessagesBySession.get(parentId) || [];
+  const rawForkIndex = Number.isFinite(session.forkedFromMessageIndex) ? Math.trunc(session.forkedFromMessageIndex) : parentRawMessages.length;
+  const parentMessageIndex = textTreeParentIndexForRawIndex(parentRawMessages, rawForkIndex);
+  if (parentMessageIndex < 0) return "";
+  return globalNodeIds.get(`${parentId}:${parentMessageIndex}`) || "";
+}
+
+function textTreeParentIndexForRawIndex(rawMessages, rawIndex) {
+  const target = Math.max(0, Math.min(rawMessages.length, rawIndex));
+  let textIndex = -1;
+  for (let index = 0; index < target; index += 1) {
+    if (treeTextMessageFromRaw(rawMessages[index])) textIndex += 1;
+  }
+  return textIndex;
+}
+
+function textTreeStartIndexForRawIndex(rawMessages, rawIndex) {
+  return Math.max(0, textTreeParentIndexForRawIndex(rawMessages, rawIndex) + 1);
+}
+
+function textTreeMessagesFromRawMessages(rawMessages) {
+  return rawMessages.map((message) => treeTextMessageFromRaw(message)).filter(Boolean);
+}
+
+function treeTextMessageFromRaw(message) {
+  if (!message || message.role === "system") return null;
+  return treeTextMessage({ role: message.role, content: message.content });
+}
+
+function compareSessionsForTree(a, b) {
+  const left = a?.forkedAt || a?.createdAt || a?.updatedAt || "";
+  const right = b?.forkedAt || b?.createdAt || b?.updatedAt || "";
+  if (left === right) return String(a?.title || "").localeCompare(String(b?.title || ""));
+  return left.localeCompare(right);
 }
 
 function relatedForkSessions(sessions, focalSessionId = activeSessionId) {
@@ -1535,6 +1712,23 @@ async function firstTextPreviewForSession(sessionId, cache) {
   return null;
 }
 
+async function lineageTextMessagesForSession(sessionId, cache) {
+  const messages = await rawSessionMessagesCached(sessionId, cache);
+  return transcriptMessagesForUi(messages)
+    .map((message) => treeTextMessage(message))
+    .filter(Boolean);
+}
+
+async function assistantTextPreviewForSession(sessionId, cache) {
+  const messages = await rawSessionMessagesCached(sessionId, cache);
+  const uiMessages = transcriptMessagesForUi(messages);
+  for (const message of uiMessages) {
+    const preview = treeTextMessage(message);
+    if (preview?.role === "assistant") return preview;
+  }
+  return null;
+}
+
 async function rawSessionMessagesCached(sessionId, cache) {
   if (cache.has(sessionId)) return cache.get(sessionId);
   let messages = [];
@@ -1567,9 +1761,33 @@ function firstTextPreview(messages) {
 }
 
 function treeTextMessage(message) {
-  if (!message || (message.role !== "user" && message.role !== "assistant")) return null;
-  const content = typeof message.content === "string" ? message.content.trim() : "";
-  return content ? { role: message.role, content } : null;
+  const role = normalizeTextMessageRole(message?.role);
+  if (!role) return null;
+  const content = textContentFromMessage(message).trim();
+  return content ? { role, content } : null;
+}
+
+function normalizeTextMessageRole(role) {
+  if (role === "user") return "user";
+  if (role === "assistant" || role === "agent") return "assistant";
+  return "";
+}
+
+function textContentFromMessage(message) {
+  const content = message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (!part || typeof part !== "object") return "";
+        if (typeof part.text === "string") return part.text;
+        if (typeof part.content === "string") return part.content;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return String(content ?? "");
 }
 
 function rawMessageStartIndexForUiMessageIndex(messages, uiMessageIndex) {

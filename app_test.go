@@ -1479,3 +1479,43 @@ func TestActivatingEditedForkFromTreeLoadsOnlyForkLineageMessages(t *testing.T) 
 		t.Fatalf("viewport = %q, want edited fork lineage", viewport)
 	}
 }
+
+func TestSubmitInputIncludesSystemPromptMode(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.autoNewSessionOnChat = false
+	m.session = "sess_1"
+	m.permissionMode = permissionModeAlwaysAllow
+	m.composer.SetValue("change files")
+
+	_, cmd := m.submitInput()
+	payload := runBatchSendCommand(t, cmd, stdin, "chat")
+	if payload["systemPromptMode"] != "edit" {
+		t.Fatalf("systemPromptMode = %#v, want edit; payload=%#v", payload["systemPromptMode"], payload)
+	}
+}
+
+func TestFilteredSlashCommandsPrioritizesNameMatches(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.composer.SetValue("/provider")
+
+	matches := m.filteredSlashCommands()
+	if len(matches) < 2 {
+		t.Fatalf("matches = %#v, want at least name and description matches", matches)
+	}
+	if matches[0].Name != "providers" {
+		t.Fatalf("first match = %q, want providers; matches=%#v", matches[0].Name, matches)
+	}
+	seenDescriptionOnly := false
+	for _, command := range matches {
+		if command.Name == "models" {
+			seenDescriptionOnly = true
+			continue
+		}
+		if seenDescriptionOnly && strings.Contains(command.Name, "provider") {
+			t.Fatalf("name match %q appeared after description-only match; matches=%#v", command.Name, matches)
+		}
+	}
+}

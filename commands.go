@@ -22,7 +22,7 @@ var slashCommands = []slashCommand{
 	{Name: "theme", Usage: "/theme", Description: "Customize terminal colors", NeedsArg: false, OpensOnSelect: true},
 	{Name: "rename", Usage: "/rename <title>", Description: "Rename current session", NeedsArg: true},
 	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal Shift+Enter newline setup", NeedsArg: false},
-	{Name: "permission", Usage: "/permission <ask|always>", Description: "Set tool permission mode", NeedsArg: true},
+	{Name: "permission", Usage: "/permission <plan|edit>", Description: "Set plan/edit mode", NeedsArg: true},
 	{Name: "permission-test", Usage: "/permission-test", Description: "Open a demo permission modal", NeedsArg: false},
 	{Name: "help", Usage: "/help", Description: "Show command help", NeedsArg: false},
 }
@@ -166,7 +166,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title] - fork current chat from here or a previous user message\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <ask|always> - choose whether gated tools ask or auto-allow\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title] - fork current chat from here or a previous user message\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <plan|edit> - switch between plan and edit mode\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
@@ -273,18 +273,18 @@ func (m *model) moveForkSelector(delta int) {
 func (m model) setPermissionMode(arg string) (tea.Model, tea.Cmd) {
 	mode := strings.ToLower(strings.TrimSpace(arg))
 	switch mode {
-	case "ask", "a":
+	case "plan", "ask", "a", "p":
 		m.permissionMode = permissionModeAsk
 		m.status = "ready"
-		m.appendSystem("Tool permissions: ask before running gated tools.")
-	case "always", "always-allow", "always_allow", "allow", "auto", "auto-allow":
+		m.appendSystem("Mode: plan. Tool permissions will ask before running gated tools.")
+	case "edit", "always", "always-allow", "always_allow", "allow", "auto", "auto-allow", "e":
 		m.permissionMode = permissionModeAlwaysAllow
 		m.status = "ready"
-		m.appendSystem("Tool permissions: always allow gated tools for this session.")
+		m.appendSystem("Mode: edit. Gated tools will be allowed automatically for this session.")
 	case "":
-		m.appendSystem(fmt.Sprintf("Tool permissions are currently: %s. Usage: /permission <ask|always>", m.permissionModeLabel()))
+		m.appendSystem(fmt.Sprintf("Current mode: %s. Usage: /permission <plan|edit>", m.permissionModeLabel()))
 	default:
-		m.appendSystem("Usage: /permission <ask|always>")
+		m.appendSystem("Usage: /permission <plan|edit>")
 	}
 	return m, nil
 }
@@ -300,9 +300,16 @@ func (m model) cyclePermissionMode() (tea.Model, tea.Cmd) {
 
 func (m model) permissionModeLabel() string {
 	if m.permissionMode == permissionModeAlwaysAllow {
-		return "always allow"
+		return "edit"
 	}
-	return "ask"
+	return "plan"
+}
+
+func (m model) systemPromptMode() string {
+	if m.permissionMode == permissionModeAlwaysAllow {
+		return "edit"
+	}
+	return "plan"
 }
 
 func (m model) showSlashPalette() bool {
@@ -312,13 +319,22 @@ func (m model) showSlashPalette() bool {
 
 func (m model) filteredSlashCommands() []slashCommand {
 	query := strings.ToLower(strings.TrimPrefix(m.composer.Value(), "/"))
-	var matches []slashCommand
+	if query == "" {
+		return append([]slashCommand(nil), slashCommands...)
+	}
+
+	var nameMatches []slashCommand
+	var descriptionMatches []slashCommand
 	for _, command := range slashCommands {
-		if query == "" || strings.Contains(command.Name, query) || strings.Contains(strings.ToLower(command.Description), query) {
-			matches = append(matches, command)
+		name := strings.ToLower(command.Name)
+		description := strings.ToLower(command.Description)
+		if strings.Contains(name, query) {
+			nameMatches = append(nameMatches, command)
+		} else if strings.Contains(description, query) {
+			descriptionMatches = append(descriptionMatches, command)
 		}
 	}
-	return matches
+	return append(nameMatches, descriptionMatches...)
 }
 
 func (m *model) moveSlashCursor(delta int) {

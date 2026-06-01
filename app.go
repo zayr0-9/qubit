@@ -294,7 +294,7 @@ func (m model) submitInput() (tea.Model, tea.Cmd) {
 	m.status = "thinking"
 	m.autoScroll = true
 	m.refreshViewport()
-	payload := map[string]any{"type": "chat", "input": input, "runId": runID}
+	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "systemPromptMode": m.systemPromptMode()}
 	if m.autoNewSessionOnChat {
 		payload["newSession"] = true
 		payload["title"] = titleFromInput(input)
@@ -319,7 +319,7 @@ func (m model) submitMessageEdit(input string) (tea.Model, tea.Cmd) {
 	m.autoScroll = true
 	m.refreshViewport()
 
-	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "sessionId": m.session, "replaceFromMessageIndex": target, "title": "Edit: " + fallback(m.title, m.currentSessionTitle())}
+	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "sessionId": m.session, "replaceFromMessageIndex": target, "title": "Edit: " + fallback(m.title, m.currentSessionTitle()), "systemPromptMode": m.systemPromptMode()}
 	return m, tea.Batch(sendRuntime(m.runtime, payload), m.spinner.Tick)
 }
 

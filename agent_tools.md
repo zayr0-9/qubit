@@ -222,7 +222,7 @@ always_allow
 
 The permission mode is Go UI/session state. Keep the runtime/tool definitions responsible for declaring static tool safety (`permission: { mode: 'ask' }` for gated tools and `permission: { mode: 'always' }` for intrinsically safe read/search tools), but keep user-facing auto-approval gating in the Go client. Do not conflate tool-level `always` with user-level `always_allow`.
 
-For now, permission mode is changed with `/permission <ask|always>` or cycled in the chat UI with Shift+Tab. The current mode is rendered as a minimal bright `ask` / `always allow` label in a dedicated status section below the input area and is not persisted across process restarts. If persistence is added later, document the settings file and migration behavior here.
+For now, permission mode is changed with `/permission <plan|edit>` or cycled in the chat UI with Shift+Tab. The current mode is rendered as a minimal bright `plan` / `edit` label in a dedicated status section below the input area and is not persisted across process restarts. Plan mode maps to ask-before-gated-tools behavior and edit mode maps to always-allow gated tools for the session. If persistence is added later, document the settings file and migration behavior here.
 
 ## Tool Definition Standards
 

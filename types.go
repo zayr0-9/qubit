@@ -14,6 +14,22 @@ type chatMessage struct {
 	ToolGroup *toolGroup `json:"toolGroup,omitempty"`
 }
 
+type forkTreeLineageMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type forkTreeMessageNode struct {
+	ID           string `json:"id"`
+	ParentID     string `json:"parentId,omitempty"`
+	SessionID    string `json:"sessionId"`
+	SessionTitle string `json:"sessionTitle,omitempty"`
+	Role         string `json:"role"`
+	Content      string `json:"content"`
+	MessageIndex int    `json:"messageIndex,omitempty"`
+	Continued    bool   `json:"continued,omitempty"`
+}
+
 type renderCacheKey struct {
 	Role    string
 	Content string
@@ -176,17 +192,22 @@ type slashCommand struct {
 }
 
 type forkTreeNode struct {
-	ID                     string `json:"id"`
-	SessionID              string `json:"sessionId"`
-	SessionTitle           string `json:"sessionTitle"`
-	ParentSessionID        string `json:"parentSessionId,omitempty"`
-	ForkedFromMessageIndex int    `json:"forkedFromMessageIndex,omitempty"`
-	ForkedAt               string `json:"forkedAt,omitempty"`
-	CreatedAt              string `json:"createdAt,omitempty"`
-	UpdatedAt              string `json:"updatedAt,omitempty"`
-	MessageRole            string `json:"messageRole,omitempty"`
-	MessageContent         string `json:"messageContent,omitempty"`
-	MessageCount           int    `json:"messageCount,omitempty"`
+	ID                     string                   `json:"id"`
+	SessionID              string                   `json:"sessionId"`
+	SessionTitle           string                   `json:"sessionTitle"`
+	ParentSessionID        string                   `json:"parentSessionId,omitempty"`
+	ParentNodeID           string                   `json:"parentNodeId,omitempty"`
+	ForkedFromMessageIndex int                      `json:"forkedFromMessageIndex,omitempty"`
+	ForkedAt               string                   `json:"forkedAt,omitempty"`
+	CreatedAt              string                   `json:"createdAt,omitempty"`
+	UpdatedAt              string                   `json:"updatedAt,omitempty"`
+	MessageRole            string                   `json:"messageRole,omitempty"`
+	MessageContent         string                   `json:"messageContent,omitempty"`
+	AssistantRole          string                   `json:"assistantRole,omitempty"`
+	AssistantContent       string                   `json:"assistantContent,omitempty"`
+	LineageMessages        []forkTreeLineageMessage `json:"lineageMessages,omitempty"`
+	MessageNodes           []forkTreeMessageNode    `json:"messageNodes,omitempty"`
+	MessageCount           int                      `json:"messageCount,omitempty"`
 
 	X        int   `json:"-"`
 	Y        int   `json:"-"`

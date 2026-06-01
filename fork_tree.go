@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	forkTreeNodeWidth = 24
-	forkTreeColGap    = 10
-	forkTreeRowGap    = 2
+	forkTreeNodeWidth  = 2
+	forkTreeColGap     = 3
+	forkTreeRowGap     = 2
+	forkTreeNodeHeight = 1
 )
 
 func newForkTreeState() forkTreeState {
@@ -24,7 +25,7 @@ func newForkTreeState() forkTreeState {
 func (m *model) applyForkTree(ev runtimeEvent) {
 	state := m.forkTree
 	state.Loading = false
-	state.Nodes = cloneForkTreeNodes(ev.ForkTreeNodes)
+	state.Nodes = expandForkTreeMessageNodes(cloneForkTreeNodes(ev.ForkTreeNodes))
 	state.Selected = 0
 	state.Preview = viewport.New()
 	state.PreviewWidth = 0
@@ -47,6 +48,36 @@ func cloneForkTreeNodes(nodes []forkTreeNode) []forkTreeNode {
 	return cloned
 }
 
+func expandForkTreeMessageNodes(sessionNodes []forkTreeNode) []forkTreeNode {
+	expanded := make([]forkTreeNode, 0, len(sessionNodes))
+	for _, sessionNode := range sessionNodes {
+		if len(sessionNode.MessageNodes) == 0 {
+			expanded = append(expanded, sessionNode)
+			continue
+		}
+		for i, messageNode := range sessionNode.MessageNodes {
+			content := strings.TrimSpace(messageNode.Content)
+			if content == "" {
+				continue
+			}
+			node := sessionNode
+			node.ID = fallback(messageNode.ID, fmt.Sprintf("%s:%d", sessionNode.SessionID, i))
+			node.ParentNodeID = messageNode.ParentID
+			node.ParentSessionID = ""
+			node.MessageRole = fallback(messageNode.Role, node.MessageRole)
+			node.MessageContent = content
+			node.AssistantRole = ""
+			node.AssistantContent = ""
+			node.MessageNodes = nil
+			node.ForkedFromMessageIndex = messageNode.MessageIndex
+			node.Parent = -1
+			node.Children = nil
+			expanded = append(expanded, node)
+		}
+	}
+	return expanded
+}
+
 func (s *forkTreeState) buildForkTreeLayout(currentSessionID string) {
 	if len(s.Nodes) == 0 {
 		s.Order = nil
@@ -57,17 +88,30 @@ func (s *forkTreeState) buildForkTreeLayout(currentSessionID string) {
 	}
 
 	idToIndex := make(map[string]int, len(s.Nodes))
+	sessionIDToIndex := make(map[string]int, len(s.Nodes))
 	for i := range s.Nodes {
 		s.Nodes[i].Parent = -1
 		s.Nodes[i].Children = nil
-		idToIndex[s.Nodes[i].SessionID] = i
+		if s.Nodes[i].ID != "" {
+			idToIndex[s.Nodes[i].ID] = i
+		}
+		if _, exists := sessionIDToIndex[s.Nodes[i].SessionID]; !exists {
+			sessionIDToIndex[s.Nodes[i].SessionID] = i
+		}
 	}
 
 	roots := make([]int, 0)
 	for i := range s.Nodes {
-		parentID := s.Nodes[i].ParentSessionID
+		parentID := s.Nodes[i].ParentNodeID
+		if parentID == "" {
+			parentID = s.Nodes[i].ParentSessionID
+		}
 		if parentID != "" && !isVirtualRootFork(s.Nodes[i]) {
-			if parentIndex, ok := idToIndex[parentID]; ok && parentIndex != i {
+			parentIndex, ok := idToIndex[parentID]
+			if !ok {
+				parentIndex, ok = sessionIDToIndex[parentID]
+			}
+			if ok && parentIndex != i {
 				s.Nodes[i].Parent = parentIndex
 				s.Nodes[parentIndex].Children = append(s.Nodes[parentIndex].Children, i)
 				continue
@@ -92,27 +136,41 @@ func (s *forkTreeState) buildForkTreeLayout(currentSessionID string) {
 	}
 
 	s.Order = nil
-	row := 0
 	maxDepth := 0
-	var walk func(index int, depth int)
-	walk = func(index int, depth int) {
+	maxRow := 0
+	nextRow := 0
+	var walk func(index int, depth int, row int)
+	walk = func(index int, depth int, row int) {
 		s.Nodes[index].X = depth * (forkTreeNodeWidth + forkTreeColGap)
-		s.Nodes[index].Y = row * (3 + forkTreeRowGap)
+		s.Nodes[index].Y = row * (forkTreeNodeHeight + forkTreeRowGap)
 		s.Order = append(s.Order, index)
-		row++
 		if depth > maxDepth {
 			maxDepth = depth
 		}
-		for _, child := range s.Nodes[index].Children {
-			walk(child, depth+1)
+		if row > maxRow {
+			maxRow = row
+		}
+		children := s.Nodes[index].Children
+		sameRowUsed := false
+		for _, child := range children {
+			childRow := row
+			if sameRowUsed || s.Nodes[child].SessionID != s.Nodes[index].SessionID {
+				nextRow++
+				childRow = nextRow
+			} else {
+				sameRowUsed = true
+			}
+			walk(child, depth+1, childRow)
 		}
 	}
 	for _, root := range roots {
-		walk(root, 0)
+		rootRow := nextRow
+		walk(root, 0, rootRow)
+		nextRow = max(nextRow, maxRow) + 1
 	}
 
 	s.CanvasWidth = max(forkTreeNodeWidth, maxDepth*(forkTreeNodeWidth+forkTreeColGap)+forkTreeNodeWidth)
-	s.CanvasHeight = max(3, row*(3+forkTreeRowGap))
+	s.CanvasHeight = max(forkTreeNodeHeight, (maxRow+1)*(forkTreeNodeHeight+forkTreeRowGap))
 
 	for i, node := range s.Nodes {
 		if node.SessionID == currentSessionID {
@@ -137,9 +195,13 @@ func (m model) updateForkTree(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeChat
 		m.status = "ready"
 		return m, nil
-	case "up", "k", "ctrl+p":
+	case "up":
+		m.moveForkTreeParallel(-1)
+	case "down":
+		m.moveForkTreeParallel(1)
+	case "k", "ctrl+p":
 		m.moveForkTreeOrder(-1)
-	case "down", "j", "ctrl+n":
+	case "j", "ctrl+n":
 		m.moveForkTreeOrder(1)
 	case "left", "h":
 		m.moveForkTreeParent()
@@ -179,6 +241,50 @@ func (m *model) moveForkTreeOrder(delta int) {
 	currentPos = (currentPos + delta + len(m.forkTree.Order)) % len(m.forkTree.Order)
 	m.forkTree.Selected = m.forkTree.Order[currentPos]
 	m.updateForkTreePreview()
+}
+
+func (m *model) moveForkTreeParallel(delta int) {
+	if !m.forkTree.hasSelectedNode() || len(m.forkTree.Nodes) == 0 {
+		return
+	}
+	selected := m.forkTree.Nodes[m.forkTree.Selected]
+	candidates := make([]int, 0)
+	for i, node := range m.forkTree.Nodes {
+		if i == m.forkTree.Selected {
+			continue
+		}
+		if node.X != selected.X || node.Y == selected.Y {
+			continue
+		}
+		if delta < 0 && node.Y < selected.Y {
+			candidates = append(candidates, i)
+		}
+		if delta > 0 && node.Y > selected.Y {
+			candidates = append(candidates, i)
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left := m.forkTree.Nodes[candidates[i]]
+		right := m.forkTree.Nodes[candidates[j]]
+		leftDistance := absInt(left.Y - selected.Y)
+		rightDistance := absInt(right.Y - selected.Y)
+		if leftDistance == rightDistance {
+			return left.X < right.X
+		}
+		return leftDistance < rightDistance
+	})
+	m.forkTree.Selected = candidates[0]
+	m.updateForkTreePreview()
+}
+
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 func (m *model) moveForkTreeParent() {
@@ -242,19 +348,8 @@ func (m *model) updateForkTreePreview() {
 	}
 	node := m.forkTree.Nodes[m.forkTree.Selected]
 	width := max(20, m.forkTree.PreviewWidth)
-	var content string
-	if strings.TrimSpace(node.MessageContent) == "" {
-		content = mutedSt.Render("No text message preview for this fork.")
-	} else {
-		rendered, err := renderMessageContentAtWidth(chatMessage{Role: node.MessageRole, Content: node.MessageContent}, width)
-		if err != nil {
-			content = wrap(node.MessageContent, width)
-		} else {
-			content = rendered
-		}
-	}
 	header := lipgloss.NewStyle().Foreground(accent).Bold(true).Render(fallback(node.SessionTitle, "Untitled chat"))
-	metaParts := []string{fallback(node.MessageRole, "text"), fmt.Sprintf("%d msgs", node.MessageCount)}
+	metaParts := []string{fmt.Sprintf("%d msgs", node.MessageCount)}
 	if showForkTreeDevDetails() {
 		metaParts = append(metaParts, short(node.SessionID, 14))
 		if node.ParentSessionID != "" {
@@ -262,7 +357,56 @@ func (m *model) updateForkTreePreview() {
 		}
 	}
 	meta := mutedSt.Render(strings.Join(metaParts, " · "))
-	m.forkTree.Preview.SetContent(header + "\n" + meta + "\n\n" + content)
+	m.forkTree.Preview.SetContent(header + "\n" + meta + "\n\n" + m.renderForkTreeLineagePreview(node, width))
+}
+
+func (m *model) renderForkTreeLineagePreview(node forkTreeNode, width int) string {
+	messages := forkTreeLineageMessages(node)
+	if len(messages) == 0 {
+		return mutedSt.Render("No text message preview for this fork.")
+	}
+	parts := make([]string, 0, len(messages))
+	for _, message := range messages {
+		rendered, err := renderMessageContentAtWidth(message, width)
+		if err != nil {
+			rendered = wrap(message.Content, width)
+		}
+		parts = append(parts, renderMessageWithIcon(message, rendered))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func forkTreeLineageMessages(node forkTreeNode) []chatMessage {
+	if len(node.LineageMessages) > 0 {
+		messages := make([]chatMessage, 0, len(node.LineageMessages))
+		for _, message := range node.LineageMessages {
+			content := strings.TrimSpace(message.Content)
+			if content == "" {
+				continue
+			}
+			messages = append(messages, chatMessage{Role: fallback(normalizedForkTreeRole(message.Role), "assistant"), Content: content})
+		}
+		return messages
+	}
+	messages := make([]chatMessage, 0, 2)
+	if content := strings.TrimSpace(node.MessageContent); content != "" {
+		messages = append(messages, chatMessage{Role: fallback(normalizedForkTreeRole(node.MessageRole), "user"), Content: content})
+	}
+	if content := strings.TrimSpace(node.AssistantContent); content != "" && content != strings.TrimSpace(node.MessageContent) {
+		messages = append(messages, chatMessage{Role: fallback(normalizedForkTreeRole(node.AssistantRole), "assistant"), Content: content})
+	}
+	return messages
+}
+
+func normalizedForkTreeRole(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "user":
+		return "user"
+	case "assistant", "agent":
+		return "assistant"
+	default:
+		return ""
+	}
 }
 
 func (m model) renderForkTreeModal(height int) string {
@@ -288,7 +432,7 @@ func (m model) renderForkTreeModal(height int) string {
 	m.forkTree.Preview.SetHeight(paneHeight)
 	m.updateForkTreePreview()
 
-	previewTitle := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("selected message")
+	previewTitle := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("chat lineage")
 	preview := previewTitle + "\n" + m.forkTree.Preview.View()
 	preview = renderFixedHeight(preview, height)
 
@@ -314,7 +458,7 @@ func (m model) renderForkTreeCanvas(width int, height int) string {
 		if node.Parent >= 0 && node.Parent < len(m.forkTree.Nodes) {
 			parent := m.forkTree.Nodes[node.Parent]
 			edgeSelected := i == m.forkTree.Selected || selectedAncestors[i]
-			drawForkTreeEdge(canvas, parent.X+forkTreeNodeWidth, parent.Y+1, node.X, node.Y+1, edgeSelected)
+			drawForkTreeEdge(canvas, parent.X+forkTreeNodeWidth, parent.Y, node.X, node.Y, edgeSelected)
 		}
 	}
 	showDev := showForkTreeDevDetails()
@@ -324,7 +468,7 @@ func (m model) renderForkTreeCanvas(width int, height int) string {
 
 	selected := m.forkTree.Nodes[m.forkTree.Selected]
 	offsetX := clampInt(selected.X+forkTreeNodeWidth/2-width/2, 0, max(0, canvas.width-width))
-	offsetY := clampInt(selected.Y+1-height/2, 0, max(0, canvas.height()-height))
+	offsetY := clampInt(selected.Y-height/2, 0, max(0, canvas.height()-height))
 	return canvas.render(offsetX, offsetY, width, height)
 }
 
@@ -351,34 +495,91 @@ func drawForkTreeEdge(canvas *runeCanvas, x1 int, y1 int, x2 int, y2 int, select
 	}
 	midX := x1 + max(2, (x2-x1)/2)
 	canvas.drawHorizontal(x1, midX, y1, '─', style)
-	canvas.set(midX, y1, '┐', style)
-	canvas.drawVertical(midX, y1, y2, '│', style)
-	canvas.set(midX, y2, '└', style)
+	if y1 == y2 {
+		canvas.drawHorizontal(midX, x2-1, y2, '─', style)
+		return
+	}
+	cornerDown := '┐'
+	cornerOut := '└'
+	if y2 < y1 {
+		cornerDown = '┘'
+		cornerOut = '┌'
+	}
+	canvas.set(midX, y1, cornerDown, style)
+	canvas.drawVertical(midX, y1+sign(y2-y1), y2-sign(y2-y1), '│', style)
+	canvas.set(midX, y2, cornerOut, style)
 	canvas.drawHorizontal(midX, x2-1, y2, '─', style)
 }
 
 func drawForkTreeNode(canvas *runeCanvas, node forkTreeNode, selected bool, showDev bool) {
-	prefix := "█"
-	style := lipgloss.NewStyle().Foreground(cyan)
-	textStyle := lipgloss.NewStyle().Foreground(text)
-	if selected {
-		prefix = "▓"
-		style = lipgloss.NewStyle().Foreground(accent).Bold(true)
-		textStyle = lipgloss.NewStyle().Foreground(accent).Bold(true)
+	markerRole := node.MessageRole
+	entries := forkTreeNodeEntries(node)
+	if len(entries) > 0 {
+		markerRole = entries[0].role
 	}
-	lines := []string{
-		oneLine(fallback(node.MessageRole, "text")+": "+node.MessageContent, forkTreeNodeWidth-3),
-	}
+	canvas.writeStyledString(node.X, node.Y, "■", forkTreeNodeMarkerStyle(normalizedForkTreeRole(markerRole), selected))
 	if showDev {
-		lines = append(lines,
-			oneLine(fallback(node.SessionTitle, "Untitled chat"), forkTreeNodeWidth-3),
-			oneLine(short(node.SessionID, 18), forkTreeNodeWidth-3),
-		)
+		devStyle := mutedSt
+		if selected {
+			devStyle = lipgloss.NewStyle().Foreground(accent).Bold(true)
+		}
+		canvas.writeStyledString(node.X+2, node.Y, short(node.SessionID, 10), devStyle)
 	}
-	for row, line := range lines {
-		y := node.Y + row
-		canvas.writeStyledString(node.X, y, prefix, style)
-		canvas.writeStyledString(node.X+2, y, line, textStyle)
+}
+
+type forkTreeNodeEntry struct {
+	role string
+	text string
+}
+
+func forkTreeNodeEntries(node forkTreeNode) []forkTreeNodeEntry {
+	entries := make([]forkTreeNodeEntry, 0, 2)
+	if text := strings.TrimSpace(node.MessageContent); text != "" {
+		entries = append(entries, forkTreeNodeEntry{role: node.MessageRole, text: text})
+	}
+	if text := strings.TrimSpace(node.AssistantContent); text != "" && text != strings.TrimSpace(node.MessageContent) {
+		entries = append(entries, forkTreeNodeEntry{role: fallback(node.AssistantRole, "assistant"), text: text})
+	}
+	if len(entries) == 0 {
+		entries = append(entries, forkTreeNodeEntry{role: node.MessageRole, text: "No text preview"})
+	}
+	return entries
+}
+
+func forkTreeNodeText(node forkTreeNode) string {
+	entries := forkTreeNodeEntries(node)
+	if len(entries) == 0 {
+		return "No text preview"
+	}
+	return entries[0].text
+}
+
+func forkTreeNodeExtraRows(node forkTreeNode) int {
+	return 0
+}
+
+func forkTreeNodeMarkerStyle(role string, selected bool) lipgloss.Style {
+	if selected {
+		return lipgloss.NewStyle().Foreground(accent).Bold(true)
+	}
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "assistant", "agent":
+		return lipgloss.NewStyle().Foreground(cyan)
+	case "user":
+		return lipgloss.NewStyle().Foreground(accent)
+	default:
+		return mutedSt
+	}
+}
+
+func sign(n int) int {
+	switch {
+	case n < 0:
+		return -1
+	case n > 0:
+		return 1
+	default:
+		return 0
 	}
 }
 

@@ -23,7 +23,7 @@ Qubit CLI
   Owns rendering, keyboard interaction, local UI state, slash command palette, and session picker.
 ```
 
-Current MVP scope is basic chat plus session UI, including transcript reload on session switch, session forking through `/fork`, edit/reroll forks from prior user messages, a keyboard-first fork tree through `/tree`, and frontend-simulated assistant streaming. Archive/delete flows and true provider token streaming can come later.
+Current MVP scope is basic chat plus session UI, including transcript reload on session switch, session forking through `/fork`, edit/reroll forks from prior user messages, a keyboard-first fork tree through `/tree`, and frontend-simulated assistant streaming. The `/tree` view is a symbolic horizontal message/fork map: left/right navigates parent/child lineage, Up/Down jumps to parallel branch nodes, and `j`/`k` preserve linear order navigation. Archive/delete flows and true provider token streaming can come later.
 
 ## Extra Context Files
 
@@ -229,6 +229,7 @@ view.MouseMode = tea.MouseModeCellMotion
 - When reserving terminal layout space, preserve the composer/footer visibility without painting opaque chat/message rows. Avoid using `Style.Width(...).Height(...).Render(...)` or `lipgloss.Place(...)` around the chat viewport when the style has a background, because Lip Gloss/viewport padding can create full-line black bars behind messages and role names. Prefer transparent styles plus explicit blank-line padding helpers such as `renderFixedHeight`/`renderChat`.
 - Prefer existing Lip Gloss APIs already used by the project; do not assume newer helpers such as `lipgloss.WithWhitespaceBackground` are available without confirming the pinned dependency supports them.
 - Commands requiring arguments should insert a trailing space after completion.
+- Slash command palette filtering should rank command-name matches before description-only matches so command names remain the primary selection signal.
 - Slash commands that open interactive UI directly from the palette should mark `slashCommand.OpensOnSelect` so Enter/Tab clears the composer and opens the UI instead of inserting command text.
 - Reusable modal selector lists use `modalState.Options` plus `OptionCursor`: Up/down moves the option cursor, left/right or tab/shift+tab moves actions, Enter resolves the selected action, and Esc cancels selector-style modals.
 - `/models` should open the model selector modal backed by runtime `model.list`/`model.use` protocol data, not a hardcoded demo list. The model selector offers Use now and Set default actions; Set default sends `model.use` with `persistDefault: true` so the runtime stores a non-secret per-provider default model in `.qubit/settings.json`.
@@ -250,6 +251,7 @@ view.MouseMode = tea.MouseModeCellMotion
   - Esc close/cancel.
 - API key entry must never render raw secret text. Pasted or typed keys should be displayed only as mask bullets, and tests should cover paste -> save flows, not only programmatic insertion.
 - Preserve normal terminal selection/copy behavior by keeping mouse capture disabled unless richer mouse interaction is explicitly requested.
+- Plan/edit mode maps the UI's permission mode to runtime prompt mode: plan uses ask-before-gated-tools behavior and the `prompts/plan.md` system prompt addendum; edit uses always-allow gated-tool behavior and the `prompts/edit.md` system prompt addendum. Keep the Markdown files as the editable source for these prompt addenda.
 - Assistant responses may be frontend-simulated streamed: the runtime can send a complete `assistant` event, and the Go UI may progressively reveal it. During a running chat, Esc sends `chat.cancel` with the active `runId` so the Node runtime can abort the hyper-router model call; any assistant text already visible in the Go UI is preserved. If the full `assistant` event already arrived and only the frontend reveal is still streaming, Esc stops that reveal while keeping the visible partial text. Keep fake reveal streaming as terminal UX logic; true provider token streaming should be added explicitly to the protocol when needed.
 
 ### Node Runtime Standards

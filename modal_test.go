@@ -276,8 +276,11 @@ func TestRenderInputStatusShowsPermissionMode(t *testing.T) {
 	if strings.Contains(status, "permissions:") {
 		t.Fatalf("status section = %q, want minimal mode label without prefix", status)
 	}
-	if !strings.Contains(status, "always allow") {
-		t.Fatalf("status section = %q, want current permission mode", status)
+	if !strings.Contains(status, "edit") {
+		t.Fatalf("status section = %q, want current mode", status)
+	}
+	if strings.Contains(status, "always allow") || strings.Contains(status, "ask") {
+		t.Fatalf("status section = %q, want plan/edit label only", status)
 	}
 }
 
