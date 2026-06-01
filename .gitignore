@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+bin/
+dist/
+build/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Runtime data / local state
+.qubit/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Go test/build artifacts
+*.test
+coverage.out
+
+# Temporary files
+*.tmp
+*.temp

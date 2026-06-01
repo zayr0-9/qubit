@@ -1,0 +1,146 @@
+<svg width="1400" height="900" viewBox="0 0 1400 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1400" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#080A10"/>
+      <stop offset="0.55" stop-color="#0B0F17"/>
+      <stop offset="1" stop-color="#05070B"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#67E8F9"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="violet" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="lime" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#BEF264"/>
+      <stop offset="1" stop-color="#22C55E"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#FCD34D"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.18 0 0 0 0 0.76 0 0 0 0 1 0 0 0 .28 0"/>
+      <feBlend in="SourceGraphic" mode="screen"/>
+    </filter>
+    <style>
+      .mono { font-family: 'JetBrains Mono', 'Cascadia Mono', 'SFMono-Regular', Consolas, monospace; }
+      .sans { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+      .muted { fill: #7B8496; }
+      .text { fill: #DCE2EA; }
+      .dim { fill: #4D5566; }
+      .label { font-size: 18px; font-weight: 700; letter-spacing: .02em; }
+      .small { font-size: 16px; }
+      .body { font-size: 22px; }
+      .chipText { font-size: 15px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="900" fill="url(#bg)"/>
+
+  <!-- ambient color only: no structural borders -->
+  <circle cx="1120" cy="105" r="270" fill="#312E81" opacity="0.23" filter="url(#softGlow)"/>
+  <circle cx="210" cy="805" r="310" fill="#0E7490" opacity="0.18" filter="url(#softGlow)"/>
+  <circle cx="720" cy="455" r="430" fill="#111827" opacity="0.65"/>
+
+  <!-- top command/status rail -->
+  <g transform="translate(76 58)">
+    <text class="mono" x="0" y="0" dominant-baseline="middle" font-size="28" font-weight="900" fill="#F8FAFC">Qubit</text>
+    <rect x="112" y="-18" width="90" height="36" rx="18" fill="#052E1A"/>
+    <circle cx="135" cy="0" r="5" fill="#22C55E"/>
+    <text class="mono chipText" x="152" y="1" dominant-baseline="middle" fill="#86EFAC">ready</text>
+
+    <text class="mono small muted" x="232" y="1" dominant-baseline="middle">provider</text>
+    <text class="mono small" x="318" y="1" dominant-baseline="middle" fill="#67E8F9">stub</text>
+    <text class="mono small muted" x="382" y="1" dominant-baseline="middle">model</text>
+    <text class="mono small" x="440" y="1" dominant-baseline="middle" fill="#A78BFA">glm-4.6</text>
+    <text class="mono small muted" x="532" y="1" dominant-baseline="middle">session</text>
+    <text class="mono small" x="608" y="1" dominant-baseline="middle" fill="#FCD34D">Test chat</text>
+    <text class="mono small dim" x="715" y="1" dominant-baseline="middle">sess_20260601…</text>
+  </g>
+
+  <!-- subtle right-side active mode capsule -->
+  <g transform="translate(1112 46)">
+    <rect x="0" y="0" width="214" height="42" rx="21" fill="#111827" opacity="0.74"/>
+    <text class="mono chipText" x="22" y="22" dominant-baseline="middle" fill="#7DD3FC">active mode</text>
+    <text class="mono chipText" x="142" y="22" dominant-baseline="middle" fill="#F0ABFC">chat</text>
+  </g>
+
+  <!-- plan strip: harness feature, colorful but minimal -->
+  <g transform="translate(76 124)">
+    <text class="mono small muted" x="0" y="0" dominant-baseline="middle">plan</text>
+    <rect x="54" y="-13" width="8" height="26" rx="4" fill="url(#cyan)"/>
+    <text class="mono small text" x="80" y="0" dominant-baseline="middle">1</text>
+    <text class="mono small muted" x="101" y="0" dominant-baseline="middle">listen</text>
+    <rect x="174" y="-13" width="8" height="26" rx="4" fill="url(#violet)"/>
+    <text class="mono small text" x="200" y="0" dominant-baseline="middle">2</text>
+    <text class="mono small muted" x="221" y="0" dominant-baseline="middle">route</text>
+    <rect x="286" y="-13" width="8" height="26" rx="4" fill="url(#lime)"/>
+    <text class="mono small text" x="312" y="0" dominant-baseline="middle">3</text>
+    <text class="mono small muted" x="333" y="0" dominant-baseline="middle">respond</text>
+  </g>
+
+  <!-- chat body, open layout no box borders -->
+  <g transform="translate(76 184)">
+    <text class="mono label" x="0" y="0" fill="#67E8F9">Qubit</text>
+    <text class="mono body text" x="0" y="44">Welcome back. Sessions are enabled.</text>
+    <text class="mono body muted" x="0" y="82">Try </text>
+    <text class="mono body" x="52" y="82" fill="#FCD34D">/new</text>
+    <text class="mono body muted" x="111" y="82">, </text>
+    <text class="mono body" x="135" y="82" fill="#67E8F9">/sessions</text>
+    <text class="mono body muted" x="255" y="82">, </text>
+    <text class="mono body" x="279" y="82" fill="#A78BFA">/use &lt;id&gt;</text>
+    <text class="mono body muted" x="421" y="82">, </text>
+    <text class="mono body" x="445" y="82" fill="#86EFAC">/rename &lt;title&gt;</text>
+
+    <g transform="translate(0 178)">
+      <text class="mono label" x="0" y="0" fill="#FCD34D">You</text>
+      <text class="mono body text" x="0" y="44">Show my sessions</text>
+    </g>
+
+    <!-- minimal session picker embedded as command result -->
+    <g transform="translate(0 318)">
+      <text class="mono label" x="0" y="0" fill="#A78BFA">sessions</text>
+      <text class="mono small muted" x="118" y="0" dominant-baseline="middle">↑/↓ select · enter activate · esc close</text>
+
+      <g transform="translate(0 50)">
+        <rect x="0" y="-27" width="972" height="54" rx="16" fill="#0B1220" opacity="0.92"/>
+        <rect x="0" y="-27" width="5" height="54" rx="2.5" fill="url(#cyan)"/>
+        <text class="mono small" x="28" y="0" dominant-baseline="middle" fill="#67E8F9">›</text>
+        <text class="mono small text" x="58" y="0" dominant-baseline="middle">Test chat</text>
+        <text class="mono small muted" x="254" y="0" dominant-baseline="middle">active</text>
+        <text class="mono small dim" x="366" y="0" dominant-baseline="middle">sess_20260601_0918</text>
+        <text class="mono small" x="812" y="0" dominant-baseline="middle" fill="#86EFAC">12 msgs</text>
+      </g>
+
+      <g transform="translate(0 112)">
+        <text class="mono small muted" x="58" y="0" dominant-baseline="middle">Research notes</text>
+        <text class="mono small dim" x="366" y="0" dominant-baseline="middle">sess_20260531_2214</text>
+        <text class="mono small" x="812" y="0" dominant-baseline="middle" fill="#94A3B8">5 msgs</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- command palette floating, borderless glass card -->
+  <g transform="translate(835 642)">
+    <rect x="0" y="0" width="490" height="162" rx="28" fill="#090D14" opacity="0.94"/>
+    <rect x="24" y="28" width="9" height="106" rx="4.5" fill="url(#violet)"/>
+    <text class="mono chipText" x="56" y="38" fill="#C4B5FD">command palette</text>
+    <text class="mono small" x="56" y="78" fill="#FCD34D">/sessions</text>
+    <text class="mono small muted" x="174" y="78">open picker</text>
+    <text class="mono small" x="56" y="112" fill="#86EFAC">/rename</text>
+    <text class="mono small muted" x="174" y="112">set title</text>
+  </g>
+
+  <!-- input rail: borderless, single luminous prompt -->
+  <g transform="translate(76 830)">
+    <text class="mono" x="0" y="0" dominant-baseline="middle" font-size="26" font-weight="900" fill="#F59E0B">›</text>
+    <text class="mono" x="36" y="0" dominant-baseline="middle" font-size="22" fill="#DCE2EA">Ask Qubit anything</text>
+    <text class="mono" x="278" y="0" dominant-baseline="middle" font-size="22" fill="#475569">/</text>
+    <rect x="300" y="-22" width="2" height="44" rx="1" fill="#67E8F9" opacity="0.9"/>
+    <text class="mono small muted" x="990" y="0" dominant-baseline="middle">enter send · / commands · normal copy</text>
+  </g>
+</svg>

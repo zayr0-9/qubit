@@ -1,0 +1,66 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@hyper-labs/hyper-router':
+        specifier: file:hyper-labs-hyper-router-0.1.5.tgz
+        version: file:hyper-labs-hyper-router-0.1.5.tgz(sql.js@1.14.1)(zod@4.4.3)
+      sql.js:
+        specifier: ^1.14.1
+        version: 1.14.1
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+
+packages:
+
+  '@hyper-labs/hyper-router@file:hyper-labs-hyper-router-0.1.5.tgz':
+    resolution: {integrity: sha512-O7WQt4k0P8FYPDz+SLJ10BxlYLJ8e9iPE12T7gW05wLTiLSiMO7tFCzpYyxxI55FHgvBX4NY4A4SqmAlMZ+N6w==, tarball: file:hyper-labs-hyper-router-0.1.5.tgz}
+    version: 0.1.5
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@ai-sdk/amazon-bedrock': ^4.0.92
+      '@ai-sdk/openai': ^3.0.53
+      '@openrouter/agent': ^0.3.2
+      ai: ^6.0.168
+      pg: ^8.13.1
+      sql.js: ^1.14.1
+      zod: ^4.1.12
+    peerDependenciesMeta:
+      '@ai-sdk/amazon-bedrock':
+        optional: true
+      '@ai-sdk/openai':
+        optional: true
+      '@openrouter/agent':
+        optional: true
+      ai:
+        optional: true
+      pg:
+        optional: true
+      sql.js:
+        optional: true
+      zod:
+        optional: true
+
+  sql.js@1.14.1:
+    resolution: {integrity: sha512-gcj8zBWU5cFsi9WUP+4bFNXAyF1iRpA3LLyS/DP5xlrNzGmPIizUeBggKa8DbDwdqaKwUcTEnChtd2grWo/x/A==, tarball: https://registry.npmjs.org/sql.js/-/sql.js-1.14.1.tgz}
+
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==, tarball: https://registry.npmjs.org/zod/-/zod-4.4.3.tgz}
+
+snapshots:
+
+  '@hyper-labs/hyper-router@file:hyper-labs-hyper-router-0.1.5.tgz(sql.js@1.14.1)(zod@4.4.3)':
+    optionalDependencies:
+      sql.js: 1.14.1
+      zod: 4.4.3
+
+  sql.js@1.14.1: {}
+
+  zod@4.4.3: {}
