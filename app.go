@@ -17,15 +17,18 @@ import (
 func initialModel(rt *runtimeClient) model {
 	composer := newComposer()
 	theme := defaultTheme()
-	applyTheme(theme)
 	inputHistory := []string(nil)
 	if rt != nil {
 		var err error
+		if loadedTheme, err := loadThemeConfig(rt.appRoot); err == nil && loadedTheme.Background != "" && loadedTheme.Text != "" {
+			theme = loadedTheme
+		}
 		inputHistory, err = loadInputHistory(rt.appRoot)
 		if err != nil {
 			inputHistory = nil
 		}
 	}
+	applyTheme(theme)
 
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(spinnerStyle))
 

@@ -54,9 +54,9 @@ var builtinThemes = []themeConfig{
 	{
 		ID:         "neon",
 		Name:       "Neon",
-		Background: "#05020a",
-		Surface:    "#12051f",
-		SurfaceHi:  "#24104a",
+		Background: "#000000",
+		Surface:    "#000000",
+		SurfaceHi:  "#000000",
 		Text:       "#f8f7ff",
 		Muted:      "#a39bff",
 		Accent:     "#ff2bd6",
@@ -119,7 +119,7 @@ func applyTheme(theme themeConfig) {
 
 	appStyle = lipgloss.NewStyle().Background(bg).Foreground(text)
 	headerStyle = lipgloss.NewStyle().Background(bg).Foreground(text).Padding(0, 2)
-	chatStyle = lipgloss.NewStyle().Background(bg).Foreground(text).Padding(0, 1)
+	chatStyle = lipgloss.NewStyle().Foreground(text).Padding(0, 1)
 	inputStyle = lipgloss.NewStyle().Background(surface).Foreground(text).PaddingRight(2)
 	footerStyle = lipgloss.NewStyle().Background(bg).Foreground(muted).PaddingLeft(2)
 	userIcon = lipgloss.NewStyle().Foreground(accent).Bold(true)

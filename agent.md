@@ -68,9 +68,11 @@ D:\qubit
   .qubit\sessions.sqlite    hyper-router SQLite transcript store
   .qubit\session-index.json Qubit-owned session index
   .qubit\runtime.log        Runtime diagnostic log
-```
+  .qubit\input-history.json Persisted non-secret composer history
+  .qubit\theme.json         Persisted selected `/theme` palette
+  ```
 
-## Architecture Rules
+  ## Architecture Rules
 
 1. Keep `hyper-router` pure.
    - Do not add Bubble Tea, terminal UI, app-specific sessions, Qubit keybindings, CLI code, or runtime sidecar code to `hyper-router`.

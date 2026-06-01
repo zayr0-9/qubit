@@ -172,3 +172,36 @@ func TestRenderThemeEntryShowsPresetsAndHexHint(t *testing.T) {
 		}
 	}
 }
+
+func TestThemeConfigPersistsAndLoadsSelectedPreset(t *testing.T) {
+	appRoot := t.TempDir()
+	rt, _ := newTestRuntime(t)
+	rt.appRoot = appRoot
+
+	m := initialModel(rt).applyThemeConfig(builtinThemes[2])
+	if m.err != "" {
+		t.Fatalf("applyThemeConfig err = %q", m.err)
+	}
+
+	loaded := initialModel(rt)
+	if loaded.theme.ID != "neon" || loaded.theme.Background != "#000000" || loaded.theme.Surface != "#000000" {
+		t.Fatalf("loaded theme = %#v, want persisted neon preset", loaded.theme)
+	}
+}
+
+func TestNeonThemeUsesBlackMessageRowBackground(t *testing.T) {
+	neon := builtinThemes[2]
+	if neon.ID != "neon" {
+		t.Fatalf("builtinThemes[2].ID = %q, want neon", neon.ID)
+	}
+	if neon.Background != "#000000" || neon.Surface != "#000000" || neon.SurfaceHi != "#000000" {
+		t.Fatalf("neon backgrounds = %q/%q/%q, want all black", neon.Background, neon.Surface, neon.SurfaceHi)
+	}
+
+	applyTheme(neon)
+	defer applyTheme(defaultTheme())
+	rendered := renderChat("hello", 20, 1)
+	if strings.Contains(rendered, "\x1b[48;") {
+		t.Fatalf("renderChat emitted background ANSI sequence for chat row: %q", rendered)
+	}
+}

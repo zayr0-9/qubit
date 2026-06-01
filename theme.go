@@ -188,9 +188,14 @@ func (m model) applyCustomTheme() (tea.Model, tea.Cmd) {
 }
 
 func (m model) applyThemeConfig(theme themeConfig) model {
+	theme = resolveThemeConfig(theme)
+	if theme.Background == "" || theme.Text == "" {
+		theme = defaultTheme()
+	}
 	applyTheme(theme)
 	m.spinner.Style = spinnerStyle
 	m.theme = theme
+	m.saveThemeConfig()
 	m.themeEntry = nil
 	m.mode = modeChat
 	m.previousMode = modeChat
