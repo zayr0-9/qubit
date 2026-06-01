@@ -14,7 +14,11 @@ var slashCommands = []slashCommand{
 	{Name: "tree", Usage: "/tree", Description: "Open the fork tree", NeedsArg: false, OpensOnSelect: true},
 	{Name: "sessions", Usage: "/sessions", Description: "Open the session picker", NeedsArg: false, OpensOnSelect: true},
 	{Name: "keys", Usage: "/keys", Description: "Manage provider API keys", NeedsArg: false, OpensOnSelect: true},
-	{Name: "models", Usage: "/models", Description: "Choose the active GLM model", NeedsArg: false, OpensOnSelect: true},
+	{Name: "models", Usage: "/models", Description: "Choose the active model", NeedsArg: false, OpensOnSelect: true},
+	{Name: "providers", Usage: "/providers", Description: "Choose the active provider", NeedsArg: false, OpensOnSelect: true},
+	{Name: "codex-login", Usage: "/codex-login", Description: "Sign in to ChatGPT Codex", NeedsArg: false},
+	{Name: "codex-status", Usage: "/codex-status", Description: "Show ChatGPT Codex sign-in status", NeedsArg: false},
+	{Name: "codex-logout", Usage: "/codex-logout", Description: "Sign out of ChatGPT Codex", NeedsArg: false},
 	{Name: "theme", Usage: "/theme", Description: "Customize terminal colors", NeedsArg: false, OpensOnSelect: true},
 	{Name: "rename", Usage: "/rename <title>", Description: "Rename current session", NeedsArg: true},
 	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal Shift+Enter newline setup", NeedsArg: false},
@@ -131,6 +135,21 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.busy = true
 		m.status = "loading models"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "model.list"})
+	case "providers", "provider":
+		return m.openProviderSelectorModal(), nil
+	case "codex-login", "codexlogin":
+		m.busy = true
+		m.status = "starting Codex login"
+		m.appendSystem("Starting ChatGPT Codex sign-in...")
+		return m, sendRuntime(m.runtime, map[string]any{"type": "codex.login.start"})
+	case "codex-status", "codexstatus":
+		m.busy = true
+		m.status = "checking Codex status"
+		return m, sendRuntime(m.runtime, map[string]any{"type": "codex.status"})
+	case "codex-logout", "codexlogout":
+		m.busy = true
+		m.status = "signing out of Codex"
+		return m, sendRuntime(m.runtime, map[string]any{"type": "codex.logout"})
 	case "theme", "themes", "colors", "color":
 		return m.openThemeEntry()
 	case "rename", "title":
@@ -151,7 +170,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title] - fork current chat into a new session\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/models - choose the active GLM model\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <ask|always> - choose whether gated tools ask or auto-allow\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title] - fork current chat into a new session\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <ask|always> - choose whether gated tools ask or auto-allow\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")

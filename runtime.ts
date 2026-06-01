@@ -13,8 +13,12 @@ import {
 } from "@hyper-labs/hyper-router";
 import { SqliteStorage } from "@hyper-labs/hyper-router/storage/sqlite";
 import { GLMProvider } from "@hyper-labs/hyper-router/providers/glm";
+import { OpenAIProvider } from "@hyper-labs/hyper-router/providers/openai-vai";
+import { AmazonBedrockVAIProvider } from "@hyper-labs/hyper-router/providers/amazon-bedrock-vai";
+import { OpenRouterProvider } from "@hyper-labs/hyper-router/providers/openrouter";
 import { qubitTools } from "./tools/index.js";
 import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
+import { CodexResponsesProvider, QubitCodexTokenStore, cancelCodexLogin, startCodexLogin } from "./runtime/codex/index.js";
 
 const require = createRequire(import.meta.url);
 const entryDir = dirname(fileURLToPath(import.meta.url));
@@ -24,24 +28,103 @@ const storagePath = join(dataDir, "sessions.sqlite");
 const indexPath = join(dataDir, "session-index.json");
 const keyIndexPath = join(dataDir, "api-key-index.json");
 const defaultSessionId = process.env.QUBIT_SESSION_ID || "qubit-default";
-let model = process.env.GLM_MODEL || process.env.QUBIT_MODEL || "glm-5.1";
-const glmModels = [
-  { id: "glm-5.1", name: "glm-5.1", description: "Latest flagship GLM model for coding and agentic engineering" },
-  { id: "glm-5", name: "glm-5", description: "GLM-5 foundation model for coding and long-range agent tasks" },
-  { id: "glm-5-turbo", name: "glm-5-turbo", description: "Tool-use and long-chain optimized GLM-5 model" },
-  { id: "glm-4.7", name: "glm-4.7", description: "GLM-4.7 coding, reasoning, and agent model" },
-  { id: "glm-4.7-flashx", name: "glm-4.7-flashx", description: "Fast GLM-4.7 variant" },
-  { id: "glm-4.7-flash", name: "glm-4.7-flash", description: "Lightweight GLM-4.7 flash variant" },
-  { id: "glm-4.6", name: "glm-4.6", description: "Previous flagship GLM coding/chat model" },
-  { id: "glm-4.5", name: "glm-4.5", description: "Previous GLM generation" },
-  { id: "glm-4.5-x", name: "glm-4.5-x", description: "Higher-performance GLM-4.5 variant" },
-  { id: "glm-4.5-air", name: "glm-4.5-air", description: "Lower-cost GLM-4.5 Air model" },
-  { id: "glm-4.5-airx", name: "glm-4.5-airx", description: "Fast GLM-4.5 Air variant" },
-  { id: "glm-4.5-flash", name: "glm-4.5-flash", description: "Lightweight GLM-4.5 flash variant" },
-  { id: "glm-4-32b-0414-128k", name: "glm-4-32b-0414-128k", description: "32B GLM-4 model with 128K context" },
-];
+const providerDefinitions = {
+  glm: {
+    aliases: ["zai"],
+    envKeys: ["ZAI_API_KEY", "GLM_API_KEY"],
+    modelEnvKeys: ["GLM_MODEL", "QUBIT_MODEL"],
+    defaultModel: "glm-5.1",
+  },
+  hyperrouter: {
+    aliases: ["hyper-router", "hyper_router", "hyperouter"],
+    envKeys: ["HYPERROUTER_API_KEY", "HYPER_ROUTER_API_KEY"],
+    modelEnvKeys: ["HYPERROUTER_MODEL", "HYPER_ROUTER_MODEL"],
+    defaultModel: "claude-sonnet-4-6",
+  },
+  openai: {
+    envKeys: ["OPENAI_API_KEY"],
+    modelEnvKeys: ["OPENAI_MODEL"],
+    defaultModel: "gpt-5.2",
+  },
+  bedrock: {
+    aliases: ["amazon-bedrock", "amazon_bedrock", "amazonbedrock", "aws-bedrock", "aws_bedrock"],
+    envKeys: ["AWS_BEARER_TOKEN_BEDROCK", "BEDROCK_API_KEY"],
+    modelEnvKeys: ["BEDROCK_MODEL", "AWS_BEDROCK_MODEL"],
+    defaultModel: "anthropic.claude-opus-4-7",
+  },
+  openrouter: {
+    aliases: ["open-router", "open_router"],
+    envKeys: ["OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"],
+    modelEnvKeys: ["OPENROUTER_MODEL", "OPEN_ROUTER_MODEL"],
+    defaultModel: "openai/gpt-5.4",
+  },
+  codex: {
+    aliases: ["openai-codex", "chatgpt-codex", "chatgpt"],
+    envKeys: ["CODEX_ACCESS_TOKEN"],
+    modelEnvKeys: ["CODEX_MODEL", "QUBIT_MODEL"],
+    defaultModel: "gpt-5.2-codex",
+  },
+};
+const providerAliasMap = new Map(Object.entries(providerDefinitions).flatMap(([name, definition]) => [name, ...(definition.aliases || [])].map((alias) => [alias, name])));
+const providerNames = Object.keys(providerDefinitions);
+const defaultProviderName = normalizeProvider(process.env.QUBIT_PROVIDER || "glm");
+let activeProviderName = defaultProviderName;
+let model = defaultModelForProvider(activeProviderName);
+const providerModelLists = {
+  glm: [
+    { id: "glm-5.1", name: "glm-5.1", description: "Latest flagship GLM model for coding and long-horizon agent tasks" },
+    { id: "glm-5", name: "glm-5", description: "GLM-5 foundation model for coding and agent workflows" },
+    { id: "glm-5-turbo", name: "glm-5-turbo", description: "Fast GLM-5 variant for tool use and long chains" },
+    { id: "glm-4.7", name: "glm-4.7", description: "GLM-4.7 coding, reasoning, and agent model" },
+    { id: "glm-4.7-flashx", name: "glm-4.7-flashx", description: "Fast GLM-4.7 variant" },
+    { id: "glm-4.7-flash", name: "glm-4.7-flash", description: "Lightweight GLM-4.7 flash variant" },
+    { id: "glm-4.6", name: "glm-4.6", description: "Previous flagship GLM coding/chat model" },
+    { id: "glm-4.5", name: "glm-4.5", description: "Previous GLM generation" },
+    { id: "glm-4.5-x", name: "glm-4.5-x", description: "Higher-performance GLM-4.5 variant" },
+    { id: "glm-4.5-air", name: "glm-4.5-air", description: "Lower-cost GLM-4.5 Air model" },
+    { id: "glm-4.5-flash", name: "glm-4.5-flash", description: "Lightweight GLM-4.5 flash variant" },
+  ],
+  openai: [
+    { id: "gpt-5.2", name: "GPT-5.2", description: "Flagship OpenAI model for coding and agentic tasks" },
+    { id: "gpt-5.2-chat-latest", name: "GPT-5.2 Chat", description: "GPT-5.2 model used for ChatGPT-style chat" },
+    { id: "gpt-5.2-codex", name: "GPT-5.2-Codex", description: "Coding-optimized GPT-5.2 model" },
+    { id: "gpt-5.2-pro", name: "GPT-5.2 pro", description: "Higher-compute GPT-5.2 variant" },
+    { id: "gpt-5.1", name: "GPT-5.1", description: "Agentic coding model with configurable reasoning" },
+    { id: "gpt-5", name: "GPT-5", description: "Previous intelligent reasoning model" },
+    { id: "gpt-5-mini", name: "GPT-5 mini", description: "Faster, cost-efficient GPT-5 variant" },
+    { id: "gpt-5-nano", name: "GPT-5 nano", description: "Fastest, most cost-efficient GPT-5 variant" },
+    { id: "gpt-4.1", name: "GPT-4.1", description: "Smart non-reasoning model" },
+    { id: "gpt-4.1-mini", name: "GPT-4.1 mini", description: "Smaller, faster GPT-4.1 variant" },
+  ],
+  bedrock: [
+    { id: "anthropic.claude-sonnet-4-5-20250929-v1:0", name: "Claude Sonnet 4.5", description: "Anthropic coding and agent model on Amazon Bedrock" },
+    { id: "global.anthropic.claude-sonnet-4-5-20250929-v1:0", name: "Claude Sonnet 4.5 global", description: "Cross-region inference profile" },
+    { id: "us.anthropic.claude-sonnet-4-5-20250929-v1:0", name: "Claude Sonnet 4.5 US", description: "US cross-region inference profile" },
+    { id: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0", name: "Claude Sonnet 4.5 EU", description: "EU cross-region inference profile" },
+    { id: "anthropic.claude-3-7-sonnet-20250219-v1:0", name: "Claude 3.7 Sonnet", description: "Previous Claude Sonnet generation" },
+    { id: "anthropic.claude-3-5-sonnet-20241022-v2:0", name: "Claude 3.5 Sonnet v2", description: "Earlier Claude coding/chat model" },
+  ],
+  openrouter: [
+    { id: "openai/gpt-5.4", name: "OpenAI: GPT-5.4", description: "Latest OpenAI flagship through OpenRouter" },
+    { id: "openai/gpt-5.4-mini", name: "OpenAI: GPT-5.4 Mini", description: "Fast GPT-5.4 model through OpenRouter" },
+    { id: "openai/gpt-5.2", name: "OpenAI: GPT-5.2", description: "OpenAI GPT-5.2 through OpenRouter" },
+    { id: "openai/gpt-chat-latest", name: "OpenAI: GPT Chat Latest", description: "OpenAI chat alias through OpenRouter" },
+    { id: "anthropic/claude-opus-4.8", name: "Anthropic: Claude Opus 4.8", description: "Latest Claude Opus through OpenRouter" },
+    { id: "anthropic/claude-sonnet-4.6", name: "Anthropic: Claude Sonnet 4.6", description: "Claude Sonnet coding model through OpenRouter" },
+    { id: "google/gemini-3.5-flash", name: "Google: Gemini 3.5 Flash", description: "Latest Gemini Flash through OpenRouter" },
+    { id: "x-ai/grok-4.3", name: "xAI: Grok 4.3", description: "Latest Grok model through OpenRouter" },
+    { id: "qwen/qwen3.7-max", name: "Qwen: Qwen3.7 Max", description: "Latest Qwen Max through OpenRouter" },
+    { id: "z-ai/glm-5.1", name: "Z.ai: GLM 5.1", description: "Latest GLM model through OpenRouter" },
+  ],
+  codex: [
+    { id: "gpt-5.5", name: "GPT-5.5", description: "ChatGPT/Codex backend frontier model" },
+    { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", description: "ChatGPT Codex Responses backend via local OAuth" },
+    { id: "gpt-5.2", name: "GPT-5.2", description: "ChatGPT/Codex backend model" },
+  ],
+};
+let openRouterModelsCache = null;
+let openRouterModelsCacheAt = 0;
 const keychainService = process.env.QUBIT_KEYCHAIN_SERVICE || "Qubit";
-const envGLMAlias = "env:ZAI_API_KEY";
 const initialWorkspaceCwd = process.env.QUBIT_WORKSPACE_CWD || process.cwd();
 setDefaultToolCwd(initialWorkspaceCwd);
 
@@ -61,13 +144,15 @@ try {
   keytarLoadError = error;
 }
 
-const agent = defineAgent({
-  name: "qubit-chat",
-  instructions:
-    "You are Qubit, a concise terminal coding assistant MVP. Be helpful, direct, and practical. Keep answers brief unless the user asks for detail.",
-  model,
-  tools: qubitTools,
-});
+function createQubitAgent() {
+  return defineAgent({
+    name: "qubit-chat",
+    instructions:
+      "You are Qubit, a concise terminal coding assistant MVP. Be helpful, direct, and practical. Keep answers brief unless the user asks for detail.",
+    model,
+    tools: qubitTools,
+  });
+}
 
 const storage = new SqliteStorage({
   filePath: storagePath,
@@ -125,6 +210,7 @@ const hooks = {
 };
 
 let apiKeyIndex = await loadApiKeyIndex();
+const codexTokenStore = new QubitCodexTokenStore({ dataDir, keychainService, keytar });
 let runtimeState = await createRuntimeState();
 let sessionIndex = await loadSessionIndex();
 let activeSessionId = sessionIndex.activeSessionId;
@@ -215,36 +301,61 @@ async function handleLine(line) {
     return;
   }
 
+  if (request.type === "codex.status") {
+    await writeCodexStatus(request.id);
+    return;
+  }
+
+  if (request.type === "codex.login.start") {
+    await handleCodexLoginStart(request.id);
+    return;
+  }
+
+  if (request.type === "codex.login.cancel") {
+    await handleCodexLoginCancel(request.id);
+    return;
+  }
+
+  if (request.type === "codex.logout") {
+    await handleCodexLogout(request.id);
+    return;
+  }
+
   if (request.type === "model.list") {
-    writeModelList(request.id);
+    await writeModelList(request.id);
+    return;
+  }
+
+  if (request.type === "provider.use") {
+    await switchProvider(request.id, request.provider);
     return;
   }
 
   if (request.type === "model.use") {
     model = normalizeModel(request.model);
     runtimeState = await createRuntimeState();
-    writeModelUpdated(request.id, `Using model ${model}.`);
+    await writeModelUpdated(request.id, `Using ${runtimeState.providerName} model ${model}.`);
     return;
   }
 
   if (request.type === "key.set") {
     await setApiKey({ provider: request.provider, alias: request.alias, apiKey: request.apiKey });
     runtimeState = await createRuntimeState();
-    await writeKeyUpdated(request.id, `Saved and activated ${request.provider || "glm"}/${request.alias || ""}.`);
+    await writeKeyUpdated(request.id, `Saved and activated ${normalizeProvider(request.provider || defaultProviderName)}/${request.alias || ""}.`);
     return;
   }
 
   if (request.type === "key.use") {
     await activateApiKey({ provider: request.provider, alias: request.alias });
     runtimeState = await createRuntimeState();
-    await writeKeyUpdated(request.id, `Activated ${request.provider || "glm"}/${request.alias || ""}.`);
+    await writeKeyUpdated(request.id, `Activated ${normalizeProvider(request.provider || defaultProviderName)}/${request.alias || ""}.`);
     return;
   }
 
   if (request.type === "key.delete") {
     await deleteApiKey({ provider: request.provider, alias: request.alias });
     runtimeState = await createRuntimeState();
-    await writeKeyUpdated(request.id, `Deleted ${request.provider || "glm"}/${request.alias || ""}.`);
+    await writeKeyUpdated(request.id, `Deleted ${normalizeProvider(request.provider || defaultProviderName)}/${request.alias || ""}.`);
     return;
   }
 
@@ -415,6 +526,11 @@ function handleCancelRequest(request) {
   write({ type: "run_cancelled", id: request.id, runId, sessionId: active.sessionId, status: "cancelled" });
 }
 
+function defaultModelForProvider(provider) {
+  const normalizedProvider = normalizeProvider(provider || defaultProviderName);
+  return firstEnvValue(providerDefinitions[normalizedProvider].modelEnvKeys) || providerDefinitions[normalizedProvider].defaultModel;
+}
+
 function handlePermissionResponse(request) {
   const resolve = pendingPermissions.get(request.id);
   if (!resolve) return;
@@ -427,10 +543,10 @@ function handlePermissionResponse(request) {
 }
 
 async function createRuntimeState() {
-  const providerConfig = await resolveActiveProviderConfig("glm");
+  const providerConfig = await resolveActiveProviderConfig(activeProviderName);
   const provider = createProvider(providerConfig);
   const runtime = createRuntime({
-    agent,
+    agent: createQubitAgent(),
     provider,
     storage,
     toolPermission: {
@@ -443,27 +559,72 @@ async function createRuntimeState() {
 
 function createProvider(config) {
   if (config.providerName === "stub") return new StubProvider();
-  if (config.providerName !== "glm") {
-    throw new Error(`Unsupported provider: ${config.providerName}`);
+
+  switch (config.providerName) {
+    case "glm":
+      return new GLMProvider({
+        apiKey: config.apiKey,
+        endpoint: process.env.GLM_ENDPOINT === "coding" ? "coding" : "general",
+        thinking: process.env.GLM_THINKING === "1" ? { type: "enabled" } : { type: "disabled" },
+      });
+    case "hyperrouter":
+      return new OpenAIProvider({
+        apiKey: config.apiKey,
+        baseURL: process.env.HYPERROUTER_BASE_URL || process.env.HYPER_ROUTER_BASE_URL || "https://hyperrouter.cloud/v1",
+        name: "hyperrouter",
+      });
+    case "openai":
+      return new OpenAIProvider({
+        apiKey: config.apiKey,
+        baseURL: process.env.OPENAI_BASE_URL,
+        organization: process.env.OPENAI_ORG_ID || process.env.OPENAI_ORGANIZATION,
+        project: process.env.OPENAI_PROJECT,
+      });
+    case "bedrock":
+      return new AmazonBedrockVAIProvider({
+        apiKey: config.apiKey,
+        region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || process.env.BEDROCK_REGION,
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        sessionToken: process.env.AWS_SESSION_TOKEN,
+        baseURL: process.env.BEDROCK_BASE_URL,
+      });
+    case "openrouter":
+      return new OpenRouterProvider({
+        apiKey: config.apiKey,
+      });
+    case "codex":
+      return new CodexResponsesProvider({
+        tokenStore: codexTokenStore,
+        baseURL: process.env.CODEX_BASE_URL || "https://chatgpt.com/backend-api/codex",
+        issuer: process.env.CODEX_ISSUER || "https://auth.openai.com",
+        clientId: process.env.CODEX_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann",
+        originator: process.env.CODEX_ORIGINATOR || "codex_cli_rs",
+      });
+    default:
+      throw new Error(`Unsupported provider: ${config.providerName}`);
   }
-  return new GLMProvider({
-    apiKey: config.apiKey,
-    endpoint: process.env.GLM_ENDPOINT === "coding" ? "coding" : "general",
-    thinking: process.env.GLM_THINKING === "1" ? { type: "enabled" } : { type: "disabled" },
-  });
 }
 
-async function resolveActiveProviderConfig(provider = "glm") {
+async function resolveActiveProviderConfig(provider = defaultProviderName) {
   if (process.env.QUBIT_STUB === "1") {
     return { providerName: "stub", keyAlias: "stub", keySource: "stub", apiKey: undefined };
   }
 
   const normalizedProvider = normalizeProvider(provider);
+  if (normalizedProvider === "codex") {
+    if (process.env.CODEX_ACCESS_TOKEN) return { providerName: "codex", keyAlias: "env:CODEX_ACCESS_TOKEN", keySource: "env", apiKey: process.env.CODEX_ACCESS_TOKEN };
+    const status = await codexTokenStore.status();
+    if (status.active) return { providerName: "codex", keyAlias: "chatgpt", keySource: status.storage || "keychain", apiKey: undefined };
+    return { providerName: "codex", keyAlias: "not-signed-in", keySource: "oauth", apiKey: undefined };
+  }
   const activeAlias = apiKeyIndex.active?.[normalizedProvider];
   if (activeAlias) {
-    if (activeAlias === envGLMAlias) {
-      if (!process.env.ZAI_API_KEY) throw new Error("ZAI_API_KEY is not set.");
-      return { providerName: normalizedProvider, keyAlias: activeAlias, keySource: "env", apiKey: process.env.ZAI_API_KEY };
+    const envKeyName = envKeyNameFromAlias(normalizedProvider, activeAlias);
+    if (envKeyName) {
+      const envValue = process.env[envKeyName];
+      if (!envValue) throw new Error(`${envKeyName} is not set.`);
+      return { providerName: normalizedProvider, keyAlias: activeAlias, keySource: "env", apiKey: envValue };
     }
     const entry = findStoredKey(normalizedProvider, activeAlias);
     if (entry) {
@@ -472,10 +633,12 @@ async function resolveActiveProviderConfig(provider = "glm") {
     }
   }
 
-  if (process.env.ZAI_API_KEY) {
-    apiKeyIndex.active[normalizedProvider] = envGLMAlias;
+  const envKey = firstProviderEnvKey(normalizedProvider);
+  if (envKey) {
+    const envAlias = envAliasFor(envKey);
+    apiKeyIndex.active[normalizedProvider] = envAlias;
     await saveApiKeyIndex();
-    return { providerName: normalizedProvider, keyAlias: envGLMAlias, keySource: "env", apiKey: process.env.ZAI_API_KEY };
+    return { providerName: normalizedProvider, keyAlias: envAlias, keySource: "env", apiKey: process.env[envKey] };
   }
 
   return { providerName: "stub", keyAlias: "stub", keySource: "stub", apiKey: undefined };
@@ -499,9 +662,19 @@ async function loadApiKeyIndex() {
       createdAt: key.createdAt || new Date().toISOString(),
       updatedAt: key.updatedAt || key.createdAt || new Date().toISOString(),
     }));
+  const active = {};
+  if (typeof parsed?.active === "object" && parsed.active) {
+    for (const [provider, alias] of Object.entries(parsed.active)) {
+      try {
+        active[normalizeProvider(provider)] = String(alias);
+      } catch {
+        // Drop active provider entries that are no longer supported.
+      }
+    }
+  }
   const index = {
     version: 1,
-    active: typeof parsed?.active === "object" && parsed.active ? parsed.active : {},
+    active,
     keys: normalized,
   };
   await saveApiKeyIndex(index);
@@ -514,19 +687,24 @@ async function saveApiKeyIndex(index = apiKeyIndex) {
 }
 
 async function listApiKeys() {
-  const activeProvider = runtimeState?.providerName === "stub" ? "glm" : runtimeState?.providerName || "glm";
-  const activeAlias = apiKeyIndex.active?.glm || runtimeState?.keyAlias || "";
+  const activeProvider = runtimeState?.providerName === "stub" ? activeProviderName : runtimeState?.providerName || activeProviderName;
+  const activeAlias = apiKeyIndex.active?.[activeProvider] || runtimeState?.keyAlias || "";
   const keys = [];
 
-  if (process.env.ZAI_API_KEY) {
-    keys.push({
-      provider: "glm",
-      alias: envGLMAlias,
-      source: "env",
-      active: activeProvider === "glm" && activeAlias === envGLMAlias,
-      masked: maskApiKey(process.env.ZAI_API_KEY),
-      readonly: true,
-    });
+  for (const providerName of providerNames) {
+    for (const envKey of providerDefinitions[providerName].envKeys || []) {
+      const value = process.env[envKey];
+      if (!value) continue;
+      const alias = envAliasFor(envKey);
+      keys.push({
+        provider: providerName,
+        alias,
+        source: "env",
+        active: activeProvider === providerName && activeAlias === alias,
+        masked: maskApiKey(value),
+        readonly: true,
+      });
+    }
   }
 
   for (const key of apiKeyIndex.keys) {
@@ -552,14 +730,95 @@ async function listApiKeys() {
   return keys;
 }
 
-function listModels() {
-  const known = glmModels.some((candidate) => candidate.id === model)
-    ? glmModels
-    : [{ id: model, name: model, description: "Configured model" }, ...glmModels];
+async function listModels() {
+  const activeProvider = runtimeState?.providerName === "stub" ? activeProviderName : runtimeState?.providerName || activeProviderName;
+  const knownModels = activeProvider === "openrouter"
+    ? await listOpenRouterModels()
+    : providerModelLists[activeProvider] || [];
+  const known = knownModels.some((candidate) => candidate.id === model)
+    ? knownModels
+    : [{ id: model, name: model, description: "Configured model" }, ...knownModels];
   return known.map((candidate) => ({ ...candidate, active: candidate.id === model }));
 }
 
-function writeModelList(id) {
+async function listOpenRouterModels() {
+  const fallback = providerModelLists.openrouter;
+  const now = Date.now();
+  if (openRouterModelsCache && now - openRouterModelsCacheAt < 5 * 60 * 1000) {
+    return openRouterModelsCache;
+  }
+
+  try {
+    const apiKey = await resolveProviderApiKey("openrouter");
+    const headers = {
+      "HTTP-Referer": process.env.OPENROUTER_HTTP_REFERER || "https://github.com/zayr0-9/qubit",
+      "X-Title": process.env.OPENROUTER_APP_TITLE || "Qubit",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    };
+    const response = await fetch("https://openrouter.ai/api/v1/models", { headers });
+    if (!response.ok) throw new Error(`OpenRouter models request failed: HTTP ${response.status}`);
+    const payload = await response.json();
+    const remoteModels = Array.isArray(payload?.data)
+      ? payload.data
+        .filter((item) => item && typeof item.id === "string")
+        .map((item) => ({
+          id: item.id,
+          name: item.name || item.id,
+          description: openRouterModelDescription(item),
+        }))
+      : [];
+    if (remoteModels.length === 0) return fallback;
+    openRouterModelsCache = remoteModels;
+    openRouterModelsCacheAt = now;
+    return remoteModels;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function openRouterModelDescription(item) {
+  const contextLength = Number.isFinite(item?.context_length) ? `${item.context_length.toLocaleString()} context` : "OpenRouter model";
+  const pricing = item?.pricing;
+  const prompt = pricing?.prompt;
+  const completion = pricing?.completion;
+  if (prompt !== undefined && completion !== undefined) {
+    return `${contextLength} · prompt ${prompt}/token · completion ${completion}/token`;
+  }
+  return contextLength;
+}
+
+async function resolveProviderApiKey(provider) {
+  const normalizedProvider = normalizeProvider(provider);
+  const activeAlias = apiKeyIndex.active?.[normalizedProvider];
+  if (activeAlias) {
+    const envKeyName = envKeyNameFromAlias(normalizedProvider, activeAlias);
+    if (envKeyName) return process.env[envKeyName] || "";
+    const entry = findStoredKey(normalizedProvider, activeAlias);
+    if (entry) {
+      try {
+        return await getKeychainPassword(entry.account) || "";
+      } catch {
+        return "";
+      }
+    }
+  }
+  const envKey = firstProviderEnvKey(normalizedProvider);
+  return envKey ? process.env[envKey] || "" : "";
+}
+
+async function switchProvider(id, provider) {
+  try {
+    const normalizedProvider = normalizeProvider(provider);
+    activeProviderName = normalizedProvider;
+    model = defaultModelForProvider(normalizedProvider);
+    runtimeState = await createRuntimeState();
+    await writeModelUpdated(id, `Using provider ${runtimeState.providerName} with model ${model}.`);
+  } catch (error) {
+    write({ type: "error", id, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function writeModelList(id) {
   write({
     type: "model.list",
     id,
@@ -567,11 +826,11 @@ function writeModelList(id) {
     activeProvider: runtimeState.providerName,
     activeKeyAlias: runtimeState.keyAlias,
     model,
-    models: listModels(),
+    models: await listModels(),
   });
 }
 
-function writeModelUpdated(id, status) {
+async function writeModelUpdated(id, status) {
   write({
     type: "model.updated",
     id,
@@ -580,7 +839,7 @@ function writeModelUpdated(id, status) {
     activeKeyAlias: runtimeState.keyAlias,
     model,
     status,
-    models: listModels(),
+    models: await listModels(),
   });
 }
 
@@ -604,6 +863,67 @@ async function writeKeyList(id) {
   });
 }
 
+async function writeCodexStatus(id) {
+  const status = await codexTokenStore.status();
+  write({
+    type: "codex.status",
+    id,
+    provider: "codex",
+    activeProvider: runtimeState.providerName,
+    activeKeyAlias: runtimeState.providerName === "codex" ? runtimeState.keyAlias : undefined,
+    model,
+    ...status,
+    status: status.active ? "Signed in to ChatGPT Codex." : "Not signed in to ChatGPT Codex.",
+  });
+}
+
+async function handleCodexLoginStart(id) {
+  try {
+    const login = await startCodexLogin({
+      tokenStore: codexTokenStore,
+      issuer: process.env.CODEX_ISSUER || "https://auth.openai.com",
+      clientId: process.env.CODEX_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann",
+      originator: process.env.CODEX_ORIGINATOR || "codex_cli_rs",
+      allowedWorkspaceId: process.env.QUBIT_CODEX_ALLOWED_WORKSPACE_ID,
+    });
+    write({ type: "codex.login.started", id, authUrl: login.authUrl, localPort: login.localPort });
+    login.completed.then(async (result) => {
+      if (activeProviderName === "codex") runtimeState = await createRuntimeState();
+      write({
+        type: "codex.login.completed",
+        id,
+        provider: "codex",
+        activeProvider: runtimeState.providerName,
+        activeKeyAlias: runtimeState.providerName === "codex" ? runtimeState.keyAlias : "chatgpt",
+        model,
+        ...result,
+      });
+    }).catch((error) => {
+      write({ type: "codex.error", id, error: redactSecrets(error instanceof Error ? error.message : String(error)) });
+    });
+  } catch (error) {
+    write({ type: "codex.error", id, error: redactSecrets(error instanceof Error ? error.message : String(error)) });
+  }
+}
+
+async function handleCodexLoginCancel(id) {
+  const cancelled = await cancelCodexLogin();
+  write({ type: cancelled ? "codex.login.cancelled" : "codex.status", id, status: cancelled ? "Codex login cancelled." : "No Codex login is active." });
+}
+
+async function handleCodexLogout(id) {
+  await codexTokenStore.delete();
+  runtimeState = await createRuntimeState();
+  write({
+    type: "codex.logout.completed",
+    id,
+    provider: "codex",
+    activeProvider: runtimeState.providerName,
+    activeKeyAlias: runtimeState.keyAlias,
+    status: "Signed out of ChatGPT Codex.",
+  });
+}
+
 async function writeKeyUpdated(id, status) {
   write({
     type: "key.updated",
@@ -617,7 +937,7 @@ async function writeKeyUpdated(id, status) {
 }
 
 async function setApiKey({ provider, alias, apiKey }) {
-  const normalizedProvider = normalizeProvider(provider || "glm");
+  const normalizedProvider = normalizeProvider(provider || defaultProviderName);
   const normalizedAlias = normalizeAlias(alias);
   const value = String(apiKey || "").trim();
   if (!value) throw new Error("API key is required.");
@@ -645,10 +965,11 @@ async function setApiKey({ provider, alias, apiKey }) {
 }
 
 async function activateApiKey({ provider, alias }) {
-  const normalizedProvider = normalizeProvider(provider || "glm");
+  const normalizedProvider = normalizeProvider(provider || defaultProviderName);
   const normalizedAlias = normalizeAlias(alias);
-  if (normalizedAlias === envGLMAlias) {
-    if (!process.env.ZAI_API_KEY) throw new Error("ZAI_API_KEY is not set.");
+  const envKeyName = envKeyNameFromAlias(normalizedProvider, normalizedAlias);
+  if (envKeyName) {
+    if (!process.env[envKeyName]) throw new Error(`${envKeyName} is not set.`);
     apiKeyIndex.active[normalizedProvider] = normalizedAlias;
     await saveApiKeyIndex();
     return;
@@ -662,15 +983,16 @@ async function activateApiKey({ provider, alias }) {
 }
 
 async function deleteApiKey({ provider, alias }) {
-  const normalizedProvider = normalizeProvider(provider || "glm");
+  const normalizedProvider = normalizeProvider(provider || defaultProviderName);
   const normalizedAlias = normalizeAlias(alias);
-  if (normalizedAlias === envGLMAlias) throw new Error("Environment API keys are read-only and cannot be deleted.");
+  if (envKeyNameFromAlias(normalizedProvider, normalizedAlias)) throw new Error("Environment API keys are read-only and cannot be deleted.");
   const index = apiKeyIndex.keys.findIndex((key) => key.provider === normalizedProvider && key.alias === normalizedAlias);
   if (index < 0) throw new Error(`Unknown API key alias: ${normalizedProvider}/${normalizedAlias}`);
   const [entry] = apiKeyIndex.keys.splice(index, 1);
   await deleteKeychainPassword(entry.account);
   if (apiKeyIndex.active?.[normalizedProvider] === normalizedAlias) {
-    if (process.env.ZAI_API_KEY) apiKeyIndex.active[normalizedProvider] = envGLMAlias;
+    const envKey = firstProviderEnvKey(normalizedProvider);
+    if (envKey) apiKeyIndex.active[normalizedProvider] = envAliasFor(envKey);
     else delete apiKeyIndex.active[normalizedProvider];
   }
   await saveApiKeyIndex();
@@ -678,8 +1000,31 @@ async function deleteApiKey({ provider, alias }) {
 
 function normalizeProvider(provider) {
   const normalized = String(provider || "glm").trim().toLowerCase();
-  if (normalized !== "glm") throw new Error(`Unsupported provider: ${normalized || "empty"}`);
-  return normalized;
+  const canonical = providerAliasMap.get(normalized);
+  if (!canonical) throw new Error(`Unsupported provider: ${normalized || "empty"}. Supported providers: ${providerNames.join(", ")}.`);
+  return canonical;
+}
+
+function firstEnvValue(names = []) {
+  const name = names.find((candidate) => process.env[candidate]);
+  return name ? process.env[name] : undefined;
+}
+
+function firstProviderEnvKey(provider) {
+  const definition = providerDefinitions[normalizeProvider(provider)];
+  return (definition.envKeys || []).find((name) => process.env[name]);
+}
+
+function envAliasFor(envKey) {
+  return `env:${envKey}`;
+}
+
+function envKeyNameFromAlias(provider, alias) {
+  const normalizedProvider = normalizeProvider(provider);
+  const normalizedAlias = String(alias || "").trim();
+  if (!normalizedAlias.startsWith("env:")) return "";
+  const envKey = normalizedAlias.slice(4);
+  return (providerDefinitions[normalizedProvider].envKeys || []).includes(envKey) ? envKey : "";
 }
 
 function normalizeAlias(alias) {
@@ -717,7 +1062,7 @@ async function deleteKeychainPassword(account) {
 function ensureKeychainAvailable() {
   if (keytar && typeof keytar.setPassword === "function" && typeof keytar.getPassword === "function" && typeof keytar.deletePassword === "function") return;
   const reason = keytarLoadError instanceof Error ? keytarLoadError.message : String(keytarLoadError || "keytar module did not expose the expected OS keychain API");
-  throw new Error(`Secure OS keychain storage is unavailable: ${reason}. Install Qubit's keychain dependency and required OS keychain support, or use ZAI_API_KEY.`);
+  throw new Error(`Secure OS keychain storage is unavailable: ${reason}. Install Qubit's keychain dependency and required OS keychain support, or use an environment API key for the selected provider.`);
 }
 
 function maskApiKey(value) {
@@ -727,7 +1072,12 @@ function maskApiKey(value) {
 }
 
 function redactSecrets(value) {
-  return String(value || "").replace(/\b(?:sk|zai|key|token)[-_][A-Za-z0-9_.-]{8,}/gi, "[redacted]");
+  return String(value || "")
+    .replace(/(authorization\s*[:=]\s*bearer\s+)[A-Za-z0-9._~+/-]+/gi, "$1[redacted]")
+    .replace(/(\/auth\/callback\?[^\s]*?\bstate=)([^\s&#]+)/gi, "$1[redacted]")
+    .replace(/\b(?:access_token|refresh_token|id_token|subject_token|requested_token|code)=([^\s&#]+)/gi, (match, _value) => match.replace(/=([^\s&#]+)/, "=[redacted]"))
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[redacted-jwt]")
+    .replace(/\b(?:sk|zai|key|token)[-_][A-Za-z0-9_.-]{8,}/gi, "[redacted]");
 }
 
 function plainObject(value) {
@@ -823,9 +1173,18 @@ function summarizeToolResult(toolName, result) {
 
 function redactMessage(message) {
   if (!message || typeof message !== "object") return message;
-  const clone = { ...message };
-  if (typeof clone.apiKey === "string") clone.apiKey = "[redacted]";
-  if (typeof clone.error === "string") clone.error = redactSecrets(clone.error);
+  return redactMessageValue(message);
+}
+
+function redactMessageValue(value) {
+  if (typeof value === "string") return redactSecrets(value);
+  if (Array.isArray(value)) return value.map((item) => redactMessageValue(item));
+  if (!value || typeof value !== "object") return value;
+  const clone = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (/apiKey|access_token|refresh_token|id_token|authorization|subject_token|code_verifier/i.test(key)) clone[key] = "[redacted]";
+    else clone[key] = redactMessageValue(item);
+  }
   return clone;
 }
 

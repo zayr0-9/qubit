@@ -14,7 +14,11 @@
     "check:runtime": "tsc --noEmit -p tsconfig.json && pnpm run build:runtime && node dist/runtime.js --check"
   },
   "dependencies": {
-    "@hyper-labs/hyper-router": "file:hyper-labs-hyper-router-0.1.7.tgz",
+    "@ai-sdk/amazon-bedrock": "^4.0.92",
+    "@ai-sdk/openai": "^3.0.53",
+    "@hyper-labs/hyper-router": "file:hyper-labs-hyper-router-0.1.8.tgz",
+    "@openrouter/agent": "^0.3.2",
+    "ai": "^6.0.168",
     "glob": "^13.0.0",
     "keytar": "^7.9.0",
     "sql.js": "^1.14.1",

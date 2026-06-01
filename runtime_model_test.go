@@ -49,3 +49,53 @@ func TestModelUpdatedAppliesActiveModel(t *testing.T) {
 		t.Fatalf("status = %q, want ready", m.status)
 	}
 }
+
+func TestProviderUpdatedAppliesProviderModelAndModels(t *testing.T) {
+	m := initialModel(nil)
+
+	m.applyModelUpdated(runtimeEvent{
+		Type:           "model.updated",
+		ActiveProvider: "codex",
+		ActiveKeyAlias: "chatgpt",
+		Model:          "gpt-5.2-codex",
+		Status:         "Using provider codex with model gpt-5.2-codex.",
+		Models: []modelInfo{
+			{ID: "gpt-5.5", Name: "GPT-5.5"},
+			{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Active: true},
+			{ID: "gpt-5.2", Name: "GPT-5.2"},
+		},
+	})
+
+	if m.activeProvider != "codex" || m.provider != "codex" {
+		t.Fatalf("provider = %q activeProvider = %q, want codex", m.provider, m.activeProvider)
+	}
+	if m.activeKeyAlias != "chatgpt" {
+		t.Fatalf("activeKeyAlias = %q, want chatgpt", m.activeKeyAlias)
+	}
+	if m.model != "gpt-5.2-codex" {
+		t.Fatalf("model = %q, want gpt-5.2-codex", m.model)
+	}
+	if len(m.models) != 3 || m.models[0].ID != "gpt-5.5" || m.models[1].ID != "gpt-5.2-codex" {
+		t.Fatalf("models = %#v, want codex model list", m.models)
+	}
+}
+
+func TestProviderSelectorModal(t *testing.T) {
+	m := initialModel(nil)
+	m.activeProvider = "codex"
+
+	got := m.openProviderSelectorModal()
+
+	if got.mode != modeModal {
+		t.Fatalf("mode = %v, want modeModal", got.mode)
+	}
+	if got.modal == nil || got.modal.ID != "provider_selector" {
+		t.Fatalf("modal = %#v, want provider selector", got.modal)
+	}
+	if len(got.modal.Options) == 0 {
+		t.Fatal("provider selector options empty")
+	}
+	if got.modal.Options[got.modal.OptionCursor].ID != "codex" {
+		t.Fatalf("selected provider = %q, want codex", got.modal.Options[got.modal.OptionCursor].ID)
+	}
+}

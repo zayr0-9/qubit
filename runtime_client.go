@@ -93,6 +93,12 @@ func (r *runtimeClient) readStderr(stderr io.Reader) {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
 			r.appendLog("stderr", line)
+			// Opt-in OAuth diagnostics are intentionally written to stderr by the
+			// Node runtime, but they are not runtime failures. Keep them in
+			// .qubit/runtime.log without interrupting the TUI or hiding the auth URL.
+			if strings.HasPrefix(line, "[codex-oauth]") {
+				continue
+			}
 			r.errs <- fmt.Errorf("%s", line)
 		}
 	}

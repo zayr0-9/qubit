@@ -73,6 +73,37 @@ func (m model) openDemoPermissionModal() model {
 	})
 }
 
+func (m model) openProviderSelectorModal() model {
+	m.previousMode = modeChat
+	m.mode = modeModal
+	providers := apiKeyProviderOptions()
+	options := make([]modalOption, 0, len(providers))
+	activeIndex := 0
+	activeProvider := fallback(m.activeProvider, m.provider)
+	for i, provider := range providers {
+		if provider.ID == activeProvider {
+			activeIndex = i
+		}
+		options = append(options, modalOption{ID: provider.ID, Label: provider.Label, Description: provider.Description})
+	}
+	m.modal = &modalState{
+		ID:           "provider_selector",
+		Kind:         modalKindCustom,
+		Title:        "Choose provider",
+		Description:  "Select the provider Qubit should use for new runs. Switching providers also resets to that provider's default model.",
+		Options:      options,
+		OptionCursor: activeIndex,
+		Actions: []modalAction{
+			{ID: "select", Label: "Select", Style: "primary", Default: true},
+			{ID: "cancel", Label: "Cancel"},
+		},
+		Payload: map[string]any{"action": "provider.select"},
+	}
+	m.busy = false
+	m.status = "choose provider"
+	return m
+}
+
 func (m model) openModelSelectorModal(models []modelInfo) model {
 	m.previousMode = modeChat
 	m.mode = modeModal
@@ -89,11 +120,15 @@ func (m model) openModelSelectorModal(models []modelInfo) model {
 	if len(options) == 0 {
 		options = []modalOption{{ID: fallback(m.model, "glm-4.6"), Label: fallback(m.model, "glm-4.6"), Description: "Current runtime model"}}
 	}
+	title := "Choose model"
+	if m.activeProvider != "" {
+		title = fmt.Sprintf("Choose %s model", m.activeProvider)
+	}
 	m.modal = &modalState{
 		ID:          "model_selector",
 		Kind:        modalKindCustom,
-		Title:       "Choose model",
-		Description: "Select the GLM model Qubit should use for new runs.",
+		Title:       title,
+		Description: "Select the model Qubit should use for new runs.",
 		Options:     options,
 		Actions: []modalAction{
 			{ID: "select", Label: "Select", Style: "primary", Default: true},
@@ -242,6 +277,17 @@ func (m model) resolveModalAction(actionID string) (tea.Model, tea.Cmd) {
 			return m, sendRuntime(m.runtime, map[string]any{"type": "model.use", "model": selected.ID})
 		}
 		m.status = "model selection cancelled"
+		return m, nil
+	}
+
+	if modal.Payload["action"] == "provider.select" {
+		if actionID == "select" {
+			selected := modalSelectedOption(modal)
+			m.busy = true
+			m.status = "switching provider"
+			return m, sendRuntime(m.runtime, map[string]any{"type": "provider.use", "provider": selected.ID})
+		}
+		m.status = "provider selection cancelled"
 		return m, nil
 	}
 

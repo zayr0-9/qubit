@@ -39,6 +39,9 @@ agent_design.md
 
 agent_tools.md
   Mandatory when working on model-callable tools, tool registration, runtime tool permissions, or shared filesystem/path infrastructure.
+
+agent_codex.md
+  Mandatory when working on Qubit's local Codex provider, ChatGPT OAuth flow, Codex token storage/refresh, or Codex Responses API integration.
 ```
 
 When adding a new major subsystem or extracting detailed guidance from this file, create a focused `agent_<category>.md` context file and list it here with when it is mandatory to read.
@@ -72,6 +75,7 @@ D:\qubit
 1. Keep `hyper-router` pure.
    - Do not add Bubble Tea, terminal UI, app-specific sessions, Qubit keybindings, CLI code, or runtime sidecar code to `hyper-router`.
    - Treat it as a reusable SDK dependency.
+   - Codex provider exception: Codex is implemented inside Qubit runtime, not `hyper-router`, because it uses ChatGPT OAuth, local token storage, and the ChatGPT Codex backend. It still implements `hyper-router`'s `ModelProvider` interface.
 
 2. Keep provider/runtime work in TypeScript runtime source.
    - GLM provider setup belongs in Node TypeScript runtime files.

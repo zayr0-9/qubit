@@ -51,6 +51,12 @@ type modelInfo struct {
 	Active      bool   `json:"active"`
 }
 
+type apiKeyProviderOption struct {
+	ID          string
+	Label       string
+	Description string
+}
+
 type keyEntryStep int
 
 const (
@@ -60,10 +66,12 @@ const (
 )
 
 type keyEntryState struct {
-	Step     keyEntryStep
-	Provider composerModel
-	Alias    composerModel
-	Secret   composerModel
+	Step           keyEntryStep
+	ProviderCursor int
+	Providers      []apiKeyProviderOption
+	Provider       composerModel
+	Alias          composerModel
+	Secret         composerModel
 }
 
 type themeEntryStep int
@@ -201,6 +209,12 @@ type runtimeEvent struct {
 	StoragePath      string         `json:"storagePath,omitempty"`
 	IndexPath        string         `json:"indexPath,omitempty"`
 	WorkspaceCwd     string         `json:"workspaceCwd,omitempty"`
+	AuthURL          string         `json:"authUrl,omitempty"`
+	LocalPort        int            `json:"localPort,omitempty"`
+	AccountEmail     string         `json:"accountEmail,omitempty"`
+	AccountID        string         `json:"accountId,omitempty"`
+	Storage          string         `json:"storage,omitempty"`
+	Active           bool           `json:"active,omitempty"`
 	Status           string         `json:"status,omitempty"`
 	Content          string         `json:"content,omitempty"`
 	ReasoningContent string         `json:"reasoningContent,omitempty"`

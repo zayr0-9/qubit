@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
+
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/viewport"
@@ -348,11 +350,20 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	case "key.list":
 		m.applyKeyList(ev)
 	case "model.list":
+		if ev.Model != "" {
+			m.model = ev.Model
+		}
+		if len(ev.Models) > 0 {
+			m.models = ev.Models
+		}
+		m.applyActiveKeyMetadata(ev)
 		m = m.openModelSelectorModal(ev.Models)
 	case "model.updated":
 		m.applyModelUpdated(ev)
 	case "key.updated":
 		m.applyKeyUpdated(ev)
+	case "codex.login.started", "codex.login.completed", "codex.login.cancelled", "codex.logout.completed", "codex.status", "codex.error":
+		m.applyCodexEvent(ev)
 	case "tool.permission.request":
 		if m.permissionMode == permissionModeAlwaysAllow {
 			m.status = "thinking"
@@ -412,6 +423,51 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 	}
 	return m, waitRuntimeEvent(m.runtime)
+}
+
+func (m *model) applyCodexEvent(ev runtimeEvent) {
+	m.clearFakeStream()
+	m.busy = false
+	m.err = ""
+	m.status = fallback(ev.Status, "ready")
+	if ev.Provider != "" {
+		m.provider = ev.Provider
+	}
+	if ev.ActiveProvider != "" {
+		m.activeProvider = ev.ActiveProvider
+	}
+	if ev.ActiveKeyAlias != "" {
+		m.activeKeyAlias = ev.ActiveKeyAlias
+	}
+	if ev.Model != "" {
+		m.model = ev.Model
+	}
+	switch ev.Type {
+	case "codex.login.started":
+		copyStatus := ""
+		if ev.AuthURL != "" {
+			if err := clipboard.WriteAll(ev.AuthURL); err == nil {
+				copyStatus = "\n\nThe URL has also been copied to your clipboard. Paste it into your browser if your terminal does not support Ctrl+Click."
+			} else {
+				copyStatus = "\n\nCould not copy the URL to clipboard automatically; select/copy the full URL below and paste it into your browser."
+			}
+		}
+		m.appendSystem(fmt.Sprintf("Open this URL to sign in to ChatGPT Codex:\n%s%s", ev.AuthURL, copyStatus))
+	case "codex.error":
+		m.err = ev.Error
+		m.status = "Codex error"
+		m.messages = append(m.messages, chatMessage{Role: "error", Content: fallback(ev.Error, "Codex operation failed")})
+		m.refreshViewport()
+	default:
+		detail := fallback(ev.Status, ev.Type)
+		if ev.AccountEmail != "" {
+			detail += "\nAccount: " + ev.AccountEmail
+		}
+		if ev.Storage != "" {
+			detail += "\nStorage: " + ev.Storage
+		}
+		m.appendSystem(detail)
+	}
 }
 
 func (m *model) applyAssistantEvent(ev runtimeEvent) {

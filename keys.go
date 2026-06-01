@@ -88,7 +88,9 @@ func (m model) openDeleteApiKeyConfirm(selected apiKeyInfo) model {
 }
 
 func (m model) openKeyEntry() model {
-	provider := newKeyEntryComposer("glm", "provider")
+	providers := apiKeyProviderOptions()
+	providerID := fallback(m.activeProvider, fallback(m.provider, providers[0].ID))
+	provider := newKeyEntryComposer(providerID, "provider")
 	alias := newKeyEntryComposer("", "alias")
 	secret := newKeyEntryComposer("", "api key")
 	provider.charLimit = 32
@@ -96,8 +98,8 @@ func (m model) openKeyEntry() model {
 	secret.charLimit = 4096
 	m.previousMode = m.mode
 	m.mode = modeKeyEntry
-	m.keyEntry = &keyEntryState{Step: keyEntryProvider, Provider: provider, Alias: alias, Secret: secret}
-	m.status = "enter provider"
+	m.keyEntry = &keyEntryState{Step: keyEntryProvider, ProviderCursor: providerOptionIndex(providers, providerID), Providers: providers, Provider: provider, Alias: alias, Secret: secret}
+	m.status = "choose provider"
 	return m
 }
 
@@ -121,6 +123,18 @@ func (m model) updateKeyEntry(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
+	case "up", "k", "ctrl+p":
+		if m.keyEntry.Step == keyEntryProvider {
+			m.moveKeyEntryProvider(-1)
+			m.layout()
+			return m, nil
+		}
+	case "down", "j", "ctrl+n":
+		if m.keyEntry.Step == keyEntryProvider {
+			m.moveKeyEntryProvider(1)
+			m.layout()
+			return m, nil
+		}
 	case "esc":
 		m.keyEntry = nil
 		m.mode = modeKeyPicker
@@ -182,6 +196,7 @@ func (m model) advanceKeyEntry() (tea.Model, tea.Cmd) {
 	}
 	switch m.keyEntry.Step {
 	case keyEntryProvider:
+		m.syncSelectedKeyEntryProvider()
 		provider := strings.TrimSpace(m.keyEntry.Provider.Value())
 		if provider == "" {
 			m.status = "provider required"
@@ -217,13 +232,31 @@ func (m model) advanceKeyEntry() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *model) moveKeyEntryProvider(delta int) {
+	if m.keyEntry == nil || len(m.keyEntry.Providers) == 0 {
+		return
+	}
+	m.keyEntry.ProviderCursor = (m.keyEntry.ProviderCursor + delta + len(m.keyEntry.Providers)) % len(m.keyEntry.Providers)
+	m.syncSelectedKeyEntryProvider()
+	m.status = "choose provider"
+}
+
+func (m *model) syncSelectedKeyEntryProvider() {
+	if m.keyEntry == nil || len(m.keyEntry.Providers) == 0 {
+		return
+	}
+	cursor := clampInt(m.keyEntry.ProviderCursor, 0, len(m.keyEntry.Providers)-1)
+	m.keyEntry.ProviderCursor = cursor
+	m.keyEntry.Provider.SetValue(m.keyEntry.Providers[cursor].ID)
+}
+
 func (m *model) activeKeyEntryComposer() *composerModel {
 	if m.keyEntry == nil {
 		return nil
 	}
 	switch m.keyEntry.Step {
 	case keyEntryProvider:
-		return &m.keyEntry.Provider
+		return nil
 	case keyEntryAlias:
 		return &m.keyEntry.Alias
 	case keyEntrySecret:
@@ -310,7 +343,7 @@ func (m model) renderKeyPicker() string {
 		if key.Readonly || key.Source == "env" {
 			lock = " readonly"
 		}
-		line := fmt.Sprintf("%s %-6s %-18s %-10s %s%s", active, key.Provider, oneLine(key.Alias, 18), key.Source, key.Masked, mutedSt.Render(lock))
+		line := fmt.Sprintf("%s %-12s %-18s %-10s %s%s", active, key.Provider, oneLine(key.Alias, 18), key.Source, key.Masked, mutedSt.Render(lock))
 		if i == m.apiKeyCursor {
 			line = selectSt.Render("  " + line)
 		} else {
@@ -345,17 +378,48 @@ func (m model) renderKeyEntry(height int) string {
 	b.WriteString(mutedSt.Render("Stored in your OS keychain. Qubit never writes the raw key to .qubit files or runtime events."))
 	b.WriteString("\n\n")
 	b.WriteString(mutedSt.Render("Step: ") + stepName + "\n\n")
-	b.WriteString(renderKeyEntryLine("Provider", m.keyEntry.Provider.View(""), m.keyEntry.Step == keyEntryProvider, false))
+	b.WriteString(renderKeyProviderList(m.keyEntry))
 	b.WriteString("\n")
 	b.WriteString(renderKeyEntryLine("Alias", m.keyEntry.Alias.View(""), m.keyEntry.Step == keyEntryAlias, false))
 	b.WriteString("\n")
 	secretView := maskComposerView(m.keyEntry.Secret)
 	b.WriteString(renderKeyEntryLine("API key", secretView, m.keyEntry.Step == keyEntrySecret, true))
 	b.WriteString("\n\n")
-	b.WriteString(mutedSt.Render("enter next/save · ctrl+v paste · esc cancel"))
+	b.WriteString(mutedSt.Render("provider: ↑/↓ choose · enter next/save · ctrl+v paste · esc cancel"))
 
 	panel := lipgloss.NewStyle().Background(surface).Foreground(text).Padding(1, 2).Width(panelWidth).Render(b.String())
 	return lipgloss.Place(max(1, m.width-4), max(1, height), lipgloss.Center, lipgloss.Bottom, panel)
+}
+
+func renderKeyProviderList(entry *keyEntryState) string {
+	if entry == nil || len(entry.Providers) == 0 {
+		return renderKeyEntryLine("Provider", "", false, false)
+	}
+	var b strings.Builder
+	label := mutedSt.Render(fmt.Sprintf("%-10s", "Provider:"))
+	if entry.Step == keyEntryProvider {
+		label = accentSt().Render(fmt.Sprintf("%-10s", "Provider:"))
+	}
+	b.WriteString(label)
+	if entry.Step != keyEntryProvider {
+		b.WriteString(entry.Provider.View(""))
+		return b.String()
+	}
+	b.WriteString("\n")
+	for i, provider := range entry.Providers {
+		prefix := "  "
+		line := fmt.Sprintf("%s%-12s %s", prefix, provider.ID, provider.Description)
+		if i == entry.ProviderCursor {
+			line = selectSt.Render("  • " + fmt.Sprintf("%-12s %s", provider.ID, provider.Description))
+		} else {
+			line = mutedSt.Render("    ") + fmt.Sprintf("%-12s %s", provider.ID, provider.Description)
+		}
+		b.WriteString(line)
+		if i < len(entry.Providers)-1 {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }
 
 func setEntryWidths(entry *keyEntryState, width int) {
@@ -414,4 +478,25 @@ func (m *model) applyModelUpdated(ev runtimeEvent) {
 	if ev.Status != "" {
 		m.appendSystem(ev.Status)
 	}
+}
+
+func apiKeyProviderOptions() []apiKeyProviderOption {
+	return []apiKeyProviderOption{
+		{ID: "glm", Label: "GLM", Description: "Z.ai GLM models"},
+		{ID: "hyperrouter", Label: "Hyperrouter", Description: "OpenAI-compatible Hyperrouter gateway"},
+		{ID: "openai", Label: "OpenAI", Description: "OpenAI API"},
+		{ID: "bedrock", Label: "Amazon Bedrock", Description: "AWS Bedrock via Vercel AI SDK"},
+		{ID: "openrouter", Label: "OpenRouter", Description: "OpenRouter models and tools"},
+		{ID: "codex", Label: "Codex", Description: "ChatGPT Codex OAuth"},
+	}
+}
+
+func providerOptionIndex(options []apiKeyProviderOption, provider string) int {
+	provider = strings.TrimSpace(strings.ToLower(provider))
+	for i, option := range options {
+		if option.ID == provider {
+			return i
+		}
+	}
+	return 0
 }
