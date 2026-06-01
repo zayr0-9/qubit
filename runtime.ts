@@ -24,12 +24,21 @@ const storagePath = join(dataDir, "sessions.sqlite");
 const indexPath = join(dataDir, "session-index.json");
 const keyIndexPath = join(dataDir, "api-key-index.json");
 const defaultSessionId = process.env.QUBIT_SESSION_ID || "qubit-default";
-let model = process.env.GLM_MODEL || process.env.QUBIT_MODEL || "glm-4.6";
+let model = process.env.GLM_MODEL || process.env.QUBIT_MODEL || "glm-5.1";
 const glmModels = [
-  { id: "glm-4.6", name: "glm-4.6", description: "Default GLM coding/chat model" },
+  { id: "glm-5.1", name: "glm-5.1", description: "Latest flagship GLM model for coding and agentic engineering" },
+  { id: "glm-5", name: "glm-5", description: "GLM-5 foundation model for coding and long-range agent tasks" },
+  { id: "glm-5-turbo", name: "glm-5-turbo", description: "Tool-use and long-chain optimized GLM-5 model" },
+  { id: "glm-4.7", name: "glm-4.7", description: "GLM-4.7 coding, reasoning, and agent model" },
+  { id: "glm-4.7-flashx", name: "glm-4.7-flashx", description: "Fast GLM-4.7 variant" },
+  { id: "glm-4.7-flash", name: "glm-4.7-flash", description: "Lightweight GLM-4.7 flash variant" },
+  { id: "glm-4.6", name: "glm-4.6", description: "Previous flagship GLM coding/chat model" },
   { id: "glm-4.5", name: "glm-4.5", description: "Previous GLM generation" },
-  { id: "glm-4-air", name: "glm-4-air", description: "Faster GLM option" },
-  { id: "glm-4-flash", name: "glm-4-flash", description: "Lightweight GLM option" },
+  { id: "glm-4.5-x", name: "glm-4.5-x", description: "Higher-performance GLM-4.5 variant" },
+  { id: "glm-4.5-air", name: "glm-4.5-air", description: "Lower-cost GLM-4.5 Air model" },
+  { id: "glm-4.5-airx", name: "glm-4.5-airx", description: "Fast GLM-4.5 Air variant" },
+  { id: "glm-4.5-flash", name: "glm-4.5-flash", description: "Lightweight GLM-4.5 flash variant" },
+  { id: "glm-4-32b-0414-128k", name: "glm-4-32b-0414-128k", description: "32B GLM-4 model with 128K context" },
 ];
 const keychainService = process.env.QUBIT_KEYCHAIN_SERVICE || "Qubit";
 const envGLMAlias = "env:ZAI_API_KEY";
