@@ -3,33 +3,23 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
 func initialModel(rt *runtimeClient) model {
-	input := textarea.New()
-	input.Placeholder = "message qubit..."
-	input.CharLimit = 4000
-	input.Prompt = lipgloss.NewStyle().Foreground(accent).Render("› ")
-	input.ShowLineNumbers = false
-	input.EndOfBufferCharacter = ' '
-	input.DynamicHeight = true
-	input.MinHeight = 1
-	input.MaxHeight = 8
-	input.MaxContentHeight = 80
-	input.Focus()
+	composer := newComposer()
 
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(accent)))
 
 	return model{
 		viewport:   viewport.New(),
-		input:      input,
+		composer:   composer,
 		spinner:    spin,
 		messages:   []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
 		status:     "starting runtime",
@@ -62,12 +52,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSendDone(msg.err), nil
 	case terminalSetupResultMsg:
 		return m.updateTerminalSetupResult(terminalSetupResult(msg)), nil
+	case fakeStreamTickMsg:
+		return m.updateFakeStreamTick()
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		if m.busy {
 			return m, cmd
 		}
+		return m, nil
+	case tea.PasteMsg:
+		m.composer.InsertString(msg.Content)
+		m.layout()
+		return m, nil
+	case composerPasteMsg:
+		if msg.err != nil {
+			return m.updateRuntimeError(msg.err), nil
+		}
+		m.composer.InsertString(msg.text)
+		m.layout()
 		return m, nil
 	}
 
@@ -86,7 +89,18 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
-	case "ctrl+c", "esc":
+	case "ctrl+c":
+		if m.composer.HasSelection() {
+			m.status = "copied input"
+			return m, copyClipboardCmd(m.composer.SelectedText())
+		}
+		return m, tea.Quit
+	case "esc":
+		if m.composer.HasSelection() {
+			m.composer.ClearSelection()
+			m.layout()
+			return m, nil
+		}
 		return m, tea.Quit
 	case "up", "ctrl+p":
 		if m.showSlashPalette() {
@@ -107,53 +121,43 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.acceptSlashSelection()
 		}
 		return m.submitInput()
-	case "pgup", "ctrl+u":
+	case "pgup":
 		m.autoScroll = false
 		m.viewport.ScrollUp(max(1, m.viewport.Height()/2))
 		return m, nil
-	case "pgdown", "ctrl+d":
+	case "pgdown":
 		m.viewport.ScrollDown(max(1, m.viewport.Height()/2))
 		m.autoScroll = false
 		return m, nil
-	case "home":
-		m.autoScroll = false
-		m.viewport.GotoTop()
-		return m, nil
-	case "end":
-		m.autoScroll = true
-		m.viewport.GotoBottom()
-		return m, nil
 	}
 
-	return m.updateInputAndViewport(msg)
+	return m.updateComposerKey(msg)
 }
 
-func (m model) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	m.layout()
-	return m, cmd
+func (m model) updateComposerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	handled, cmd := m.composer.UpdateKey(msg)
+	if handled {
+		m.layout()
+		return m, cmd
+	}
+	return m, nil
 }
 
 func (m model) insertInputNewline() (tea.Model, tea.Cmd) {
-	m.input.InsertString("\n")
+	m.composer.InsertNewline()
 	m.layout()
 	return m, nil
 }
 
 func (m model) updateInputAndViewport(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	previousYOffset := m.viewport.YOffset()
-	m.input, cmd = m.input.Update(msg)
-	cmds = append(cmds, cmd)
 	m.viewport, cmd = m.viewport.Update(msg)
-	cmds = append(cmds, cmd)
 	if m.viewport.YOffset() != previousYOffset {
 		m.autoScroll = m.viewport.AtBottom()
 	}
 	m.layout()
-	return m, tea.Batch(cmds...)
+	return m, cmd
 }
 
 func isNewlineKey(msg tea.KeyPressMsg) bool {
@@ -168,12 +172,12 @@ func isNewlineKey(msg tea.KeyPressMsg) bool {
 }
 
 func (m model) submitInput() (tea.Model, tea.Cmd) {
-	input := strings.TrimSpace(normalizeInputNewlines(m.input.Value()))
+	input := strings.TrimSpace(normalizeInputNewlines(m.composer.Value()))
 	if input == "" || m.busy || !m.ready {
 		return m, nil
 	}
 
-	m.input.SetValue("")
+	m.composer.Reset()
 	m.layout()
 	m.err = ""
 	if strings.HasPrefix(input, "/") {
@@ -203,15 +207,22 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.status = "thinking"
 	case "assistant":
 		m.applyAssistantEvent(ev)
+		return m, tea.Batch(waitRuntimeEvent(m.runtime), fakeStreamTick())
 	case "run_finished":
-		m.busy = false
 		if ev.SessionID != "" {
 			m.session = ev.SessionID
 		}
-		if ev.Status != "" {
-			m.status = ev.Status
+		finishStatus := ev.Status
+		if finishStatus == "" {
+			finishStatus = "ready"
+		}
+		if m.streaming {
+			m.streamingFinished = true
+			m.streamingFinishStatus = finishStatus
+			m.status = "responding"
 		} else {
-			m.status = "ready"
+			m.busy = false
+			m.status = finishStatus
 		}
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}))
 	case "session.list":
@@ -219,6 +230,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	case "tool.permission.request":
 		m = m.openToolPermissionModal(ev)
 	case "session.created":
+		m.clearFakeStream()
 		m.autoScroll = true
 		m.busy = false
 		m.session = ev.SessionID
@@ -227,6 +239,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.status = "ready"
 		m.refreshViewport()
 	case "session.activated":
+		m.clearFakeStream()
 		m.autoScroll = true
 		m.busy = true
 		m.session = ev.SessionID
@@ -247,6 +260,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		}
 		m.appendSystem("Renamed current session to: " + m.title)
 	case "error":
+		m.clearFakeStream()
 		m.busy = false
 		m.err = ev.Error
 		m.status = "error"
@@ -257,19 +271,94 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) applyAssistantEvent(ev runtimeEvent) {
+	m.clearFakeStream()
 	content := strings.TrimSpace(ev.Content)
 	if content == "" {
 		content = "(empty response)"
 	}
-	m.messages = append(m.messages, chatMessage{Role: "assistant", Content: content})
+	m.messages = append(m.messages, chatMessage{Role: "assistant", Content: ""})
+	m.streaming = true
+	m.streamingMessageIndex = len(m.messages) - 1
+	m.streamingFullContent = content
+	m.streamingVisibleRunes = 0
+	m.streamingFinished = false
+	m.streamingFinishStatus = ""
 	if ev.SessionID != "" {
 		m.session = ev.SessionID
 	}
-	m.status = ev.Status
+	if ev.Status != "" {
+		m.status = ev.Status
+	} else {
+		m.status = "responding"
+	}
 	m.refreshViewport()
 }
 
+func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {
+	if !m.streaming {
+		return m, nil
+	}
+	if m.streamingMessageIndex < 0 || m.streamingMessageIndex >= len(m.messages) {
+		m.clearFakeStream()
+		m.busy = false
+		m.status = "ready"
+		return m, nil
+	}
+
+	fullContent := []rune(m.streamingFullContent)
+	m.streamingVisibleRunes = min(len(fullContent), m.streamingVisibleRunes+fakeStreamChunkSize(len(fullContent), m.streamingVisibleRunes))
+	m.messages[m.streamingMessageIndex].Content = string(fullContent[:m.streamingVisibleRunes])
+	m.refreshViewport()
+
+	if m.streamingVisibleRunes < len(fullContent) {
+		return m, fakeStreamTick()
+	}
+
+	finishStatus := m.streamingFinishStatus
+	finished := m.streamingFinished
+	m.clearFakeStream()
+	if finished {
+		m.busy = false
+		m.status = fallback(finishStatus, "ready")
+	} else {
+		m.status = "responding"
+	}
+	return m, nil
+}
+
+func (m *model) clearFakeStream() {
+	m.streaming = false
+	m.streamingMessageIndex = 0
+	m.streamingFullContent = ""
+	m.streamingVisibleRunes = 0
+	m.streamingFinished = false
+	m.streamingFinishStatus = ""
+}
+
+func fakeStreamTick() tea.Cmd {
+	return tea.Tick(18*time.Millisecond, func(time.Time) tea.Msg {
+		return fakeStreamTickMsg{}
+	})
+}
+
+func fakeStreamChunkSize(totalRunes int, visibleRunes int) int {
+	remaining := totalRunes - visibleRunes
+	if remaining <= 0 {
+		return 0
+	}
+	size := 3
+	if totalRunes > 2000 {
+		size = 24
+	} else if totalRunes > 800 {
+		size = 12
+	} else if totalRunes > 240 {
+		size = 6
+	}
+	return min(size, remaining)
+}
+
 func (m *model) applySessionList(ev runtimeEvent) {
+	wasStreaming := m.streaming
 	m.sessions = ev.Sessions
 	if ev.SessionID != "" {
 		m.session = ev.SessionID
@@ -279,8 +368,13 @@ func (m *model) applySessionList(ev runtimeEvent) {
 	} else {
 		m.title = m.currentSessionTitle()
 	}
-	m.status = "ready"
-	m.busy = false
+	if wasStreaming {
+		m.streaming = true
+		m.status = "responding"
+	} else {
+		m.status = "ready"
+		m.busy = false
+	}
 	m.ensureSessionCursor()
 }
 
@@ -288,6 +382,7 @@ func (m *model) applySessionMessages(ev runtimeEvent) {
 	if ev.SessionID != "" && ev.SessionID != m.session {
 		return
 	}
+	m.clearFakeStream()
 	if ev.SessionID != "" {
 		m.session = ev.SessionID
 	}
@@ -307,6 +402,7 @@ func (m *model) applySessionMessages(ev runtimeEvent) {
 }
 
 func (m model) updateRuntimeError(err error) model {
+	m.clearFakeStream()
 	m.busy = false
 	m.ready = false
 	m.err = err.Error()
@@ -324,6 +420,7 @@ func (m model) updateSendDone(err error) model {
 	if err == nil {
 		return m
 	}
+	m.clearFakeStream()
 	m.busy = false
 	m.err = err.Error()
 	m.status = "send failed"
@@ -348,7 +445,8 @@ func (m model) updateTerminalSetupResult(result terminalSetupResult) model {
 func (m *model) layout() {
 	chatW := max(20, m.width-4)
 	inputW := max(10, m.width-6)
-	m.input.SetWidth(inputW)
+	promptW := lipgloss.Width(m.inputPrompt())
+	m.composer.SetWidth(max(1, inputW-promptW))
 
 	input := m.renderInput()
 	footer := m.renderFooter()

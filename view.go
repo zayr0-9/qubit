@@ -90,13 +90,28 @@ func (m model) renderMainArea(height int) string {
 }
 
 func (m model) renderInput() string {
-	return inputStyle.Width(m.width).Height(m.input.Height()).Render(m.input.View())
+	view := m.composer.View(m.inputPrompt())
+	return inputStyle.Width(m.width).Height(m.composer.Height()).Render(view)
+}
+
+func (m model) inputPrompt() string {
+	if m.streaming {
+		return m.spinner.View() + " "
+	}
+	return idleInputPrompt()
+}
+
+func idleInputPrompt() string {
+	return lipgloss.NewStyle().Foreground(accent).Render("› ")
 }
 
 func (m model) renderFooter() string {
-	footer := "enter send · ctrl+j newline · shift+enter if supported · / commands · pgup/pgdn/ctrl+u/d scroll · end bottom · esc quit"
+	footer := "enter send · ctrl+a all · ctrl+c copy/quit · shift+arrows select · ctrl+j newline · pgup/pgdn scroll"
 	if m.keyboardEnhanced {
-		footer = "enter send · shift+enter/ctrl+j newline · / commands · pgup/pgdn/ctrl+u/d scroll · end bottom · esc quit"
+		footer = "enter send · shift+enter newline · shift+arrows select · ctrl+shift+←/→ words · ctrl+a all · ctrl+c copy/quit"
+	}
+	if m.composer.HasSelection() {
+		footer = "selection · ctrl+c copy · type replace · backspace/delete remove · esc clear"
 	}
 	if m.mode == modeModal {
 		footer = "←/→ choose action · enter confirm · esc deny/cancel"

@@ -115,12 +115,12 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 }
 
 func (m model) showSlashPalette() bool {
-	value := m.input.Value()
+	value := m.composer.Value()
 	return strings.HasPrefix(value, "/") && !strings.Contains(value, " ") && m.mode == modeChat && !m.busy && m.ready
 }
 
 func (m model) filteredSlashCommands() []slashCommand {
-	query := strings.ToLower(strings.TrimPrefix(m.input.Value(), "/"))
+	query := strings.ToLower(strings.TrimPrefix(m.composer.Value(), "/"))
 	var matches []slashCommand
 	for _, command := range slashCommands {
 		if query == "" || strings.Contains(command.Name, query) || strings.Contains(strings.ToLower(command.Description), query) {
@@ -149,12 +149,12 @@ func (m model) acceptSlashSelection() (tea.Model, tea.Cmd) {
 	}
 	command := matches[m.slashCursor]
 	if command.Name == "sessions" {
-		m.input.SetValue("")
+		m.composer.Reset()
 		return m.handleSlashCommand("/sessions")
 	}
 	value := "/" + command.Name + " "
-	m.input.SetValue(value)
-	m.input.MoveToEnd()
+	m.composer.SetValue(value)
+	m.composer.MoveToEnd(false)
 	return m, nil
 }
 

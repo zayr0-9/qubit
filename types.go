@@ -5,7 +5,6 @@ import (
 	"os/exec"
 
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 )
 
@@ -100,6 +99,7 @@ type runtimeMsg runtimeEvent
 type runtimeErrMsg struct{ err error }
 type sendDoneMsg struct{ err error }
 type terminalSetupResultMsg terminalSetupResult
+type fakeStreamTickMsg struct{}
 
 type runtimeClient struct {
 	cmd     *exec.Cmd
@@ -115,7 +115,7 @@ type model struct {
 	height int
 
 	viewport viewport.Model
-	input    textarea.Model
+	composer composerModel
 	spinner  spinner.Model
 
 	messages         []chatMessage
@@ -136,6 +136,13 @@ type model struct {
 	slashCursor   int
 	modal         *modalState
 	autoScroll    bool
+
+	streaming             bool
+	streamingMessageIndex int
+	streamingFullContent  string
+	streamingVisibleRunes int
+	streamingFinished     bool
+	streamingFinishStatus string
 
 	runtime *runtimeClient
 }

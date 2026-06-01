@@ -23,7 +23,7 @@ Qubit CLI
   Owns rendering, keyboard interaction, local UI state, slash command palette, and session picker.
 ```
 
-Current MVP scope is basic chat plus session UI, including transcript reload on session switch. Branch visualization, minimaps, archive/delete flows, and streaming can come later.
+Current MVP scope is basic chat plus session UI, including transcript reload on session switch and frontend-simulated assistant streaming. Branch visualization, minimaps, archive/delete flows, and true provider token streaming can come later.
 
 ## Important Paths
 
@@ -34,6 +34,7 @@ D:\qubit
   go.mod                    Go module config
   main.go                   CLI entrypoint
   app.go                    Bubble Tea app model/update logic
+  streaming.go              Frontend-simulated assistant streaming helpers, if/when split out
   view.go                   TUI rendering, including Glow/Glamour Markdown message rendering
   commands.go               Slash commands and session picker interactions
   runtime_client.go         Go <-> Node JSON-lines client
@@ -108,15 +109,17 @@ This is currently a small single-package Go application using `package main`. Ke
 ```txt
 main.go            process entrypoint only
 app.go             Bubble Tea model lifecycle and state transitions
-view.go            all render/view functions
-commands.go        slash commands and picker interactions
+view.go            top-level rendering composition and shared render helpers
+commands.go        slash commands and session picker interactions
+modal.go           reusable modal state/update/render helpers
+streaming.go       frontend-simulated assistant streaming helpers when streaming logic grows
 runtime_client.go  sidecar process/client code
 types.go           shared structs/types
 styles.go          UI styles/colors
 util.go            small generic helpers
 ```
 
-Add a new file only when it has a clear responsibility. Do not create tiny abstraction files without a reason.
+Keep the application maintainable as it grows. Split cohesive behavior into focused files or self-contained components when a feature has its own state/update/render rules, tests, or lifecycle. Do not keep adding unrelated logic to `app.go` or `view.go` until they become giant catch-all files. A new file is appropriate when it has a clear responsibility, reduces coupling, and makes the code easier to navigate; avoid tiny abstraction files that only add indirection.
 
 ### Go Style
 
@@ -131,12 +134,14 @@ Follow standard Go conventions:
 - Wrap errors with context using `fmt.Errorf("context: %w", err)` when returning them.
 - Avoid global mutable state unless it is configuration/style data.
 - Keep functions focused; if a function grows too large, extract behavior by responsibility.
+- Keep files focused; if a feature starts adding multiple helpers, tests, or state fields, consider a dedicated file/component instead of expanding an already-large file.
+- Prefer small composed helpers and self-contained UI components for modal/picker/streaming-style features.
 - Prefer table-driven tests when adding tests.
 
 ### Bubble Tea Standards
 
-- Keep `Update` as a dispatcher; move meaningful logic to helper methods.
-- Keep `View` as composition; move large sections to `renderX` helpers.
+- Keep `Update` as a dispatcher; move meaningful logic to helper methods or focused feature files.
+- Keep `View` as composition; move large sections to `renderX` helpers or component render functions.
 - Do not perform blocking work inside `Update` or `View`.
 - All side effects should happen through `tea.Cmd` where possible.
 - Maintain value semantics for the model unless pointer mutation is clearer for local helpers.
@@ -184,6 +189,7 @@ view.AltScreen = false
   - Enter activation
   - Esc close
 - Preserve normal terminal selection/copy behavior by keeping mouse capture disabled unless richer mouse interaction is explicitly requested.
+- Assistant responses may be frontend-simulated streamed: the runtime can send a complete `assistant` event, and the Go UI may progressively reveal it. Keep this fake streaming as terminal UX logic, not provider/runtime business logic, until true provider token streaming is explicitly added to the protocol.
 
 ### Node Runtime Standards
 
@@ -255,7 +261,7 @@ Prefer incremental changes in this order:
 3. Add `/clear` with clearly defined behavior.
 4. Add better error surfaces and `/logs`.
 5. Add session auto-title generation.
-6. Add real or simulated token streaming.
+6. Add true provider token streaming when the runtime/provider protocol supports it.
 7. Add normal terminal paste handling improvements if any terminal still flattens multiline paste before Bubble Tea receives it.
 8. Add keyboard-first branch/session minimap later.
 
@@ -267,11 +273,12 @@ When making changes:
 2. Keep changes scoped to the user request.
 3. Preserve the runtime/TUI/SDK separation.
 4. Prefer boring, maintainable code over clever abstractions.
-5. Do not introduce unrelated formatting churn.
-6. Do not mutate generated files, `.qubit` data, or `bin/qubit.exe` unless rebuilding is part of the task.
-7. Do not install dependencies unless clearly required.
-8. Run validation before claiming success.
-9. If an interactive TUI issue cannot be copied, inspect:
+5. Keep the app maintainable: create focused files/components for cohesive features when that improves navigation and prevents giant files.
+6. Do not introduce unrelated formatting churn.
+7. Do not mutate generated files, `.qubit` data, or `bin/qubit.exe` unless rebuilding is part of the task.
+8. Do not install dependencies unless clearly required.
+9. Run validation before claiming success.
+10. If an interactive TUI issue cannot be copied, inspect:
 
 ```powershell
 Get-Content D:\qubit\.qubit\runtime.log -Raw
