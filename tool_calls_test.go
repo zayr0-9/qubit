@@ -1,0 +1,217 @@
+package main
+
+import (
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+func TestToolCallEventsGroupSameTool(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "read files"}}
+
+	m.applyToolCallStart(runtimeEvent{Type: "tool.call.start", SessionID: "sess_1", Step: 1, ToolCallID: "call_a", ToolName: "readFile", Status: "running", Args: map[string]any{"path": "agent.md"}})
+	m.applyToolCallStart(runtimeEvent{Type: "tool.call.start", SessionID: "sess_1", Step: 1, ToolCallID: "call_b", ToolName: "readFile", Status: "running", Args: map[string]any{"path": "agent_tools.md"}})
+
+	if len(m.messages) != 2 {
+		t.Fatalf("message count = %d, want 2", len(m.messages))
+	}
+	group := m.messages[1].ToolGroup
+	if group == nil {
+		t.Fatal("tool group missing")
+	}
+	if len(group.Calls) != 2 {
+		t.Fatalf("tool call count = %d, want 2", len(group.Calls))
+	}
+	viewport := plainText(m.viewport.View())
+	if !strings.Contains(viewport, "Read 2 files") {
+		t.Fatalf("viewport = %q, want grouped read label", viewport)
+	}
+}
+
+func TestToolCallFinishUpdatesDetails(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "search"}}
+
+	m.applyToolCallStart(runtimeEvent{Type: "tool.call.start", SessionID: "sess_1", Step: 1, ToolCallID: "rg_1", ToolName: "ripgrep", Status: "running", Args: map[string]any{"pattern": "tool.call", "searchPath": "D:\\qubit"}})
+	m.applyToolCallFinish(runtimeEvent{Type: "tool.call.finish", SessionID: "sess_1", Step: 1, ToolCallID: "rg_1", ToolName: "ripgrep", Status: "completed", Result: map[string]any{"matchCount": float64(7)}, DurationMs: 12})
+
+	group := m.messages[1].ToolGroup
+	if got := group.status(); got != "completed" {
+		t.Fatalf("status = %q, want completed", got)
+	}
+	if !strings.Contains(plainText(m.viewport.View()), "7 matches") {
+		t.Fatalf("viewport = %q, want match count", m.viewport.View())
+	}
+}
+
+func TestToolCallFinishWithoutStartCreatesGroup(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "unknown"}}
+
+	m.applyToolCallFinish(runtimeEvent{Type: "tool.call.finish", SessionID: "sess_1", Step: 1, ToolCallID: "bad_1", ToolName: "missingTool", Status: "unknown_tool", Result: map[string]any{"error": "Unknown tool"}})
+
+	if len(m.messages) != 2 || m.messages[1].ToolGroup == nil {
+		t.Fatalf("messages = %#v, want tool group", m.messages)
+	}
+	if got := m.messages[1].ToolGroup.status(); got != "failed" {
+		t.Fatalf("group status = %q, want failed", got)
+	}
+}
+
+func TestToolGroupExpandedRenderingAndMouseToggle(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "read"}}
+	m.applyToolCallFinish(runtimeEvent{
+		Type:       "tool.call.finish",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "read_1",
+		ToolName:   "readFile",
+		Status:     "completed",
+		Args:       map[string]any{"path": "agent.md"},
+		Result:     map[string]any{"totalLines": float64(42), "contentPreview": "# Qubit Agent Guide"},
+	})
+
+	if len(m.toolHitboxes) == 0 {
+		t.Fatal("tool hitbox missing")
+	}
+	updated := m.updateMouseClick(tea.MouseClickMsg{X: 2, Y: m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset() - 1, Button: tea.MouseLeft}).(model)
+	if !updated.messages[1].ToolGroup.Expanded {
+		t.Fatal("tool group not expanded after click")
+	}
+	viewport := plainText(updated.viewport.View())
+	if !strings.Contains(viewport, "# Qubit Agent Guide") || !strings.Contains(viewport, "lines: 42") {
+		t.Fatalf("viewport = %q, want expanded details", viewport)
+	}
+}
+
+func TestApplySessionMessagesCanLoadPersistedToolGroups(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	loaded := []chatMessage{
+		{Role: "user", Content: "read it"},
+		{Role: "tool", ToolGroup: &toolGroup{ID: "stored-tool-1-readFile-0", Name: "readFile", Step: 1, Calls: []toolCallUI{{ID: "readFile-1-0", Name: "readFile", Step: 1, Status: "completed", Args: map[string]any{"path": "agent.md"}, Result: map[string]any{"totalLines": float64(42), "contentPreview": "# Qubit Agent Guide"}}}}},
+		{Role: "assistant", Content: "done"},
+	}
+	m.applySessionMessages(runtimeEvent{Type: "session.messages", SessionID: "sess_1", Messages: loaded})
+
+	if len(m.messages) != 3 || m.messages[1].ToolGroup == nil {
+		t.Fatalf("messages = %#v, want persisted tool group", m.messages)
+	}
+	viewport := plainText(m.viewport.View())
+	if !strings.Contains(viewport, "Read 1 file") || !strings.Contains(viewport, "done") {
+		t.Fatalf("viewport = %q, want loaded tool group and assistant", viewport)
+	}
+}
+
+func TestExpandedToolGroupHitboxOnlyCoversHeader(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "read"}}
+	m.applyToolCallFinish(runtimeEvent{
+		Type:       "tool.call.finish",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "read_1",
+		ToolName:   "readFile",
+		Status:     "completed",
+		Args:       map[string]any{"path": "agent.md"},
+		Result:     map[string]any{"totalLines": float64(42), "contentPreview": "# Qubit Agent Guide"},
+	})
+	m.messages[1].ToolGroup.Expanded = true
+	m.refreshViewport()
+
+	if len(m.toolHitboxes) != 1 {
+		t.Fatalf("hitboxes = %d, want 1", len(m.toolHitboxes))
+	}
+	if m.toolHitboxes[0].StartY != m.toolHitboxes[0].EndY {
+		t.Fatalf("hitbox = %#v, want single header row", m.toolHitboxes[0])
+	}
+
+	detailClickY := m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset()
+	updated := m.updateMouseClick(tea.MouseClickMsg{X: 4, Y: detailClickY, Button: tea.MouseLeft}).(model)
+	if !updated.messages[1].ToolGroup.Expanded {
+		t.Fatal("detail-row click collapsed group; want only header row clickable")
+	}
+}
+
+func TestToolGroupHidesDevDetailsByDefault(t *testing.T) {
+	t.Setenv("QUBIT_DEV_TOOL_DETAILS", "")
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "read"}}
+	m.applyToolCallFinish(runtimeEvent{
+		Type:       "tool.call.finish",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "read_1",
+		ToolName:   "readFile",
+		Status:     "completed",
+		Args:       map[string]any{"path": "agent.md"},
+		Result:     map[string]any{"totalLines": float64(42), "sizeBytes": float64(1234), "contentPreview": "# Qubit Agent Guide"},
+		DurationMs: 9,
+	})
+	m.messages[1].ToolGroup.Expanded = true
+	m.refreshViewport()
+
+	viewport := plainText(m.viewport.View())
+	if strings.Contains(viewport, "duration:") || strings.Contains(viewport, "size:") || strings.Contains(viewport, "9ms") {
+		t.Fatalf("viewport = %q, want duration/size hidden without dev flag", viewport)
+	}
+}
+
+func TestToolGroupShowsDevDetailsWithFlag(t *testing.T) {
+	t.Setenv("QUBIT_DEV_TOOL_DETAILS", "1")
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "read"}}
+	m.applyToolCallFinish(runtimeEvent{
+		Type:       "tool.call.finish",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "read_1",
+		ToolName:   "readFile",
+		Status:     "completed",
+		Args:       map[string]any{"path": "agent.md"},
+		Result:     map[string]any{"totalLines": float64(42), "sizeBytes": float64(1234), "contentPreview": "# Qubit Agent Guide"},
+		DurationMs: 9,
+	})
+	m.messages[1].ToolGroup.Expanded = true
+	m.refreshViewport()
+
+	viewport := plainText(m.viewport.View())
+	if !strings.Contains(viewport, "duration: 9ms") || !strings.Contains(viewport, "size: 1234 bytes") || !strings.Contains(viewport, "completed · 9ms") {
+		t.Fatalf("viewport = %q, want duration/size with dev flag", viewport)
+	}
+}

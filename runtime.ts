@@ -69,7 +69,7 @@ const hooks = {
       step: request.step,
       toolCallId: request.toolCallId,
       toolName: request.toolName,
-      args: request.args,
+      args: summarizeToolArgs(request.toolName, request.args),
       description: request.description,
       inputSchema: request.inputSchema,
       metadata: request.metadata,
@@ -77,6 +77,33 @@ const hooks = {
 
     return await new Promise((resolve) => {
       pendingPermissions.set(request.id, resolve);
+    });
+  },
+  async onToolCallStart(event) {
+    write({
+      type: "tool.call.start",
+      sessionId: event.sessionId,
+      step: event.step,
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      status: event.status,
+      args: summarizeToolArgs(event.toolName, event.args),
+      startedAt: event.startedAt,
+    });
+  },
+  async onToolCallFinish(event) {
+    write({
+      type: "tool.call.finish",
+      sessionId: event.sessionId,
+      step: event.step,
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      status: event.status,
+      args: summarizeToolArgs(event.toolName, event.args),
+      result: summarizeToolResult(event.toolName, event.result),
+      startedAt: event.startedAt,
+      finishedAt: event.finishedAt,
+      durationMs: event.durationMs,
     });
   },
 };
@@ -559,6 +586,97 @@ function redactSecrets(value) {
   return String(value || "").replace(/\b(?:sk|zai|key|token)[-_][A-Za-z0-9_.-]{8,}/gi, "[redacted]");
 }
 
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function compactObject(value, allowedKeys) {
+  const source = plainObject(value);
+  const compact = {};
+  for (const key of allowedKeys) {
+    if (source[key] !== undefined) compact[key] = source[key];
+  }
+  return compact;
+}
+
+function previewText(value, maxChars = 1200) {
+  if (value === undefined || value === null) return "";
+  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  const redacted = redactSecrets(text || "");
+  return redacted.length > maxChars ? `${redacted.slice(0, maxChars)}…` : redacted;
+}
+
+function resultPayload(result) {
+  if (!result || typeof result !== "object") return result;
+  if (result.data !== undefined) return result.data;
+  if (result.output !== undefined) return result.output;
+  return result;
+}
+
+function summarizeToolArgs(toolName, args) {
+  const source = plainObject(args);
+  switch (toolName) {
+    case "readFile":
+      return compactObject(source, ["path", "cwd", "maxBytes", "startLine", "endLine", "ranges", "includeHash"]);
+    case "readFileContinuation":
+      return compactObject(source, ["path", "cwd", "afterLine", "numLines", "maxBytes", "includeHash"]);
+    case "readFiles":
+      return compactObject(source, ["paths", "cwd", "baseDir", "maxBytes", "startLine", "endLine", "ranges"]);
+    case "glob":
+      return compactObject(source, ["pattern", "cwd", "ignore", "dot", "absolute", "nodir", "maxMatches"]);
+    case "ripgrep":
+      return compactObject(source, ["pattern", "searchPath", "cwd", "glob", "caseSensitive", "lineNumbers", "count", "filesWithMatches", "maxCount", "contextLines"]);
+    case "bash":
+    case "powershell":
+      return compactObject(source, ["command", "description", "cwd", "timeoutMs", "maxOutputChars"]);
+    case "createFile":
+      return { ...compactObject(source, ["path", "cwd", "createParentDirs", "overwrite", "executable", "operationMode"]), contentPreview: previewText(source.content, 600) };
+    case "editFile":
+      return { ...compactObject(source, ["path", "operation", "cwd", "approxStartLine", "approxEndLine", "createBackup", "operationMode", "validateContent"]), searchPreview: previewText(source.searchPattern, 400), replacementPreview: previewText(source.replacement, 400), contentPreview: previewText(source.content, 400) };
+    case "multiEdit":
+      return { ...compactObject(source, ["cwd", "stopOnError", "createBackup", "operationMode", "validateContent"]), edits: Array.isArray(source.edits) ? source.edits.map((edit) => compactObject(edit, ["path", "operation", "approxStartLine", "approxEndLine"])).slice(0, 20) : undefined };
+    case "deleteFile":
+      return compactObject(source, ["path", "cwd", "allowedExtensions", "operationMode"]);
+    case "todoMd":
+      return { ...compactObject(source, ["action", "name", "cwd", "search"]), contentPreview: previewText(source.content, 600), replacementPreview: previewText(source.replacement, 600) };
+    default:
+      return JSON.parse(JSON.stringify(source, (_key, value) => typeof value === "string" ? previewText(value, 1000) : value));
+  }
+}
+
+function summarizeToolResult(toolName, result) {
+  const base = plainObject(result);
+  const payload = resultPayload(result);
+  const data = plainObject(payload);
+  const summary = { ok: Boolean(base.ok), ...(base.error ? { error: previewText(base.error, 1200) } : {}) };
+
+  switch (toolName) {
+    case "readFile":
+    case "readFileContinuation":
+      return { ...summary, ...compactObject(data, ["truncated", "sizeBytes", "totalLines", "startLine", "endLine", "ranges", "metadata"]), contentPreview: previewText(data.content, 2400) };
+    case "readFiles":
+      return { ...summary, fileCount: Array.isArray(data.files) ? data.files.length : undefined, files: Array.isArray(data.files) ? data.files.slice(0, 20).map((file) => ({ filename: file.filename, totalLines: file.totalLines, contentPreview: previewText(file.content, 1200) })) : undefined };
+    case "glob":
+      return { ...summary, success: data.success, pattern: data.pattern, cwd: data.cwd, error: previewText(data.error, 1200), matchCount: Array.isArray(data.matches) ? data.matches.length : 0, matches: Array.isArray(data.matches) ? data.matches.slice(0, 30) : undefined };
+    case "ripgrep":
+      return { ...summary, success: data.success, searchPath: data.searchPath, command: data.command, error: previewText(data.error, 1200), matchCount: Array.isArray(data.matches) ? data.matches.length : 0, matches: Array.isArray(data.matches) ? data.matches.slice(0, 30) : undefined };
+    case "bash":
+    case "powershell":
+      return { ...summary, ...compactObject(data, ["success", "cwd", "exitCode", "timedOut", "durationMs", "command"]), stdoutPreview: previewText(data.stdout, 2400), stderrPreview: previewText(data.stderr, 1600), error: previewText(data.error || base.error, 1200) };
+    case "createFile":
+    case "deleteFile":
+      return { ...summary, ...compactObject(data, ["success", "created", "deleted", "sizeBytes", "path", "message"]) };
+    case "editFile":
+      return { ...summary, ...compactObject(data, ["success", "sizeBytes", "replacements", "message", "backup", "matchStrategy", "lineInfo"]) };
+    case "multiEdit":
+      return { ...summary, ...compactObject(data, ["success", "message", "applied", "failed", "stoppedEarly"]), results: Array.isArray(data.results) ? data.results.slice(0, 20).map((item) => compactObject(item, ["path", "operation", "success", "replacements", "message", "matchStrategy", "lineInfo"])) : undefined };
+    case "todoMd":
+      return { ...summary, ...compactObject(data, ["id", "created", "exists", "success", "message", "modifiedAt"]), contentPreview: previewText(data.content, 1600) };
+    default:
+      return { ...summary, payloadPreview: previewText(payload, 2400) };
+  }
+}
+
 function redactMessage(message) {
   if (!message || typeof message !== "object") return message;
   const clone = { ...message };
@@ -687,13 +805,131 @@ function writeSessionList(id) {
 
 async function loadSessionMessages(sessionId) {
   const messages = await storage.loadMessages(sessionId);
-  return messages
-    .filter((message) => message?.role === "user" || message?.role === "assistant")
-    .map((message) => ({
-      role: message.role,
-      content: typeof message.content === "string" ? message.content : String(message.content ?? ""),
-    }))
-    .filter((message) => message.content.trim() !== "");
+  return transcriptMessagesForUi(messages);
+}
+
+function transcriptMessagesForUi(messages) {
+  const toolResults = new Map();
+  for (const message of messages) {
+    if (message?.role !== "tool") continue;
+    const toolCallId = message.toolCallId || "";
+    if (!toolCallId) continue;
+    toolResults.set(toolCallId, message);
+  }
+
+  const uiMessages = [];
+  let reconstructedStep = 0;
+  const consumedToolResults = new Set();
+
+  for (const message of messages) {
+    if (!message || message.role === "system") continue;
+
+    if (message.role === "user") {
+      const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
+      if (content.trim()) uiMessages.push({ role: "user", content });
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
+      if (toolCalls.length > 0) {
+        reconstructedStep += 1;
+        uiMessages.push(...toolGroupsFromStoredToolCalls(toolCalls, toolResults, consumedToolResults, reconstructedStep));
+      }
+      const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
+      if (content.trim()) uiMessages.push({ role: "assistant", content });
+      continue;
+    }
+
+    if (message.role === "tool" && message.toolCallId && !consumedToolResults.has(message.toolCallId)) {
+      reconstructedStep += 1;
+      uiMessages.push(toolGroupMessageFromStoredToolResult(message, reconstructedStep));
+      consumedToolResults.add(message.toolCallId);
+    }
+  }
+
+  return uiMessages;
+}
+
+function toolGroupsFromStoredToolCalls(toolCalls, toolResults, consumedToolResults, step) {
+  const groups = [];
+  const byToolName = new Map();
+  for (const [index, toolCall] of toolCalls.entries()) {
+    const toolName = toolCall.toolName || toolCall.name || "tool";
+    let group = byToolName.get(toolName);
+    if (!group) {
+      group = {
+        id: `stored-tool-${step}-${toolName}-${groups.length}`,
+        name: toolName,
+        step,
+        calls: [],
+        expanded: false,
+      };
+      byToolName.set(toolName, group);
+      groups.push(group);
+    }
+
+    const toolCallId = toolCall.id || `${toolName}-${step}-${index}`;
+    const storedResult = toolResults.get(toolCallId);
+    if (storedResult) consumedToolResults.add(toolCallId);
+    const parsedResult = parseStoredToolResult(storedResult?.content);
+    group.calls.push({
+      id: toolCallId,
+      name: toolName,
+      step,
+      status: storedToolStatus(toolName, parsedResult),
+      args: summarizeToolArgs(toolName, toolCall.args),
+      result: summarizeToolResult(toolName, parsedResult ?? { ok: false, error: "Missing stored tool result" }),
+    });
+  }
+  return groups.map((group) => ({ role: "tool", content: "", toolGroup: group }));
+}
+
+function toolGroupMessageFromStoredToolResult(message, step) {
+  const toolName = message.name || "tool";
+  const parsedResult = parseStoredToolResult(message.content);
+  return {
+    role: "tool",
+    content: "",
+    toolGroup: {
+      id: `stored-tool-${step}-${toolName}-0`,
+      name: toolName,
+      step,
+      calls: [{
+        id: message.toolCallId || `${toolName}-${step}-0`,
+        name: toolName,
+        step,
+        status: storedToolStatus(toolName, parsedResult),
+        args: {},
+        result: summarizeToolResult(toolName, parsedResult ?? { ok: false, error: "Missing stored tool result" }),
+      }],
+      expanded: false,
+    },
+  };
+}
+
+function parseStoredToolResult(content) {
+  if (typeof content !== "string" || !content.trim()) return null;
+  try {
+    return JSON.parse(content);
+  } catch {
+    return { ok: false, error: content };
+  }
+}
+
+function storedToolStatus(toolName, parsedResult) {
+  if (!parsedResult) return "failed";
+  if (parsedResult.ok === false) {
+    const error = String(parsedResult.error || "").toLowerCase();
+    if (error.includes("permission denied")) return "denied";
+    if (error.includes("unknown tool")) return "unknown_tool";
+    return "failed";
+  }
+  const payload = resultPayload(parsedResult);
+  const data = plainObject(payload);
+  if ((toolName === "bash" || toolName === "powershell") && data.success === false) return "failed";
+  if (data.success === false) return "failed";
+  return "completed";
 }
 
 function createSessionId() {

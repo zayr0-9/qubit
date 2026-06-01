@@ -296,6 +296,25 @@ browseWeb
   Old Electron implementation should not be copied directly into Node sidecar.
 ```
 
+## Tool Call UI Lifecycle
+
+Qubit bridges Hyper Router tool lifecycle hooks into the JSON-lines protocol:
+
+```txt
+tool.call.start
+  Emitted after permission is allowed and immediately before a registered tool executes.
+  Includes sessionId, step, toolCallId, toolName, status=running, summarized args, and startedAt.
+
+tool.call.finish
+  Emitted when a tool reaches a terminal outcome.
+  Status can be completed, failed, denied, or unknown_tool.
+  Includes summarized args/result plus timing fields when available.
+```
+
+Runtime summary helpers must keep these events user-relevant and bounded. Do not send unbounded file contents, stdout/stderr, edit replacements, or raw tool payloads over stdout. Summaries should include paths, commands, counts, success/error messages, and capped previews with obvious secrets redacted.
+
+The Go UI groups tool calls by `(step, toolName)` and renders them as expandable tool rows in the chat transcript. Collapsed rows show compact summaries such as `Read 2 files` or `Searched 3 times · 12 matches`; clicking a row expands per-call details. `session.messages` reconstructs persisted tool groups from Hyper Router assistant `toolCalls` plus matching `role: "tool"` messages so session reloads preserve tool-call UI rows instead of dropping tool activity.
+
 ## Testing Expectations
 
 For runtime/tool source changes, run:

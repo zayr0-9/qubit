@@ -9,8 +9,9 @@ import (
 )
 
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string     `json:"role"`
+	Content   string     `json:"content"`
+	ToolGroup *toolGroup `json:"toolGroup,omitempty"`
 }
 
 type renderCacheKey struct {
@@ -134,6 +135,10 @@ type runtimeEvent struct {
 	ToolCallID       string         `json:"toolCallId,omitempty"`
 	ToolName         string         `json:"toolName,omitempty"`
 	Args             map[string]any `json:"args,omitempty"`
+	Result           map[string]any `json:"result,omitempty"`
+	StartedAt        string         `json:"startedAt,omitempty"`
+	FinishedAt       string         `json:"finishedAt,omitempty"`
+	DurationMs       int            `json:"durationMs,omitempty"`
 	Description      string         `json:"description,omitempty"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
 	InputSchema      map[string]any `json:"inputSchema,omitempty"`
@@ -190,6 +195,8 @@ type model struct {
 	modal         *modalState
 	keyEntry      *keyEntryState
 	autoScroll    bool
+	toolHitboxes  []toolHitbox
+	chatTopY      int
 
 	streaming             bool
 	streamingMessageIndex int

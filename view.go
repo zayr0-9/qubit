@@ -239,10 +239,26 @@ func (m model) renderSessionPicker() string {
 
 func (m *model) refreshViewport() {
 	previousYOffset := m.viewport.YOffset()
+	m.toolHitboxes = nil
 	var b strings.Builder
+	contentLine := 0
 	for i, message := range m.messages {
 		if i > 0 {
 			b.WriteString("\n\n")
+			contentLine += 2
+		}
+		if message.Role == "tool" {
+			startLine := contentLine
+			rendered := m.renderToolGroup(message.ToolGroup, max(20, m.viewport.Width()))
+			b.WriteString(rendered)
+			lineCount := renderedLineCount(rendered)
+			if message.ToolGroup != nil {
+				// Only the tool row header is clickable. Expanded detail rows often contain
+				// selectable text/previews and should not toggle the group accidentally.
+				m.toolHitboxes = append(m.toolHitboxes, toolHitbox{GroupID: message.ToolGroup.ID, StartY: startLine, EndY: startLine})
+			}
+			contentLine += lineCount
+			continue
 		}
 		switch message.Role {
 		case "user":
@@ -253,8 +269,11 @@ func (m *model) refreshViewport() {
 			b.WriteString(aiName.Render("Qubit"))
 		}
 		b.WriteString("\n")
+		contentLine++
 		cacheable := !(m.streaming && i == m.streamingMessageIndex)
-		b.WriteString(m.renderMessageContent(message, cacheable))
+		rendered := m.renderMessageContent(message, cacheable)
+		b.WriteString(rendered)
+		contentLine += renderedLineCount(rendered)
 	}
 	m.viewport.SetContent(b.String())
 	m.restoreViewportPosition(previousYOffset)

@@ -48,6 +48,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateKey(msg)
 	case tea.MouseWheelMsg:
 		return m.updateMouseWheel(msg), nil
+	case tea.MouseClickMsg:
+		return m.updateMouseClick(msg), nil
 	case runtimeMsg:
 		return m.updateRuntime(runtimeEvent(msg))
 	case runtimeErrMsg:
@@ -164,6 +166,22 @@ func (m model) updateMouseWheel(msg tea.MouseWheelMsg) tea.Model {
 	return m
 }
 
+func (m model) updateMouseClick(msg tea.MouseClickMsg) tea.Model {
+	mouse := msg.Mouse()
+	if mouse.Button != tea.MouseLeft || mouse.Y < m.chatTopY || mouse.Y >= m.chatTopY+m.viewport.Height() {
+		return m
+	}
+	contentY := m.viewport.YOffset() + mouse.Y - m.chatTopY + 1
+	for _, hitbox := range m.toolHitboxes {
+		if contentY >= hitbox.StartY && contentY <= hitbox.EndY {
+			m.autoScroll = false
+			m.toggleToolGroup(hitbox.GroupID)
+			return m
+		}
+	}
+	return m
+}
+
 func (m model) insertInputNewline() (tea.Model, tea.Cmd) {
 	m.composer.InsertNewline()
 	m.layout()
@@ -265,6 +283,10 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 			return m, sendRuntime(m.runtime, map[string]any{"type": "tool.permission.response", "id": ev.ID, "allow": true})
 		}
 		m = m.openToolPermissionModal(ev)
+	case "tool.call.start":
+		m.applyToolCallStart(ev)
+	case "tool.call.finish":
+		m.applyToolCallFinish(ev)
 	case "session.created":
 		m.clearFakeStream()
 		m.autoScroll = true
@@ -492,6 +514,7 @@ func (m *model) layout() {
 	bottomHeight := 1 + lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
 	mainHeight := max(1, m.height-bottomHeight)
 	bodyHeight := max(1, mainHeight-lipgloss.Height(header))
+	m.chatTopY = lipgloss.Height(header)
 	paletteHeight := 0
 	if m.showSlashPalette() {
 		paletteHeight = lipgloss.Height(m.renderSlashPalette())
