@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -49,6 +51,38 @@ func TestNormalizeInputNewlines(t *testing.T) {
 	want := "a\nb\nc\n"
 	if got := normalizeInputNewlines(input); got != want {
 		t.Fatalf("normalizeInputNewlines() = %q, want %q", got, want)
+	}
+}
+
+func TestSessionPickerEnterClearsOldMessagesWhileLoading(t *testing.T) {
+	m := initialModel(nil)
+	m.sessions = []sessionInfo{{ID: "sess_1", Title: "Empty old session"}}
+	m.messages = []chatMessage{{Role: "assistant", Content: "current conversation should disappear"}}
+	m.ready = true
+
+	updated, cmd := m.updateSessionPicker(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(model)
+
+	if cmd == nil {
+		t.Fatal("session picker enter returned nil command, want activate command")
+	}
+	if got.session != "sess_1" {
+		t.Fatalf("session = %q, want sess_1", got.session)
+	}
+	if got.title != "Empty old session" {
+		t.Fatalf("title = %q, want Empty old session", got.title)
+	}
+	if !got.busy {
+		t.Fatal("busy = false, want true while loading transcript")
+	}
+	if got.status != "loading transcript" {
+		t.Fatalf("status = %q, want loading transcript", got.status)
+	}
+	if len(got.messages) != 0 {
+		t.Fatalf("messages = %#v, want old visible chat cleared while loading", got.messages)
+	}
+	if strings.Contains(got.viewport.View(), "current conversation should disappear") {
+		t.Fatalf("viewport still contains previous conversation: %q", got.viewport.View())
 	}
 }
 
@@ -489,5 +523,280 @@ func TestTypingReplacesSelectedInput(t *testing.T) {
 	}
 	if got.composer.Value() != "x" {
 		t.Fatalf("input value = %q, want x", got.composer.Value())
+	}
+}
+
+func TestSlashSessionsOpensPickerAndRequestsList(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.sessions = []sessionInfo{{ID: "sess_1", Title: "Existing"}}
+
+	updated, cmd := m.handleSlashCommand("/sessions")
+	got := updated.(model)
+
+	if got.mode != modeSessionPicker {
+		t.Fatalf("mode = %v, want session picker", got.mode)
+	}
+	if !got.busy {
+		t.Fatal("busy = false, want true while loading sessions")
+	}
+	if got.status != "loading sessions" {
+		t.Fatalf("status = %q, want loading sessions", got.status)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.list", "")
+}
+
+func TestCreateNewSessionCommandAndCreatedEvent(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.composer.SetValue("/new Project chat")
+
+	updated, cmd := m.submitInput()
+	got := updated.(model)
+
+	if !got.busy {
+		t.Fatal("busy = false, want true while creating session")
+	}
+	if got.status != "creating session" {
+		t.Fatalf("status = %q, want creating session", got.status)
+	}
+	if got.composer.Value() != "" {
+		t.Fatalf("composer value = %q, want cleared after submit", got.composer.Value())
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.new", "")
+	if gotTitle := payload["title"]; gotTitle != "Project chat" {
+		t.Fatalf("session.new title = %#v, want Project chat", gotTitle)
+	}
+
+	updated, _ = got.updateRuntime(runtimeEvent{Type: "session.created", SessionID: "sess_new", SessionTitle: "Project chat"})
+	got = updated.(model)
+	if got.busy {
+		t.Fatal("busy = true, want false after session.created")
+	}
+	if got.session != "sess_new" {
+		t.Fatalf("session = %q, want sess_new", got.session)
+	}
+	if got.title != "Project chat" {
+		t.Fatalf("title = %q, want Project chat", got.title)
+	}
+	if got.status != "ready" {
+		t.Fatalf("status = %q, want ready", got.status)
+	}
+	if len(got.messages) != 1 || !strings.Contains(got.messages[0].Content, "Started new session") {
+		t.Fatalf("messages = %#v, want new session confirmation", got.messages)
+	}
+}
+
+func TestSessionPickerLoadsSelectedSessionTranscript(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.width = 80
+	m.height = 24
+	m.layout()
+	m.mode = modeSessionPicker
+	m.session = "current"
+	m.title = "Current"
+	m.messages = []chatMessage{{Role: "assistant", Content: "current conversation should disappear"}}
+	m.sessions = []sessionInfo{
+		{ID: "current", Title: "Current"},
+		{ID: "sess_old", Title: "Older session", MessageCount: 2},
+	}
+	m.sessionCursor = 1
+	m.refreshViewport()
+
+	updated, cmd := m.updateSessionPicker(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(model)
+
+	if got.mode != modeChat {
+		t.Fatalf("mode = %v, want chat", got.mode)
+	}
+	if got.session != "sess_old" {
+		t.Fatalf("session = %q, want sess_old", got.session)
+	}
+	if got.title != "Older session" {
+		t.Fatalf("title = %q, want Older session", got.title)
+	}
+	if !got.busy {
+		t.Fatal("busy = false, want true while switching/loading")
+	}
+	if got.status != "loading transcript" {
+		t.Fatalf("status = %q, want loading transcript", got.status)
+	}
+	if len(got.messages) != 0 {
+		t.Fatalf("messages = %#v, want cleared while transcript loads", got.messages)
+	}
+	if strings.Contains(got.viewport.View(), "current conversation should disappear") {
+		t.Fatalf("viewport still contains previous conversation: %q", got.viewport.View())
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.activate", "sess_old")
+
+	updated, cmd = got.updateRuntime(runtimeEvent{Type: "session.activated", SessionID: "sess_old", SessionTitle: "Older session"})
+	got = updated.(model)
+	transcriptPayload := runBatchSendCommand(t, cmd, stdin, "session.messages")
+	assertPayload(t, transcriptPayload, "session.messages", "sess_old")
+
+	loaded := []chatMessage{{Role: "user", Content: "old question"}, {Role: "assistant", Content: "old answer"}}
+	got.applySessionMessages(runtimeEvent{Type: "session.messages", SessionID: "sess_old", SessionTitle: "Older session", Messages: loaded})
+
+	if got.busy {
+		t.Fatal("busy = true, want false after transcript load")
+	}
+	if got.status != "ready" {
+		t.Fatalf("status = %q, want ready", got.status)
+	}
+	if len(got.messages) != len(loaded) {
+		t.Fatalf("message count = %d, want %d", len(got.messages), len(loaded))
+	}
+	if got.messages[0] != loaded[0] || got.messages[1] != loaded[1] {
+		t.Fatalf("messages = %#v, want loaded transcript %#v", got.messages, loaded)
+	}
+	viewport := got.viewport.View()
+	if !strings.Contains(plainText(viewport), "old question") || !strings.Contains(plainText(viewport), "old answer") {
+		t.Fatalf("viewport = %q, want loaded transcript content", viewport)
+	}
+	if strings.Contains(plainText(viewport), "current conversation should disappear") {
+		t.Fatalf("viewport still contains previous conversation after load: %q", viewport)
+	}
+}
+
+func TestReadyRequestsSessionList(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+
+	updated, cmd := m.updateRuntime(runtimeEvent{Type: "ready", SessionID: "sess_1", SessionTitle: "First", Provider: "stub", Model: "test-model"})
+	got := updated.(model)
+
+	if !got.ready {
+		t.Fatal("ready = false, want true")
+	}
+	if got.session != "sess_1" {
+		t.Fatalf("session = %q, want sess_1", got.session)
+	}
+	if got.title != "First" {
+		t.Fatalf("title = %q, want First", got.title)
+	}
+	payload := runBatchSendCommand(t, cmd, stdin, "session.list")
+	assertPayload(t, payload, "session.list", "")
+}
+
+func newTestRuntime(t *testing.T) (*runtimeClient, *recordingWriteCloser) {
+	t.Helper()
+	stdin := &recordingWriteCloser{}
+	return &runtimeClient{stdin: stdin, events: make(chan runtimeEvent, 8), errs: make(chan error, 1)}, stdin
+}
+
+type recordingWriteCloser struct {
+	strings.Builder
+}
+
+func (w *recordingWriteCloser) Close() error { return nil }
+
+func (w *recordingWriteCloser) lastPayload(t *testing.T) map[string]any {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(w.String()), "\n")
+	if len(lines) == 0 || lines[len(lines)-1] == "" {
+		t.Fatal("runtime stdin received no payloads")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &payload); err != nil {
+		t.Fatalf("decode runtime payload %q: %v", lines[len(lines)-1], err)
+	}
+	return payload
+}
+
+func runSendCommand(t *testing.T, cmd tea.Cmd, stdin *recordingWriteCloser) map[string]any {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("command is nil")
+	}
+	msg := cmd()
+	assertSendDone(t, msg)
+	return stdin.lastPayload(t)
+}
+
+func runBatchSendCommand(t *testing.T, cmd tea.Cmd, stdin *recordingWriteCloser, wantType string) map[string]any {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("command is nil")
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		assertSendDone(t, msg)
+		payload := stdin.lastPayload(t)
+		if payload["type"] != wantType {
+			t.Fatalf("payload type = %#v, want %q; payload=%#v", payload["type"], wantType, payload)
+		}
+		return payload
+	}
+
+	results := make(chan tea.Msg, len(batch))
+	for _, child := range batch {
+		if child == nil {
+			continue
+		}
+		go func(child tea.Cmd) {
+			results <- child()
+		}(child)
+	}
+
+	deadline := time.After(250 * time.Millisecond)
+	for range batch {
+		select {
+		case childMsg := <-results:
+			if _, ok := childMsg.(sendDoneMsg); !ok {
+				continue
+			}
+			assertSendDone(t, childMsg)
+			payload := stdin.lastPayload(t)
+			if payload["type"] == wantType {
+				return payload
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for runtime payload type %q in batch", wantType)
+		}
+	}
+	t.Fatalf("batch did not include runtime payload type %q", wantType)
+	return nil
+}
+
+func assertSendDone(t *testing.T, msg tea.Msg) {
+	t.Helper()
+	done, ok := msg.(sendDoneMsg)
+	if !ok {
+		t.Fatalf("message = %T, want sendDoneMsg", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("sendDoneMsg error = %v", done.err)
+	}
+}
+
+func plainText(s string) string {
+	replacer := strings.NewReplacer(
+		"\x1b[0m", "",
+		"\x1b[m", "",
+		"\x1b[1;38;2;242;166;90m", "",
+		"\x1b[1;38;2;139;211;221m", "",
+		"\x1b[38;5;252m", "",
+	)
+	return replacer.Replace(s)
+}
+
+func assertPayload(t *testing.T, payload map[string]any, wantType string, wantSessionID string) {
+	t.Helper()
+	if payload["type"] != wantType {
+		t.Fatalf("payload type = %#v, want %q; payload=%#v", payload["type"], wantType, payload)
+	}
+	if wantSessionID != "" && payload["sessionId"] != wantSessionID {
+		t.Fatalf("payload sessionId = %#v, want %q; payload=%#v", payload["sessionId"], wantSessionID, payload)
+	}
+	if payload["id"] == "" {
+		t.Fatalf("payload missing generated id: %#v", payload)
 	}
 }

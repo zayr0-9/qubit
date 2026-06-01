@@ -36,29 +36,40 @@ func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeChat
 			return m, nil
 		}
-		m.ensureSessionCursor()
+		m.ensureSessionCursorInBounds()
 		session := m.sessions[m.sessionCursor]
 		m.mode = modeChat
+		m.clearFakeStream()
+		m.autoScroll = true
 		m.busy = true
-		m.status = "switching session"
+		m.session = session.ID
+		m.title = session.Title
+		m.messages = nil
+		m.status = "loading transcript"
+		m.layout()
+		m.refreshViewport()
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.activate", "sessionId": session.ID})
 	}
 	return m, nil
 }
 
 func (m *model) ensureSessionCursor() {
+	m.ensureSessionCursorInBounds()
+	for i, session := range m.sessions {
+		if session.ID == m.session {
+			m.sessionCursor = i
+			return
+		}
+	}
+}
+
+func (m *model) ensureSessionCursorInBounds() {
 	if len(m.sessions) == 0 {
 		m.sessionCursor = 0
 		return
 	}
 	if m.sessionCursor < 0 || m.sessionCursor >= len(m.sessions) {
 		m.sessionCursor = 0
-	}
-	for i, session := range m.sessions {
-		if session.ID == m.session {
-			m.sessionCursor = i
-			return
-		}
 	}
 }
 
