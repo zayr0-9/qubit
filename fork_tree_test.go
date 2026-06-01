@@ -27,7 +27,7 @@ func TestTreeCommandOpensForkTreeAndRequestsSessionTree(t *testing.T) {
 		t.Fatalf("status = %q, want loading fork tree", got.status)
 	}
 	payload := runSendCommand(t, cmd, stdin)
-	assertPayload(t, payload, "session.tree", "")
+	assertPayload(t, payload, "session.tree", "sess_root")
 }
 
 func TestApplyForkTreeSelectsCurrentSessionAndRendersPreview(t *testing.T) {

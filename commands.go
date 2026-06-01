@@ -121,7 +121,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.forkTree = newForkTreeState()
 		m.busy = true
 		m.status = "loading fork tree"
-		return m, sendRuntime(m.runtime, map[string]any{"type": "session.tree"})
+		return m, sendRuntime(m.runtime, map[string]any{"type": "session.tree", "sessionId": m.session})
 	case "sessions", "session", "ls":
 		m.mode = modeSessionPicker
 		m.ensureSessionCursor()

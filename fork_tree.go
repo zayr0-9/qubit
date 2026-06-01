@@ -288,7 +288,7 @@ func (m model) renderForkTreeModal(height int) string {
 	preview := previewTitle + "\n" + m.forkTree.Preview.View()
 	preview = renderFixedHeight(preview, height)
 
-	treeTitle := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("fork tree") + "  " + mutedSt.Render("text messages only")
+	treeTitle := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("fork tree") + "  " + mutedSt.Render("current lineage · text messages only")
 	tree := treeTitle + "\n" + m.renderForkTreeCanvas(treeWidth, paneHeight)
 	tree = renderFixedHeight(tree, height)
 

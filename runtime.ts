@@ -365,12 +365,15 @@ async function handleLine(line) {
   }
 
   if (request.type === "session.tree") {
-    const nodes = await buildSessionTreeNodes();
+    const requestedSessionId = String(request.sessionId || activeSessionId || "");
+    const focalSession = sessionIndex.sessions.find((session) => session.id === requestedSessionId) || activeSession();
+    const focalSessionId = focalSession?.id || activeSessionId;
+    const nodes = await buildSessionTreeNodes(focalSessionId);
     write({
       type: "session.tree",
       id: request.id,
-      sessionId: activeSessionId,
-      sessionTitle: activeSession()?.title,
+      sessionId: focalSessionId,
+      sessionTitle: focalSession?.title,
       nodes,
     });
     return;
@@ -1358,10 +1361,11 @@ async function loadSessionMessages(sessionId) {
   return transcriptMessagesForUi(messages);
 }
 
-async function buildSessionTreeNodes() {
+async function buildSessionTreeNodes(focalSessionId = activeSessionId) {
   const previewCache = new Map();
   const nodes = [];
-  for (const session of sessionIndex.sessions) {
+  const sessions = relatedForkSessions(sessionIndex.sessions, focalSessionId);
+  for (const session of sessions) {
     const node = {
       id: session.id,
       sessionId: session.id,
@@ -1389,6 +1393,46 @@ async function buildSessionTreeNodes() {
     nodes.push(node);
   }
   return nodes;
+}
+
+function relatedForkSessions(sessions, focalSessionId = activeSessionId) {
+  if (!Array.isArray(sessions) || sessions.length === 0) return [];
+
+  const idToSession = new Map();
+  for (const session of sessions) {
+    if (session && typeof session.id === "string" && session.id) {
+      idToSession.set(session.id, session);
+    }
+  }
+  if (idToSession.size === 0) return [];
+
+  let startId = typeof focalSessionId === "string" ? focalSessionId : "";
+  if (!idToSession.has(startId)) {
+    startId = idToSession.has(activeSessionId) ? activeSessionId : sessions.find((session) => idToSession.has(session?.id))?.id;
+  }
+  if (!startId || !idToSession.has(startId)) return [];
+
+  const adjacency = new Map();
+  for (const id of idToSession.keys()) adjacency.set(id, new Set());
+  for (const session of idToSession.values()) {
+    const parentId = typeof session.forkedFromSessionId === "string" ? session.forkedFromSessionId : "";
+    if (!parentId || !idToSession.has(parentId) || parentId === session.id) continue;
+    adjacency.get(session.id).add(parentId);
+    adjacency.get(parentId).add(session.id);
+  }
+
+  const visited = new Set();
+  const queue = [startId];
+  while (queue.length > 0) {
+    const id = queue.shift();
+    if (!id || visited.has(id)) continue;
+    visited.add(id);
+    for (const nextId of adjacency.get(id) || []) {
+      if (!visited.has(nextId)) queue.push(nextId);
+    }
+  }
+
+  return sessions.filter((session) => visited.has(session?.id));
 }
 
 async function textPreviewForFork(sessionId, rawForkIndex, cache) {
