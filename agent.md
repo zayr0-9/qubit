@@ -25,6 +25,21 @@ Qubit CLI
 
 Current MVP scope is basic chat plus session UI, including transcript reload on session switch and frontend-simulated assistant streaming. Branch visualization, minimaps, archive/delete flows, and true provider token streaming can come later.
 
+## Extra Context Files
+
+Some focused project guidance lives in separate context files using the naming scheme `agent_<category>.md`.
+
+Agents must read the relevant category context file before planning or changing that area, in addition to this guide. If a task spans multiple categories, read every relevant `agent_<category>.md` file first.
+
+Agents must also update the relevant category context files when a change affects standards, architecture, workflows, file locations, tool behavior, testing expectations, or other durable guidance for that category.
+
+```txt
+agent_tools.md
+  Mandatory when working on model-callable tools, tool registration, runtime tool permissions, or shared filesystem/path infrastructure.
+```
+
+When adding a new major subsystem or extracting detailed guidance from this file, create a focused `agent_<category>.md` context file and list it here with when it is mandatory to read.
+
 ## Important Paths
 
 ```txt

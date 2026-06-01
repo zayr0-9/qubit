@@ -19,6 +19,10 @@ func startRuntime() (*runtimeClient, error) {
 	if err != nil {
 		return nil, err
 	}
+	launchCwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("get launch cwd: %w", err)
+	}
 	appRoot, err := findAppRoot()
 	if err != nil {
 		return nil, err
@@ -33,7 +37,7 @@ func startRuntime() (*runtimeClient, error) {
 	}
 	cmd := exec.Command(node, runtimePath)
 	cmd.Dir = appRoot
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), "QUBIT_WORKSPACE_CWD="+launchCwd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -48,7 +52,7 @@ func startRuntime() (*runtimeClient, error) {
 		return nil, err
 	}
 
-	rt := &runtimeClient{cmd: cmd, stdin: stdin, events: make(chan runtimeEvent, 32), errs: make(chan error, 4), appRoot: appRoot, logPath: logPath}
+	rt := &runtimeClient{cmd: cmd, stdin: stdin, events: make(chan runtimeEvent, 32), errs: make(chan error, 4), appRoot: appRoot, launchCwd: launchCwd, logPath: logPath}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

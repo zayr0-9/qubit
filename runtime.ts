@@ -13,6 +13,8 @@ import {
 } from "@hyper-labs/hyper-router";
 import { SqliteStorage } from "@hyper-labs/hyper-router/storage/sqlite";
 import { GLMProvider } from "@hyper-labs/hyper-router/providers/glm";
+import { qubitTools } from "./tools/index.js";
+import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
 
 const require = createRequire(import.meta.url);
 const entryDir = dirname(fileURLToPath(import.meta.url));
@@ -25,6 +27,8 @@ const defaultSessionId = process.env.QUBIT_SESSION_ID || "qubit-default";
 const model = process.env.GLM_MODEL || process.env.QUBIT_MODEL || "glm-4.6";
 const keychainService = process.env.QUBIT_KEYCHAIN_SERVICE || "Qubit";
 const envGLMAlias = "env:ZAI_API_KEY";
+const initialWorkspaceCwd = process.env.QUBIT_WORKSPACE_CWD || process.cwd();
+setDefaultToolCwd(initialWorkspaceCwd);
 
 if (process.argv.includes("--check")) {
   console.log("runtime check ok");
@@ -47,6 +51,7 @@ const agent = defineAgent({
   instructions:
     "You are Qubit, a concise terminal coding assistant MVP. Be helpful, direct, and practical. Keep answers brief unless the user asks for detail.",
   model,
+  tools: qubitTools,
 });
 
 const storage = new SqliteStorage({
@@ -95,6 +100,7 @@ write({
   model,
   storagePath,
   indexPath,
+  workspaceCwd: getDefaultToolCwd(),
 });
 
 const rl = readline.createInterface({
@@ -252,6 +258,7 @@ async function handleLine(line) {
       sessionId: runSessionId,
       input: request.input,
       maxSteps: 4,
+      metadata: { workspaceCwd: getDefaultToolCwd() },
     });
 
     const assistant = [...result.messages].reverse().find((message) => message.role === "assistant");

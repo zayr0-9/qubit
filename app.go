@@ -216,6 +216,9 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		}
 		m.activeKeyAlias = ev.ActiveKeyAlias
 		m.model = ev.Model
+		if ev.WorkspaceCwd != "" {
+			m.runtime.launchCwd = ev.WorkspaceCwd
+		}
 		m.session = ev.SessionID
 		m.title = ev.SessionTitle
 		m.status = "ready"

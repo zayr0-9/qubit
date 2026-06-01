@@ -119,6 +119,7 @@ type runtimeEvent struct {
 	Keys             []apiKeyInfo   `json:"keys,omitempty"`
 	StoragePath      string         `json:"storagePath,omitempty"`
 	IndexPath        string         `json:"indexPath,omitempty"`
+	WorkspaceCwd     string         `json:"workspaceCwd,omitempty"`
 	Status           string         `json:"status,omitempty"`
 	Content          string         `json:"content,omitempty"`
 	ReasoningContent string         `json:"reasoningContent,omitempty"`
@@ -139,12 +140,13 @@ type terminalSetupResultMsg terminalSetupResult
 type fakeStreamTickMsg struct{}
 
 type runtimeClient struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	events  chan runtimeEvent
-	errs    chan error
-	appRoot string
-	logPath string
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	events    chan runtimeEvent
+	errs      chan error
+	appRoot   string
+	launchCwd string
+	logPath   string
 }
 
 type model struct {
