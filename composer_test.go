@@ -79,3 +79,26 @@ func TestComposerHeightRespectsMax(t *testing.T) {
 		t.Fatalf("view lines = %d, want 3", lines)
 	}
 }
+
+func TestComposerPromptOnlyAppearsOnFirstVisibleLine(t *testing.T) {
+	c := newComposer()
+	c.SetWidth(4)
+	c.SetValue("abcdefgh")
+
+	view := c.View("› ")
+	lines := strings.Split(view, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("view line count = %d, want at least 2", len(lines))
+	}
+	if !strings.HasPrefix(lines[0], "› ") {
+		t.Fatalf("first line = %q, want prompt prefix", lines[0])
+	}
+	for i, line := range lines[1:] {
+		if strings.HasPrefix(line, "› ") {
+			t.Fatalf("line %d has duplicate prompt: %q", i+2, line)
+		}
+		if !strings.HasPrefix(line, "  ") {
+			t.Fatalf("line %d = %q, want prompt-width indentation", i+2, line)
+		}
+	}
+}

@@ -18,13 +18,14 @@ func initialModel(rt *runtimeClient) model {
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(accent)))
 
 	return model{
-		viewport:   viewport.New(),
-		composer:   composer,
-		spinner:    spin,
-		messages:   []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
-		status:     "starting runtime",
-		autoScroll: true,
-		runtime:    rt,
+		viewport:    viewport.New(),
+		composer:    composer,
+		spinner:     spin,
+		renderCache: make(map[renderCacheKey]string),
+		messages:    []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
+		status:      "starting runtime",
+		autoScroll:  true,
+		runtime:     rt,
 	}
 }
 
@@ -44,6 +45,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.updateKey(msg)
+	case tea.MouseWheelMsg:
+		return m.updateMouseWheel(msg), nil
 	case runtimeMsg:
 		return m.updateRuntime(runtimeEvent(msg))
 	case runtimeErrMsg:
@@ -123,11 +126,11 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.submitInput()
 	case "pgup":
 		m.autoScroll = false
-		m.viewport.ScrollUp(max(1, m.viewport.Height()/2))
+		m.viewport.PageUp()
 		return m, nil
 	case "pgdown":
-		m.viewport.ScrollDown(max(1, m.viewport.Height()/2))
-		m.autoScroll = false
+		m.viewport.PageDown()
+		m.autoScroll = m.viewport.AtBottom()
 		return m, nil
 	}
 
@@ -143,6 +146,18 @@ func (m model) updateComposerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) updateMouseWheel(msg tea.MouseWheelMsg) tea.Model {
+	switch msg.Mouse().Button {
+	case tea.MouseWheelUp:
+		m.autoScroll = false
+		m.viewport.ScrollUp(max(1, m.viewport.MouseWheelDelta))
+	case tea.MouseWheelDown:
+		m.viewport.ScrollDown(max(1, m.viewport.MouseWheelDelta))
+		m.autoScroll = m.viewport.AtBottom()
+	}
+	return m
+}
+
 func (m model) insertInputNewline() (tea.Model, tea.Cmd) {
 	m.composer.InsertNewline()
 	m.layout()
@@ -156,7 +171,6 @@ func (m model) updateInputAndViewport(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.viewport.YOffset() != previousYOffset {
 		m.autoScroll = m.viewport.AtBottom()
 	}
-	m.layout()
 	return m, cmd
 }
 
@@ -398,6 +412,7 @@ func (m *model) applySessionMessages(ev runtimeEvent) {
 	} else {
 		m.messages = ev.Messages
 	}
+	m.layout()
 	m.refreshViewport()
 }
 
@@ -459,11 +474,15 @@ func (m *model) layout() {
 		paletteHeight = lipgloss.Height(m.renderSlashPalette())
 	}
 
+	previousYOffset := m.viewport.YOffset()
+	previousWidth := m.viewport.Width()
 	m.viewport.SetWidth(chatW)
 	m.viewport.SetHeight(max(1, bodyHeight-paletteHeight))
-	if m.autoScroll {
+	if previousWidth != chatW {
 		m.refreshViewport()
+		return
 	}
+	m.restoreViewportPosition(previousYOffset)
 }
 
 func (m *model) appendSystem(content string) {

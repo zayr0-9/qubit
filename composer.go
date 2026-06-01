@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	"github.com/mattn/go-runewidth"
 )
@@ -463,12 +464,23 @@ func (c composerModel) View(prompt string) string {
 		visible = []composerLine{{startIndex: 0, endIndex: 0}}
 	}
 
+	promptWidth := lipgloss.Width(prompt)
+	continuationPrompt := strings.Repeat(" ", promptWidth)
+
 	var out []string
-	for _, line := range visible {
-		out = append(out, prompt+c.renderLine(line))
+	for i, line := range visible {
+		linePrompt := continuationPrompt
+		if i == 0 {
+			linePrompt = prompt
+		}
+		out = append(out, linePrompt+c.renderLine(line))
 	}
 	for len(out) < height {
-		out = append(out, prompt)
+		linePrompt := continuationPrompt
+		if len(out) == 0 {
+			linePrompt = prompt
+		}
+		out = append(out, linePrompt)
 	}
 	return strings.Join(out, "\n")
 }

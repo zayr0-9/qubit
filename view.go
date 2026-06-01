@@ -35,7 +35,7 @@ func (m model) View() tea.View {
 func newAppView(content string) tea.View {
 	view := tea.NewView(content)
 	view.AltScreen = true
-	view.MouseMode = tea.MouseModeNone
+	view.MouseMode = tea.MouseModeCellMotion
 	view.KeyboardEnhancements.ReportEventTypes = true
 	return view
 }
@@ -215,6 +215,7 @@ func (m model) renderSessionPicker() string {
 }
 
 func (m *model) refreshViewport() {
+	previousYOffset := m.viewport.YOffset()
 	var b strings.Builder
 	for i, message := range m.messages {
 		if i > 0 {
@@ -229,25 +230,45 @@ func (m *model) refreshViewport() {
 			b.WriteString(aiName.Render("Qubit"))
 		}
 		b.WriteString("\n")
-		b.WriteString(m.renderMessageContent(message))
+		cacheable := !(m.streaming && i == m.streamingMessageIndex)
+		b.WriteString(m.renderMessageContent(message, cacheable))
 	}
 	m.viewport.SetContent(b.String())
-	if m.autoScroll {
-		m.viewport.GotoBottom()
-	}
+	m.restoreViewportPosition(previousYOffset)
 }
 
-func (m model) renderMessageContent(message chatMessage) string {
+func (m *model) restoreViewportPosition(yOffset int) {
+	if m.autoScroll {
+		m.viewport.GotoBottom()
+		return
+	}
+	m.viewport.SetYOffset(clampInt(yOffset, 0, max(0, m.viewport.TotalLineCount()-m.viewport.Height())))
+}
+
+func (m *model) renderMessageContent(message chatMessage, cacheable bool) string {
 	width := max(20, m.viewport.Width())
-	if message.Role == "error" {
-		return wrap(message.Content, width)
+	key := renderCacheKey{Role: message.Role, Content: message.Content, Width: width}
+	if cacheable && m.renderCache != nil {
+		if cached, ok := m.renderCache[key]; ok {
+			return cached
+		}
 	}
 
-	rendered, err := renderMarkdown(message.Content, width)
-	if err != nil {
-		return wrap(message.Content, width)
+	rendered := ""
+	if message.Role == "error" {
+		rendered = wrap(message.Content, width)
+	} else {
+		markdown, err := renderMarkdown(message.Content, width)
+		if err != nil {
+			rendered = wrap(message.Content, width)
+		} else {
+			rendered = strings.TrimRight(stripBackgroundANSI(markdown), "\n")
+		}
 	}
-	return strings.TrimRight(stripBackgroundANSI(rendered), "\n")
+	if cacheable && m.renderCache != nil {
+		m.renderCache[key] = rendered
+	}
+	return rendered
 }
 
 func renderMarkdown(markdown string, width int) (string, error) {

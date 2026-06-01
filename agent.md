@@ -146,23 +146,25 @@ Follow standard Go conventions:
 - All side effects should happen through `tea.Cmd` where possible.
 - Maintain value semantics for the model unless pointer mutation is clearer for local helpers.
 - Use `tea.Batch` for multiple commands.
-- The chat composer uses `textarea.Model`, not `textinput.Model`; preserve multiline input behavior.
+- The chat composer uses Qubit's custom `composerModel` in `composer.go`, not `textarea.Model` or `textinput.Model`. Preserve multiline input, source-index-based cursor/selection state, internal wrapping, max-height scrolling, and inline selection rendering.
+- Do not post-process rendered ANSI text to implement composer selection/highlighting. Selection must be tracked before rendering with source indices so the chevron/prompt is never highlighted and selection stays behind input characters only.
+- The composer prompt/chevron renders only on the first visible input row. Wrapped/continuation rows should use prompt-width spaces for alignment, not repeated chevrons.
 - Plain Enter sends the current chat message. Modified Enter (`Shift+Enter` when available, and `Alt+Enter` when the terminal does not reserve it) inserts a literal newline and must not submit. `Ctrl+J` is the reliable terminal fallback for inserting a newline.
-- Recalculate layout after composer changes so the input area can grow/shrink and the viewport height adjusts.
-- Keep mouse capture disabled so normal terminal text selection/copy remains easy:
+- Composer keyboard behavior should remain editor-like: arrows/Home/End move in the composer; `Ctrl+Left/Right` and Alt fallbacks move by word; `Ctrl+Home/End` move to input begin/end; `Ctrl+A` selects all; `Shift+Arrow` selects when the terminal reports those keys; `Ctrl+Shift+Left/Right` selects by word when supported; `Ctrl+C` copies selected composer text and quits only when no composer selection exists; Esc clears selection before quitting.
+- Recalculate layout after composer changes so the input area can grow/shrink up to its max height and the chat viewport height adjusts. When composer content exceeds max height, scroll inside the composer instead of expanding the app layout past the footer.
+- Recalculate layout before refreshing/replacing chat viewport content on transcript-load paths such as `session.messages`. A loaded long conversation must not render with stale viewport dimensions from the loading placeholder or previous screen state; otherwise a large blank gap can appear above the input until the next composer edit triggers layout. The safe order is update messages/state -> `m.layout()` -> `m.refreshViewport()`.
+- Keep scrolling app-contained: Qubit runs in Bubble Tea alt-screen and captures cell-motion mouse events so mouse wheel scrolls only the chat message viewport, not the whole terminal above the Qubit title/header:
 
 ```go
-view.MouseMode = tea.MouseModeNone
+view.AltScreen = true
+view.MouseMode = tea.MouseModeCellMotion
 ```
 
-- Mouse wheel scrolling should use normal terminal scrollback behavior, not Bubble Tea mouse capture. Do not switch to `MouseModeCellMotion`/`MouseModeAllMotion` just to fix scrolling unless the user explicitly accepts the selection tradeoff.
-- If chat scroll appears to work only after pressing `PgUp`/`PgDn`, inspect whether viewport auto-scroll/layout refresh is forcing `GotoBottom()`. Preserve viewport offset after generic viewport updates, and only resume auto-scroll when the user submits a new message or explicitly jumps to the bottom.
-
-- Alt-screen is currently enabled. If normal terminal scrollback becomes more important, revisit:
-
-```go
-view.AltScreen = false
-```
+- `MouseModeCellMotion` is the accepted tradeoff for contained wheel scrolling: it enables click/release/wheel plus drag events, but common terminals will not support normal drag-to-select text while the app is capturing mouse events. Do not upgrade to `MouseModeAllMotion` unless passive movement events are explicitly needed.
+- Mouse wheel handling should scroll the chat viewport directly: wheel up disables auto-scroll, wheel down resumes auto-scroll only when the viewport reaches bottom. `PgUp`/`PgDn` should keep matching this behavior.
+- If text selection is needed while mouse capture is enabled, use the terminal's modifier-based selection override when available (for example, holding Shift while dragging in many terminals), or copy through composer selection/clipboard flows where applicable.
+- If chat scroll appears to work only after pressing `PgUp`/`PgDn`, inspect whether viewport auto-scroll/layout refresh is forcing `GotoBottom()`. Preserve viewport offset after generic viewport updates, content refreshes, and resize/layout, and only resume auto-scroll when the user submits a new message or explicitly reaches/jumps to the bottom.
+- Avoid full layout or full Markdown re-rendering on every generic viewport update or stream tick. Cache rendered historical message content by role/content/width, and do not cache the actively streaming partial message.
 
 ### Runtime Client Standards
 
@@ -246,11 +248,14 @@ Verify:
 5. `/sessions` opens the session picker.
 6. Up/down changes the highlighted session.
 7. Enter activates the selected session and reloads that session's transcript.
-8. Session lists are not repeatedly appended after assistant responses.
-9. Terminal text selection/copy still works normally.
-10. Enter sends a message; Ctrl+J inserts a newline in the composer and expands the input area. Shift+Enter should also work when keyboard enhancements are supported. Alt+Enter works only if the terminal does not reserve it for fullscreen.
-11. `/terminal-setup` patches Windows Terminal settings for Shift+Enter newline support, or reports a clear failure/manual snippet.
-12. Pasted or typed fenced Markdown code blocks retain line breaks and render as Markdown in chat.
+8. Long loaded transcripts start with the correct chat viewport height: there should not be a large blank gap above the input area that only disappears after typing.
+9. Session lists are not repeatedly appended after assistant responses.
+10. Terminal text selection/copy works via the terminal's mouse-capture override where available, or through supported keyboard/clipboard flows.
+11. Enter sends a message; Ctrl+J inserts a newline in the composer and expands the input area up to the composer max height. Shift+Enter should also work when keyboard enhancements are supported. Alt+Enter works only if the terminal does not reserve it for fullscreen.
+12. Composer editing works: arrows/Home/End move the cursor, Ctrl+Left/Right moves by word when the terminal reports those keys, Ctrl+A selects all, Ctrl+C copies selected composer text, typing replaces selected text, Esc clears selection before quitting, and Shift+Arrow selection works where supported.
+13. Composer rendering stays stable: selection highlight appears only behind input characters, the chevron appears only on the first visible input row, continuation rows are aligned with spaces, and long selected/multiline input does not expand beyond max height.
+14. `/terminal-setup` patches Windows Terminal settings for Shift+Enter newline support, or reports a clear failure/manual snippet.
+15. Pasted or typed fenced Markdown code blocks retain line breaks and render as Markdown in chat.
 
 ## Suggested Future Work
 

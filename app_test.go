@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -236,6 +237,27 @@ func TestRunFinishedWaitsForFakeStream(t *testing.T) {
 	}
 }
 
+func TestApplySessionMessagesRelayoutsViewport(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 24
+	m.layout()
+	m.viewport.SetHeight(3)
+	messages := []chatMessage{{Role: "assistant", Content: strings.Join([]string{
+		"line 1", "line 2", "line 3", "line 4", "line 5",
+		"line 6", "line 7", "line 8", "line 9", "line 10",
+	}, "\n")}}
+
+	m.applySessionMessages(runtimeEvent{Type: "session.messages", Messages: messages})
+
+	if got := m.viewport.Height(); got <= 3 {
+		t.Fatalf("viewport height = %d, want layout recalculated above stale height 3", got)
+	}
+	if !m.viewport.AtBottom() {
+		t.Fatalf("viewport not at bottom after loaded transcript: y=%d total=%d height=%d", m.viewport.YOffset(), m.viewport.TotalLineCount(), m.viewport.Height())
+	}
+}
+
 func TestApplySessionMessagesClearsFakeStream(t *testing.T) {
 	m := model{
 		session:               "sess_1",
@@ -301,6 +323,128 @@ func TestChatArrowKeysEditInputInsteadOfScrollingViewport(t *testing.T) {
 
 	if got.viewport.YOffset() != startOffset {
 		t.Fatalf("viewport YOffset changed from %d to %d; arrow keys should stay in composer", startOffset, got.viewport.YOffset())
+	}
+}
+
+func TestPageDownLeavesAutoScrollAtBottom(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 8
+	m.layout()
+	m.viewport.SetContent("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10")
+	m.viewport.GotoTop()
+
+	updated, _ := m.updateKey(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	got := updated.(model)
+
+	if got.viewport.YOffset() == 0 {
+		t.Fatal("viewport did not move down on PgDown")
+	}
+	if got.viewport.AtBottom() != got.autoScroll {
+		t.Fatalf("autoScroll = %v, want AtBottom %v", got.autoScroll, got.viewport.AtBottom())
+	}
+}
+
+func TestMouseWheelScrollsViewport(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 8
+	m.layout()
+	m.viewport.SetContent("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10")
+	m.viewport.GotoTop()
+
+	updated := m.updateMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
+	if updated.viewport.YOffset() == 0 {
+		t.Fatal("viewport did not move down on mouse wheel down")
+	}
+	if updated.autoScroll != updated.viewport.AtBottom() {
+		t.Fatalf("autoScroll = %v, want AtBottom %v", updated.autoScroll, updated.viewport.AtBottom())
+	}
+
+	updated = updated.updateMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelUp}).(model)
+	if updated.autoScroll {
+		t.Fatal("autoScroll = true after mouse wheel up, want false")
+	}
+}
+
+func TestRefreshViewportPreservesOffsetWhenAutoScrollDisabled(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 8
+	m.layout()
+	m.messages = []chatMessage{{Role: "assistant", Content: strings.Join([]string{
+		"line 1", "line 2", "line 3", "line 4", "line 5",
+		"line 6", "line 7", "line 8", "line 9", "line 10",
+	}, "\n")}}
+	m.refreshViewport()
+	m.viewport.SetYOffset(2)
+	m.autoScroll = false
+
+	m.refreshViewport()
+
+	if got := m.viewport.YOffset(); got != 2 {
+		t.Fatalf("YOffset = %d, want preserved offset 2", got)
+	}
+}
+
+func TestLayoutPreservesOffsetWhenAutoScrollDisabled(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 8
+	m.layout()
+	m.messages = []chatMessage{{Role: "assistant", Content: strings.Join([]string{
+		"line 1", "line 2", "line 3", "line 4", "line 5",
+		"line 6", "line 7", "line 8", "line 9", "line 10",
+	}, "\n")}}
+	m.refreshViewport()
+	m.viewport.SetYOffset(2)
+	m.autoScroll = false
+
+	m.layout()
+
+	if got := m.viewport.YOffset(); got != 2 {
+		t.Fatalf("YOffset = %d, want preserved offset 2", got)
+	}
+}
+
+func TestLayoutKeepsBottomWhenAutoScrollEnabled(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 8
+	m.messages = []chatMessage{{Role: "assistant", Content: strings.Join([]string{
+		"line 1", "line 2", "line 3", "line 4", "line 5",
+		"line 6", "line 7", "line 8", "line 9", "line 10",
+	}, "\n")}}
+	m.autoScroll = true
+	m.layout()
+
+	if !m.viewport.AtBottom() {
+		t.Fatalf("viewport not at bottom after layout with autoScroll enabled: y=%d total=%d height=%d", m.viewport.YOffset(), m.viewport.TotalLineCount(), m.viewport.Height())
+	}
+}
+
+func TestRenderMessageContentUsesCache(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 24
+	m.layout()
+	message := chatMessage{Role: "assistant", Content: "**hello**"}
+
+	first := m.renderMessageContent(message, true)
+	if len(m.renderCache) != 2 {
+		t.Fatalf("render cache entries = %d, want 2 including initial ready message and test message", len(m.renderCache))
+	}
+	second := m.renderMessageContent(message, true)
+	if first != second {
+		t.Fatalf("cached render changed: first %q second %q", first, second)
+	}
+	if len(m.renderCache) != 2 {
+		t.Fatalf("render cache entries after cached render = %d, want 2", len(m.renderCache))
 	}
 }
 

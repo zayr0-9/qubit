@@ -13,6 +13,12 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 
+type renderCacheKey struct {
+	Role    string
+	Content string
+	Width   int
+}
+
 type sessionInfo struct {
 	ID           string `json:"id"`
 	Title        string `json:"title"`
@@ -117,6 +123,8 @@ type model struct {
 	viewport viewport.Model
 	composer composerModel
 	spinner  spinner.Model
+
+	renderCache map[renderCacheKey]string
 
 	messages         []chatMessage
 	sessions         []sessionInfo
