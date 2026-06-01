@@ -611,6 +611,61 @@ func TestCreateNewSessionCommandAndCreatedEvent(t *testing.T) {
 	}
 }
 
+func TestForkCommandRequestsForkAndLoadsForkTranscript(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.session = "sess_parent"
+	m.title = "Parent"
+	m.autoNewSessionOnChat = false
+	m.messages = []chatMessage{{Role: "user", Content: "question"}, {Role: "assistant", Content: "answer"}}
+	m.composer.SetValue("/fork Experiment")
+
+	updated, cmd := m.submitInput()
+	got := updated.(model)
+
+	if !got.busy {
+		t.Fatal("busy = false, want true while forking session")
+	}
+	if got.status != "forking session" {
+		t.Fatalf("status = %q, want forking session", got.status)
+	}
+	if got.autoNewSessionOnChat {
+		t.Fatal("autoNewSessionOnChat = true, want false after fork command")
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.fork", "sess_parent")
+	if payload["title"] != "Experiment" {
+		t.Fatalf("session.fork title = %#v, want Experiment", payload["title"])
+	}
+	if payload["messageIndex"] != float64(2) {
+		t.Fatalf("session.fork messageIndex = %#v, want 2", payload["messageIndex"])
+	}
+
+	updated, cmd = got.updateRuntime(runtimeEvent{Type: "session.forked", SessionID: "sess_child", SessionTitle: "Experiment"})
+	got = updated.(model)
+	if got.session != "sess_child" {
+		t.Fatalf("session = %q, want sess_child", got.session)
+	}
+	if got.title != "Experiment" {
+		t.Fatalf("title = %q, want Experiment", got.title)
+	}
+	if got.status != "loading transcript" {
+		t.Fatalf("status = %q, want loading transcript", got.status)
+	}
+	transcriptPayload := runBatchSendCommand(t, cmd, stdin, "session.messages")
+	assertPayload(t, transcriptPayload, "session.messages", "sess_child")
+
+	loaded := []chatMessage{{Role: "user", Content: "question"}, {Role: "assistant", Content: "answer"}}
+	got.applySessionMessages(runtimeEvent{Type: "session.messages", SessionID: "sess_child", SessionTitle: "Experiment", Messages: loaded})
+	if got.busy {
+		t.Fatal("busy = true, want false after fork transcript load")
+	}
+	if len(got.messages) != len(loaded) {
+		t.Fatalf("message count = %d, want %d", len(got.messages), len(loaded))
+	}
+}
+
 func TestSessionPickerLoadsSelectedSessionTranscript(t *testing.T) {
 	rt, stdin := newTestRuntime(t)
 	m := initialModel(rt)

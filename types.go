@@ -21,13 +21,16 @@ type renderCacheKey struct {
 }
 
 type sessionInfo struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	CreatedAt    string `json:"createdAt"`
-	UpdatedAt    string `json:"updatedAt"`
-	Provider     string `json:"provider"`
-	Model        string `json:"model"`
-	MessageCount int    `json:"messageCount"`
+	ID                     string `json:"id"`
+	Title                  string `json:"title"`
+	CreatedAt              string `json:"createdAt"`
+	UpdatedAt              string `json:"updatedAt"`
+	Provider               string `json:"provider"`
+	Model                  string `json:"model"`
+	MessageCount           int    `json:"messageCount"`
+	ForkedFromSessionID    string `json:"forkedFromSessionId,omitempty"`
+	ForkedFromMessageIndex int    `json:"forkedFromMessageIndex,omitempty"`
+	ForkedAt               string `json:"forkedAt,omitempty"`
 }
 
 type apiKeyInfo struct {
@@ -63,6 +66,22 @@ type keyEntryState struct {
 	Secret   composerModel
 }
 
+type themeEntryStep int
+
+const (
+	themeEntryPresets themeEntryStep = iota
+	themeEntryBackground
+	themeEntryText
+)
+
+type themeEntryState struct {
+	Step       themeEntryStep
+	Preset     int
+	Background composerModel
+	Text       composerModel
+	Err        string
+}
+
 type uiMode int
 
 const (
@@ -70,7 +89,9 @@ const (
 	modeSessionPicker
 	modeKeyPicker
 	modeKeyEntry
+	modeThemeEntry
 	modeModal
+	modeForkTree
 )
 
 type permissionMode string
@@ -128,6 +149,39 @@ type slashCommand struct {
 	OpensOnSelect bool
 }
 
+type forkTreeNode struct {
+	ID                     string `json:"id"`
+	SessionID              string `json:"sessionId"`
+	SessionTitle           string `json:"sessionTitle"`
+	ParentSessionID        string `json:"parentSessionId,omitempty"`
+	ForkedFromMessageIndex int    `json:"forkedFromMessageIndex,omitempty"`
+	ForkedAt               string `json:"forkedAt,omitempty"`
+	CreatedAt              string `json:"createdAt,omitempty"`
+	UpdatedAt              string `json:"updatedAt,omitempty"`
+	MessageRole            string `json:"messageRole,omitempty"`
+	MessageContent         string `json:"messageContent,omitempty"`
+	MessageCount           int    `json:"messageCount,omitempty"`
+
+	X        int   `json:"-"`
+	Y        int   `json:"-"`
+	Parent   int   `json:"-"`
+	Children []int `json:"-"`
+}
+
+type forkTreeState struct {
+	Loading       bool
+	Nodes         []forkTreeNode
+	Selected      int
+	Order         []int
+	OffsetX       int
+	OffsetY       int
+	CanvasWidth   int
+	CanvasHeight  int
+	Preview       viewport.Model
+	PreviewWidth  int
+	PreviewHeight int
+}
+
 type runtimeEvent struct {
 	Type             string         `json:"type"`
 	ID               string         `json:"id,omitempty"`
@@ -142,6 +196,7 @@ type runtimeEvent struct {
 	Model            string         `json:"model,omitempty"`
 	Keys             []apiKeyInfo   `json:"keys,omitempty"`
 	Models           []modelInfo    `json:"models,omitempty"`
+	ForkTreeNodes    []forkTreeNode `json:"nodes,omitempty"`
 	StoragePath      string         `json:"storagePath,omitempty"`
 	IndexPath        string         `json:"indexPath,omitempty"`
 	WorkspaceCwd     string         `json:"workspaceCwd,omitempty"`
@@ -204,6 +259,7 @@ type model struct {
 	status                string
 	err                   string
 	permissionMode        permissionMode
+	theme                 themeConfig
 	autoNewSessionOnChat  bool
 	lastRunStartedSession string
 
@@ -214,6 +270,8 @@ type model struct {
 	slashCursor   int
 	modal         *modalState
 	keyEntry      *keyEntryState
+	themeEntry    *themeEntryState
+	forkTree      forkTreeState
 	autoScroll    bool
 	toolHitboxes  []toolHitbox
 	chatTopY      int

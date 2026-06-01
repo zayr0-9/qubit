@@ -77,12 +77,16 @@ func (m model) renderMainArea(height int) string {
 		chatContent = m.renderKeyPicker()
 	} else if m.mode == modeKeyEntry {
 		chatContent = m.renderKeyEntry(bodyHeight)
+	} else if m.mode == modeThemeEntry {
+		chatContent = m.renderThemeEntry(bodyHeight)
 	} else if m.mode == modeModal {
 		chatContent = m.renderModal(bodyHeight)
+	} else if m.mode == modeForkTree {
+		chatContent = m.renderForkTreeModal(bodyHeight)
 	}
 	chat := renderChat(chatContent, m.width, max(1, bodyHeight))
 
-	if m.mode == modeModal || m.mode == modeKeyEntry || !m.showSlashPalette() {
+	if m.mode == modeModal || m.mode == modeForkTree || m.mode == modeKeyEntry || !m.showSlashPalette() {
 		return lipgloss.JoinVertical(lipgloss.Left, header, chat)
 	}
 	palette := m.renderSlashPalette()
@@ -138,8 +142,12 @@ func (m model) renderFooter() string {
 		} else {
 			footer = "←/→ choose action · enter confirm · esc deny/cancel"
 		}
+	} else if m.mode == modeForkTree {
+		footer = "↑/↓ select · ← parent · → child · wheel/pgup/pgdn preview · enter open session · esc close · text only"
 	} else if m.mode == modeKeyEntry {
 		footer = "enter next/save · ctrl+v paste · esc cancel · secret input is masked"
+	} else if m.mode == modeThemeEntry {
+		footer = "↑/↓ preset · enter apply/next · tab field · d default · esc cancel"
 	} else if m.mode == modeKeyPicker {
 		footer = "↑/↓ choose key · enter activate · a add · d delete · esc close"
 	} else if m.mode == modeSessionPicker {
@@ -254,7 +262,11 @@ func (m model) renderSessionPicker() string {
 		if session.ID == m.session {
 			active = "•"
 		}
-		line := fmt.Sprintf("%s %-28s %3d msgs  %s", active, oneLine(session.Title, 28), session.MessageCount, mutedSt.Render(short(session.ID, 14)))
+		forkMarker := " "
+		if session.ForkedFromSessionID != "" {
+			forkMarker = "↳"
+		}
+		line := fmt.Sprintf("%s%s %-28s %3d msgs  %s", active, forkMarker, oneLine(session.Title, 28), session.MessageCount, mutedSt.Render(short(session.ID, 14)))
 		if i == m.sessionCursor {
 			line = selectSt.Render("  " + line)
 		} else {
@@ -343,21 +355,26 @@ func (m *model) renderMessageContent(message chatMessage, cacheable bool) string
 		}
 	}
 
-	rendered := ""
-	if message.Role == "error" {
+	rendered, err := renderMessageContentAtWidth(message, width)
+	if err != nil {
 		rendered = wrap(message.Content, width)
-	} else {
-		markdown, err := renderMarkdown(message.Content, width)
-		if err != nil {
-			rendered = wrap(message.Content, width)
-		} else {
-			rendered = strings.TrimRight(stripBackgroundANSI(markdown), "\n")
-		}
 	}
 	if cacheable && m.renderCache != nil {
 		m.renderCache[key] = rendered
 	}
 	return rendered
+}
+
+func renderMessageContentAtWidth(message chatMessage, width int) (string, error) {
+	width = max(20, width)
+	if message.Role == "error" {
+		return wrap(message.Content, width), nil
+	}
+	markdown, err := renderMarkdown(message.Content, width)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(stripBackgroundANSI(markdown), "\n"), nil
 }
 
 func renderMarkdown(markdown string, width int) (string, error) {

@@ -14,8 +14,10 @@ import (
 
 func initialModel(rt *runtimeClient) model {
 	composer := newComposer()
+	theme := defaultTheme()
+	applyTheme(theme)
 
-	spin := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(accent)))
+	spin := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(spinnerStyle))
 
 	return model{
 		viewport:             viewport.New(),
@@ -25,6 +27,7 @@ func initialModel(rt *runtimeClient) model {
 		messages:             []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
 		status:               "starting runtime",
 		permissionMode:       permissionModeAsk,
+		theme:                theme,
 		autoNewSessionOnChat: true,
 		autoScroll:           true,
 		runtime:              rt,
@@ -48,6 +51,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.updateKey(msg)
 	case tea.MouseWheelMsg:
+		if m.mode == modeForkTree {
+			return m.updateForkTreeMouseWheel(msg), nil
+		}
 		return m.updateMouseWheel(msg), nil
 	case tea.MouseClickMsg:
 		return m.updateMouseClick(msg), nil
@@ -69,8 +75,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.PasteMsg:
+		if m.mode == modeThemeEntry {
+			return m.updateThemeEntryTeaPaste(msg), nil
+		}
 		return m.updateKeyEntryTeaPaste(msg), nil
 	case composerPasteMsg:
+		if m.mode == modeThemeEntry {
+			return m.updateThemeEntryPaste(msg), nil
+		}
 		return m.updateKeyEntryPaste(msg), nil
 	}
 
@@ -81,8 +93,14 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modeModal {
 		return m.updateModal(msg)
 	}
+	if m.mode == modeForkTree {
+		return m.updateForkTree(msg)
+	}
 	if m.mode == modeKeyEntry {
 		return m.updateKeyEntry(msg)
+	}
+	if m.mode == modeThemeEntry {
+		return m.updateThemeEntry(msg)
 	}
 	if m.mode == modeKeyPicker {
 		return m.updateKeyPicker(msg)
@@ -288,6 +306,8 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}))
 	case "session.list":
 		m.applySessionList(ev)
+	case "session.tree":
+		m.applyForkTree(ev)
 	case "key.list":
 		m.applyKeyList(ev)
 	case "model.list":
@@ -316,14 +336,18 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.messages = []chatMessage{{Role: "assistant", Content: fmt.Sprintf("Started new session: %s (%s)", m.title, short(m.session, 18))}}
 		m.status = "ready"
 		m.refreshViewport()
-	case "session.activated":
+	case "session.activated", "session.forked":
 		m.clearFakeStream()
 		m.autoScroll = true
 		m.busy = true
 		m.session = ev.SessionID
 		m.title = ev.SessionTitle
 		m.autoNewSessionOnChat = false
-		m.messages = []chatMessage{{Role: "assistant", Content: fmt.Sprintf("Loading session: %s (%s)", m.title, short(m.session, 18))}}
+		verb := "Loading session"
+		if ev.Type == "session.forked" {
+			verb = "Loading fork"
+		}
+		m.messages = []chatMessage{{Role: "assistant", Content: fmt.Sprintf("%s: %s (%s)", verb, m.title, short(m.session, 18))}}
 		m.status = "loading transcript"
 		m.refreshViewport()
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.messages", "sessionId": m.session}))

@@ -233,9 +233,36 @@ async function handleLine(line) {
     return;
   }
 
+  if (request.type === "session.tree") {
+    const nodes = await buildSessionTreeNodes();
+    write({
+      type: "session.tree",
+      id: request.id,
+      sessionId: activeSessionId,
+      sessionTitle: activeSession()?.title,
+      nodes,
+    });
+    return;
+  }
+
   if (request.type === "session.new") {
     const session = await createSession({ title: request.title });
     write({ type: "session.created", id: request.id, session, sessionId: activeSessionId, sessionTitle: session.title });
+    writeSessionList(request.id);
+    return;
+  }
+
+  if (request.type === "session.fork") {
+    const session = await forkSession({
+      sourceSessionId: String(request.sessionId || activeSessionId),
+      messageIndex: Number(request.messageIndex),
+      title: request.title,
+    });
+    if (!session) {
+      write({ type: "error", id: request.id, error: `Unknown session: ${request.sessionId || activeSessionId}` });
+      return;
+    }
+    write({ type: "session.forked", id: request.id, session, sessionId: activeSessionId, sessionTitle: session.title });
     writeSessionList(request.id);
     return;
   }
@@ -769,6 +796,9 @@ async function loadSessionIndex() {
       provider: session.provider || runtimeState.providerName,
       model: session.model || model,
       messageCount: Number.isFinite(session.messageCount) ? session.messageCount : 0,
+      ...(typeof session.forkedFromSessionId === "string" ? { forkedFromSessionId: session.forkedFromSessionId } : {}),
+      ...(Number.isFinite(session.forkedFromMessageIndex) ? { forkedFromMessageIndex: session.forkedFromMessageIndex } : {}),
+      ...(typeof session.forkedAt === "string" ? { forkedAt: session.forkedAt } : {}),
     }));
 
   if (normalized.length === 0) {
@@ -804,6 +834,50 @@ function newSession(id = createSessionId(), title = "New chat", now = new Date()
 async function createSession(options = {}) {
   const title = String(options.title || "New chat").trim() || "New chat";
   const session = newSession(createSessionId(), title);
+  sessionIndex.sessions.unshift(session);
+  sessionIndex.activeSessionId = session.id;
+  activeSessionId = session.id;
+  await saveSessionIndex();
+  return session;
+}
+
+async function forkSession({ sourceSessionId, messageIndex, title } = {}) {
+  const source = sessionIndex.sessions.find((candidate) => candidate.id === sourceSessionId);
+  if (!source) return null;
+
+  const sourceMessages = await storage.loadMessages(sourceSessionId);
+  const sourceUiMessages = transcriptMessagesForUi(sourceMessages);
+  const requestedIndex = Number.isFinite(messageIndex) ? Math.trunc(messageIndex) : sourceUiMessages.length;
+  const normalizedUiIndex = Math.max(0, Math.min(sourceUiMessages.length, requestedIndex));
+  const normalizedIndex = normalizedUiIndex >= sourceUiMessages.length
+    ? sourceMessages.length
+    : rawMessageIndexForUiMessageIndex(sourceMessages, normalizedUiIndex);
+  const forkMessages = sourceMessages.slice(0, normalizedIndex);
+  const forkTitle = String(title || "").trim() || `Fork: ${source.title || "Untitled chat"}`;
+  const now = new Date().toISOString();
+  const session = {
+    ...newSession(createSessionId(), forkTitle, now),
+    forkedFromSessionId: source.id,
+    forkedFromMessageIndex: normalizedIndex,
+    forkedAt: now,
+    messageCount: forkMessages.filter((message) => message.role !== "system").length,
+  };
+
+  await storage.saveMessages(session.id, forkMessages);
+  const metadata = storage.getSessionMetadata ? await storage.getSessionMetadata(sourceSessionId) : null;
+  if (metadata && storage.setSessionMetadata) {
+    await storage.setSessionMetadata(session.id, {
+      ...metadata,
+      updatedAt: now,
+      custom: {
+        ...(metadata.custom || {}),
+        forkedFromSessionId: source.id,
+        forkedFromMessageIndex: normalizedIndex,
+        forkedAt: now,
+      },
+    });
+  }
+
   sessionIndex.sessions.unshift(session);
   sessionIndex.activeSessionId = session.id;
   activeSessionId = session.id;
@@ -870,6 +944,128 @@ function writeSessionList(id) {
 async function loadSessionMessages(sessionId) {
   const messages = await storage.loadMessages(sessionId);
   return transcriptMessagesForUi(messages);
+}
+
+async function buildSessionTreeNodes() {
+  const previewCache = new Map();
+  const nodes = [];
+  for (const session of sessionIndex.sessions) {
+    const node = {
+      id: session.id,
+      sessionId: session.id,
+      sessionTitle: session.title || "Untitled chat",
+      parentSessionId: typeof session.forkedFromSessionId === "string" ? session.forkedFromSessionId : "",
+      forkedFromMessageIndex: Number.isFinite(session.forkedFromMessageIndex) ? session.forkedFromMessageIndex : 0,
+      forkedAt: typeof session.forkedAt === "string" ? session.forkedAt : "",
+      createdAt: session.createdAt || "",
+      updatedAt: session.updatedAt || "",
+      messageCount: Number.isFinite(session.messageCount) ? session.messageCount : 0,
+      messageRole: "",
+      messageContent: "",
+    };
+
+    let preview = null;
+    if (node.parentSessionId) {
+      preview = await textPreviewForFork(node.parentSessionId, node.forkedFromMessageIndex, previewCache);
+    } else {
+      preview = await firstTextPreviewForSession(session.id, previewCache);
+    }
+    if (preview) {
+      node.messageRole = preview.role;
+      node.messageContent = preview.content;
+    }
+    nodes.push(node);
+  }
+  return nodes;
+}
+
+async function textPreviewForFork(sessionId, rawForkIndex, cache) {
+  const messages = await rawSessionMessagesCached(sessionId, cache);
+  const normalizedIndex = Math.max(0, Math.min(messages.length, Number.isFinite(rawForkIndex) ? Math.trunc(rawForkIndex) : messages.length));
+  return lastTextPreview(messages.slice(0, normalizedIndex));
+}
+
+async function firstTextPreviewForSession(sessionId, cache) {
+  const messages = await rawSessionMessagesCached(sessionId, cache);
+  const uiMessages = transcriptMessagesForUi(messages);
+  for (const message of uiMessages) {
+    const preview = treeTextMessage(message);
+    if (preview) return preview;
+  }
+  return null;
+}
+
+async function rawSessionMessagesCached(sessionId, cache) {
+  if (cache.has(sessionId)) return cache.get(sessionId);
+  let messages = [];
+  try {
+    messages = await storage.loadMessages(sessionId);
+  } catch {
+    messages = [];
+  }
+  cache.set(sessionId, messages);
+  return messages;
+}
+
+function lastTextPreview(messages) {
+  const uiMessages = transcriptMessagesForUi(messages);
+  for (let index = uiMessages.length - 1; index >= 0; index -= 1) {
+    const message = uiMessages[index];
+    const preview = treeTextMessage(message);
+    if (preview) return preview;
+  }
+  return null;
+}
+
+function treeTextMessage(message) {
+  if (!message || (message.role !== "user" && message.role !== "assistant")) return null;
+  const content = typeof message.content === "string" ? message.content.trim() : "";
+  return content ? { role: message.role, content } : null;
+}
+
+function rawMessageIndexForUiMessageIndex(messages, uiMessageIndex) {
+  if (uiMessageIndex <= 0) return 0;
+  const visibleIndexes = [];
+  const consumedToolResults = new Set();
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message || message.role === "system") continue;
+
+    if (message.role === "user") {
+      const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
+      if (content.trim()) visibleIndexes.push(index + 1);
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
+      if (toolCalls.length > 0) {
+        let groupEnd = index + 1;
+        for (const toolCall of toolCalls) {
+          const toolCallId = toolCall.id || "";
+          if (!toolCallId) continue;
+          const resultIndex = messages.findIndex((candidate, candidateIndex) => candidateIndex > index && candidate?.role === "tool" && candidate.toolCallId === toolCallId);
+          if (resultIndex >= 0) {
+            consumedToolResults.add(toolCallId);
+            groupEnd = Math.max(groupEnd, resultIndex + 1);
+          }
+        }
+        visibleIndexes.push(groupEnd);
+      }
+      const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
+      if (content.trim()) visibleIndexes.push(index + 1);
+      continue;
+    }
+
+    if (message.role === "tool" && message.toolCallId && !consumedToolResults.has(message.toolCallId)) {
+      visibleIndexes.push(index + 1);
+      consumedToolResults.add(message.toolCallId);
+    }
+  }
+
+  if (uiMessageIndex >= visibleIndexes.length) return messages.length;
+  return visibleIndexes[uiMessageIndex];
 }
 
 function transcriptMessagesForUi(messages) {

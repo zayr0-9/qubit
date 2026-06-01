@@ -23,7 +23,7 @@ Qubit CLI
   Owns rendering, keyboard interaction, local UI state, slash command palette, and session picker.
 ```
 
-Current MVP scope is basic chat plus session UI, including transcript reload on session switch and frontend-simulated assistant streaming. Branch visualization, minimaps, archive/delete flows, and true provider token streaming can come later.
+Current MVP scope is basic chat plus session UI, including transcript reload on session switch, session forking through `/fork`, a keyboard-first fork tree through `/tree`, and frontend-simulated assistant streaming. Archive/delete flows and true provider token streaming can come later.
 
 ## Extra Context Files
 
@@ -106,6 +106,8 @@ session.new
 session.activate
 session.messages
 session.rename
+session.fork
+session.tree
 key.list
 key.set
 key.use
@@ -272,6 +274,14 @@ $env:GLM_ENDPOINT = "coding" # optional
 ```powershell
 $env:QUBIT_STUB = "1"
 ```
+
+- Keep dev/debug UI details behind explicit environment flags. Do not expose raw internal IDs, fork parent IDs, durations, payload sizes, modal internals, or similar developer metadata in normal UI unless the user explicitly asks for it.
+  - `QUBIT_DEV=1` is the broad local developer override for developer-only UI details.
+  - Prefer a feature-scoped flag for new debug surfaces when possible, and document it here.
+  - Current feature-scoped flags:
+    - `QUBIT_MODAL_DEV=1` shows extra permission modal internals.
+    - `QUBIT_DEV_TOOL_DETAILS=1` shows tool-call duration/size/details.
+    - `QUBIT_DEV_FORK_TREE=1` shows fork-tree session titles, session IDs, and fork parent IDs inside the tree/preview.
 
 - Persist transcripts through hyper-router SQLite storage.
 - Maintain listable session metadata in `.qubit/session-index.json` until hyper-router exposes a suitable public session listing API.

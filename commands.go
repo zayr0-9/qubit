@@ -10,9 +10,12 @@ import (
 
 var slashCommands = []slashCommand{
 	{Name: "new", Usage: "/new [title]", Description: "Create a new chat session", NeedsArg: false},
+	{Name: "fork", Usage: "/fork [title]", Description: "Fork current chat into a new session", NeedsArg: false},
+	{Name: "tree", Usage: "/tree", Description: "Open the fork tree", NeedsArg: false, OpensOnSelect: true},
 	{Name: "sessions", Usage: "/sessions", Description: "Open the session picker", NeedsArg: false, OpensOnSelect: true},
 	{Name: "keys", Usage: "/keys", Description: "Manage provider API keys", NeedsArg: false, OpensOnSelect: true},
 	{Name: "models", Usage: "/models", Description: "Choose the active GLM model", NeedsArg: false, OpensOnSelect: true},
+	{Name: "theme", Usage: "/theme", Description: "Customize terminal colors", NeedsArg: false, OpensOnSelect: true},
 	{Name: "rename", Usage: "/rename <title>", Description: "Rename current session", NeedsArg: true},
 	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal Shift+Enter newline setup", NeedsArg: false},
 	{Name: "permission", Usage: "/permission <ask|always>", Description: "Set tool permission mode", NeedsArg: true},
@@ -100,6 +103,21 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.autoNewSessionOnChat = false
 		m.status = "creating session"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.new", "title": title})
+	case "fork", "branch":
+		m.busy = true
+		m.autoNewSessionOnChat = false
+		m.status = "forking session"
+		payload := map[string]any{"type": "session.fork", "sessionId": m.session, "messageIndex": len(m.messages)}
+		if arg != "" {
+			payload["title"] = arg
+		}
+		return m, sendRuntime(m.runtime, payload)
+	case "tree", "branches", "forks", "map":
+		m.mode = modeForkTree
+		m.forkTree = newForkTreeState()
+		m.busy = true
+		m.status = "loading fork tree"
+		return m, sendRuntime(m.runtime, map[string]any{"type": "session.tree"})
 	case "sessions", "session", "ls":
 		m.mode = modeSessionPicker
 		m.ensureSessionCursor()
@@ -113,6 +131,8 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.busy = true
 		m.status = "loading models"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "model.list"})
+	case "theme", "themes", "colors", "color":
+		return m.openThemeEntry()
 	case "rename", "title":
 		if arg == "" {
 			m.appendSystem("Usage: /rename <title>")
@@ -131,7 +151,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/models - choose the active GLM model\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <ask|always> - choose whether gated tools ask or auto-allow\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title] - fork current chat into a new session\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/models - choose the active GLM model\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <ask|always> - choose whether gated tools ask or auto-allow\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
