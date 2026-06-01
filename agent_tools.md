@@ -208,6 +208,22 @@ Do not reintroduce old `YGG_*` concepts. If Qubit later needs managed internal e
 .qubit/generated/
 ```
 
+## Runtime Permission Modes
+
+Qubit currently supports two user-facing permission modes for gated tools:
+
+```txt
+ask
+  The Go client opens the permission modal when the runtime emits tool.permission.request.
+
+always_allow
+  The Go client immediately sends tool.permission.response with allow=true for runtime permission requests.
+```
+
+The permission mode is Go UI/session state. Keep the runtime/tool definitions responsible for declaring static tool safety (`permission: { mode: 'ask' }` for gated tools and `permission: { mode: 'always' }` for intrinsically safe read/search tools), but keep user-facing auto-approval gating in the Go client. Do not conflate tool-level `always` with user-level `always_allow`.
+
+For now, permission mode is changed with `/permission <ask|always>` or cycled in the chat UI with Shift+Tab. The current mode is rendered as a minimal bright `ask` / `always allow` label in a dedicated status section below the input area and is not persisted across process restarts. If persistence is added later, document the settings file and migration behavior here.
+
 ## Tool Definition Standards
 
 Use Hyper Router tool definitions for model-callable tools:
@@ -227,6 +243,7 @@ Guidelines:
 
 - Keep read-only tools permission mode `always` unless a reason emerges to ask.
 - Write/shell/network tools should be permission-gated when migrated.
+- Keep user-facing permission-mode behavior in Go: ask mode shows the modal; always-allow mode auto-approves runtime permission requests.
 - Keep input schemas explicit and JSON-serializable.
 - Validate required arguments before doing filesystem work.
 - Catch implementation errors inside `execute` and return `{ ok: false, error }`.

@@ -98,3 +98,120 @@ func modalHasField(modal *modalState, label string, contains string) bool {
 	}
 	return false
 }
+
+func TestAskPermissionModeOpensPermissionModal(t *testing.T) {
+	m := initialModel(nil)
+	m.permissionMode = permissionModeAsk
+
+	updated, cmd := m.updateRuntime(runtimeEvent{Type: "tool.permission.request", ID: "perm_ask", ToolName: "editFile"})
+	got := updated.(model)
+
+	if cmd == nil {
+		t.Fatal("permission request returned nil command, want waitRuntimeEvent command")
+	}
+	if got.mode != modeModal {
+		t.Fatalf("mode = %v, want modeModal", got.mode)
+	}
+	if got.modal == nil || got.modal.ID != "perm_ask" || got.modal.Kind != modalKindPermission {
+		t.Fatalf("modal = %#v, want permission modal for perm_ask", got.modal)
+	}
+}
+
+func TestAlwaysAllowPermissionModeAutoApproves(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.permissionMode = permissionModeAlwaysAllow
+
+	updated, cmd := m.updateRuntime(runtimeEvent{Type: "tool.permission.request", ID: "perm_auto", ToolName: "editFile"})
+	got := updated.(model)
+
+	if got.modal != nil || got.mode == modeModal {
+		t.Fatalf("always-allow opened modal: mode=%v modal=%#v", got.mode, got.modal)
+	}
+	if got.status != "thinking" {
+		t.Fatalf("status = %q, want thinking", got.status)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	if payload["type"] != "tool.permission.response" {
+		t.Fatalf("payload type = %#v, want tool.permission.response; payload=%#v", payload["type"], payload)
+	}
+	if payload["id"] != "perm_auto" {
+		t.Fatalf("payload id = %#v, want perm_auto; payload=%#v", payload["id"], payload)
+	}
+	if payload["allow"] != true {
+		t.Fatalf("payload allow = %#v, want true; payload=%#v", payload["allow"], payload)
+	}
+}
+
+func TestSetPermissionModeSlashCommand(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+
+	updated, cmd := m.handleSlashCommand("/permission always")
+	if cmd != nil {
+		t.Fatal("/permission always returned command, want nil")
+	}
+	got := updated.(model)
+	if got.permissionMode != permissionModeAlwaysAllow {
+		t.Fatalf("permissionMode = %q, want %q", got.permissionMode, permissionModeAlwaysAllow)
+	}
+	if got.status != "ready" {
+		t.Fatalf("status = %q, want ready", got.status)
+	}
+
+	updated, cmd = got.handleSlashCommand("/permission ask")
+	if cmd != nil {
+		t.Fatal("/permission ask returned command, want nil")
+	}
+	got = updated.(model)
+	if got.permissionMode != permissionModeAsk {
+		t.Fatalf("permissionMode = %q, want %q", got.permissionMode, permissionModeAsk)
+	}
+	if got.status != "ready" {
+		t.Fatalf("status = %q, want ready", got.status)
+	}
+}
+
+func TestShiftTabCyclesPermissionMode(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.permissionMode = permissionModeAsk
+
+	updated, cmd := m.updateKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if cmd != nil {
+		t.Fatal("shift+tab returned command, want nil")
+	}
+	got := updated.(model)
+	if got.permissionMode != permissionModeAlwaysAllow {
+		t.Fatalf("permissionMode = %q, want %q", got.permissionMode, permissionModeAlwaysAllow)
+	}
+	if strings.Contains(got.status, "permission") {
+		t.Fatalf("status = %q, should not display permission mode in title/status", got.status)
+	}
+
+	updated, cmd = got.updateKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if cmd != nil {
+		t.Fatal("second shift+tab returned command, want nil")
+	}
+	got = updated.(model)
+	if got.permissionMode != permissionModeAsk {
+		t.Fatalf("permissionMode = %q, want %q", got.permissionMode, permissionModeAsk)
+	}
+	if strings.Contains(got.status, "permission") {
+		t.Fatalf("status = %q, should not display permission mode in title/status", got.status)
+	}
+}
+
+func TestRenderInputStatusShowsPermissionMode(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.permissionMode = permissionModeAlwaysAllow
+
+	status := plainText(m.renderInputStatus())
+	if strings.Contains(status, "permissions:") {
+		t.Fatalf("status section = %q, want minimal mode label without prefix", status)
+	}
+	if !strings.Contains(status, "always allow") {
+		t.Fatalf("status section = %q, want current permission mode", status)
+	}
+}

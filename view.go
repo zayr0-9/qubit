@@ -17,8 +17,9 @@ func (m model) View() tea.View {
 	}
 
 	input := m.renderInput()
+	status := m.renderInputStatus()
 	footer := m.renderFooter()
-	bottomHeight := lipgloss.Height(input) + lipgloss.Height(footer)
+	bottomHeight := lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
 	mainHeight := max(0, m.height-bottomHeight)
 	content := appStyle.Render(
 		lipgloss.JoinVertical(
@@ -26,6 +27,7 @@ func (m model) View() tea.View {
 			renderFixedHeight(m.renderMainArea(mainHeight), mainHeight),
 			"",
 			input,
+			status,
 			footer,
 		),
 	)
@@ -108,6 +110,18 @@ func (m model) inputPrompt() string {
 
 func idleInputPrompt() string {
 	return lipgloss.NewStyle().Foreground(accent).Render("› ")
+}
+
+func (m model) renderInputStatus() string {
+	mode := m.permissionModeLabel()
+	style := lipgloss.NewStyle().Bold(true)
+	if m.permissionMode == permissionModeAlwaysAllow {
+		style = style.Foreground(green)
+	} else {
+		style = style.Foreground(accent)
+	}
+
+	return footerStyle.Width(m.width).Render(style.Render(mode))
 }
 
 func (m model) renderFooter() string {

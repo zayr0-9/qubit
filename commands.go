@@ -14,6 +14,7 @@ var slashCommands = []slashCommand{
 	{Name: "keys", Usage: "/keys", Description: "Manage provider API keys", NeedsArg: false},
 	{Name: "rename", Usage: "/rename <title>", Description: "Rename current session", NeedsArg: true},
 	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal Shift+Enter newline setup", NeedsArg: false},
+	{Name: "permission", Usage: "/permission <ask|always>", Description: "Set tool permission mode", NeedsArg: true},
 	{Name: "permission-test", Usage: "/permission-test", Description: "Open a demo permission modal", NeedsArg: false},
 	{Name: "help", Usage: "/help", Description: "Show command help", NeedsArg: false},
 }
@@ -117,15 +118,52 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.status = "updating terminal settings"
 		m.appendSystem("Updating Windows Terminal settings for Shift+Enter newline support...")
 		return m, runTerminalSetup()
+	case "permission", "permissions", "perm":
+		return m.setPermissionMode(arg)
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <ask|always> - choose whether gated tools ask or auto-allow\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
 		return m, nil
 	}
+}
+
+func (m model) setPermissionMode(arg string) (tea.Model, tea.Cmd) {
+	mode := strings.ToLower(strings.TrimSpace(arg))
+	switch mode {
+	case "ask", "a":
+		m.permissionMode = permissionModeAsk
+		m.status = "ready"
+		m.appendSystem("Tool permissions: ask before running gated tools.")
+	case "always", "always-allow", "always_allow", "allow", "auto", "auto-allow":
+		m.permissionMode = permissionModeAlwaysAllow
+		m.status = "ready"
+		m.appendSystem("Tool permissions: always allow gated tools for this session.")
+	case "":
+		m.appendSystem(fmt.Sprintf("Tool permissions are currently: %s. Usage: /permission <ask|always>", m.permissionModeLabel()))
+	default:
+		m.appendSystem("Usage: /permission <ask|always>")
+	}
+	return m, nil
+}
+
+func (m model) cyclePermissionMode() (tea.Model, tea.Cmd) {
+	if m.permissionMode == permissionModeAlwaysAllow {
+		m.permissionMode = permissionModeAsk
+	} else {
+		m.permissionMode = permissionModeAlwaysAllow
+	}
+	return m, nil
+}
+
+func (m model) permissionModeLabel() string {
+	if m.permissionMode == permissionModeAlwaysAllow {
+		return "always allow"
+	}
+	return "ask"
 }
 
 func (m model) showSlashPalette() bool {

@@ -65,6 +65,13 @@ const (
 	modeModal
 )
 
+type permissionMode string
+
+const (
+	permissionModeAsk         permissionMode = "ask"
+	permissionModeAlwaysAllow permissionMode = "always_allow"
+)
+
 type modalKind string
 
 const (
@@ -173,6 +180,7 @@ type model struct {
 	title            string
 	status           string
 	err              string
+	permissionMode   permissionMode
 
 	mode          uiMode
 	previousMode  uiMode

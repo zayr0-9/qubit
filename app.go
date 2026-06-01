@@ -18,14 +18,15 @@ func initialModel(rt *runtimeClient) model {
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(accent)))
 
 	return model{
-		viewport:    viewport.New(),
-		composer:    composer,
-		spinner:     spin,
-		renderCache: make(map[renderCacheKey]string),
-		messages:    []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
-		status:      "starting runtime",
-		autoScroll:  true,
-		runtime:     rt,
+		viewport:       viewport.New(),
+		composer:       composer,
+		spinner:        spin,
+		renderCache:    make(map[renderCacheKey]string),
+		messages:       []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
+		status:         "starting runtime",
+		permissionMode: permissionModeAsk,
+		autoScroll:     true,
+		runtime:        rt,
 	}
 }
 
@@ -114,6 +115,12 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.moveSlashCursor(1)
 			return m, nil
 		}
+	case "shift+tab":
+		if m.showSlashPalette() {
+			m.moveSlashCursor(-1)
+			return m, nil
+		}
+		return m.cyclePermissionMode()
 	case "tab":
 		if m.showSlashPalette() {
 			return m.acceptSlashSelection()
@@ -253,6 +260,10 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	case "key.updated":
 		m.applyKeyUpdated(ev)
 	case "tool.permission.request":
+		if m.permissionMode == permissionModeAlwaysAllow {
+			m.status = "thinking"
+			return m, sendRuntime(m.runtime, map[string]any{"type": "tool.permission.response", "id": ev.ID, "allow": true})
+		}
 		m = m.openToolPermissionModal(ev)
 	case "session.created":
 		m.clearFakeStream()
@@ -475,9 +486,10 @@ func (m *model) layout() {
 	m.composer.SetWidth(max(1, inputW-promptW))
 
 	input := m.renderInput()
+	status := m.renderInputStatus()
 	footer := m.renderFooter()
 	header := m.renderHeader()
-	bottomHeight := 1 + lipgloss.Height(input) + lipgloss.Height(footer)
+	bottomHeight := 1 + lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
 	mainHeight := max(1, m.height-bottomHeight)
 	bodyHeight := max(1, mainHeight-lipgloss.Height(header))
 	paletteHeight := 0
