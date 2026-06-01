@@ -441,7 +441,7 @@ func (m model) renderForkTreeModal(height int) string {
 	tree = renderFixedHeight(tree, height)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Background(surface).Foreground(text).Padding(0, 1).Width(previewWidth).Render(preview),
+		lipgloss.NewStyle().Foreground(text).Padding(0, 1).Width(previewWidth).Render(preview),
 		"  ",
 		lipgloss.NewStyle().Foreground(text).Width(treeWidth).Render(tree),
 	)

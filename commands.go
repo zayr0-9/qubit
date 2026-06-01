@@ -365,34 +365,39 @@ func (m model) acceptSlashSelection() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) renderSlashPalette() string {
+func (m model) slashCommandModalHeight(maxHeight int) int {
 	matches := m.filteredSlashCommands()
-	paletteStyle := lipgloss.NewStyle().Padding(1, 2).Width(max(20, m.width-4))
+	visibleOptions := min(7, len(matches))
+	if visibleOptions == 0 {
+		return min(max(4, maxHeight), 5)
+	}
+	return min(max(4, maxHeight), visibleOptions+8)
+}
+
+func (m model) renderSlashCommandModal(height int) string {
+	matches := m.filteredSlashCommands()
+	modal := modalState{
+		Title:       "Commands",
+		Description: "Tab/Enter to complete or open. Esc closes suggestions.",
+		Options:     slashCommandModalOptions(matches),
+	}
 	if len(matches) == 0 {
-		return paletteStyle.Render(errSt.Render("✦ no matching commands"))
+		modal.Description = "No matching commands."
 	}
-
-	maxItems := min(6, len(matches))
-	cmdStyle := lipgloss.NewStyle().Foreground(cyan).Bold(true)
-	badgeStyle := lipgloss.NewStyle().Foreground(accent).Bold(true)
-	selectedBadgeStyle := lipgloss.NewStyle().Foreground(accent).Bold(true)
-
-	var b strings.Builder
-	b.WriteString(badgeStyle.Render("✦ commands") + "  " + mutedSt.Render("tab/enter to complete") + "\n")
-	for i := 0; i < maxItems; i++ {
-		command := matches[i]
-		marker := "  "
-		usage := cmdStyle.Render(fmt.Sprintf("%-16s", command.Usage))
-		description := mutedSt.Render(command.Description)
-		if i == m.slashCursor {
-			marker = selectedBadgeStyle.Render("› ")
-		}
-		b.WriteString(fmt.Sprintf("%s%s %s", marker, usage, description))
-		if i < maxItems-1 {
-			b.WriteString("\n")
-		}
+	if m.slashCursor < 0 || m.slashCursor >= len(matches) {
+		modal.OptionCursor = 0
+	} else {
+		modal.OptionCursor = m.slashCursor
 	}
-	return paletteStyle.Render(b.String())
+	return m.renderModalStateAligned(modal, height, lipgloss.Left, lipgloss.Bottom)
+}
+
+func slashCommandModalOptions(commands []slashCommand) []modalOption {
+	options := make([]modalOption, 0, len(commands))
+	for _, command := range commands {
+		options = append(options, modalOption{ID: command.Name, Label: command.Usage, Description: command.Description})
+	}
+	return options
 }
 
 func terminalSetupResultMessage(result terminalSetupResult) string {

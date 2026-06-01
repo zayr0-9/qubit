@@ -85,19 +85,30 @@ func (m model) renderMainArea(height int) string {
 		chatContent = m.renderForkTreeModal(bodyHeight)
 	}
 	chat := renderChat(chatContent, m.width, max(1, bodyHeight))
-
-	if m.mode == modeModal || m.mode == modeForkTree || m.mode == modeKeyEntry || !m.showSlashPalette() {
+	if m.mode != modeChat {
 		return lipgloss.JoinVertical(lipgloss.Left, header, chat)
 	}
-	palette := m.renderSlashPalette()
-	paletteHeight := lipgloss.Height(palette)
-	chatHeight := max(0, bodyHeight-paletteHeight)
-	if chatHeight > 0 {
-		chat = renderChat(chatContent, m.width, chatHeight)
-	} else {
-		chat = ""
+	if m.showSlashPalette() {
+		slashHeight := m.slashCommandModalHeight(bodyHeight)
+		chatHeight := max(0, bodyHeight-slashHeight)
+		if chatHeight > 0 {
+			chat = renderChat(chatContent, m.width, chatHeight)
+		} else {
+			chat = ""
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, header, chat, m.renderSlashCommandModal(slashHeight))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, header, chat, palette)
+	if m.showFileMentionPalette() {
+		fileHeight := m.fileMentionModalHeight(bodyHeight)
+		chatHeight := max(0, bodyHeight-fileHeight)
+		if chatHeight > 0 {
+			chat = renderChat(chatContent, m.width, chatHeight)
+		} else {
+			chat = ""
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, header, chat, m.renderFileMentionModal(fileHeight))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, header, chat)
 }
 
 func (m model) renderInput() string {
@@ -136,54 +147,65 @@ func (m model) renderInputStatus() string {
 }
 
 func (m model) renderFooter() string {
-	footer := "enter send · ctrl+a all · ctrl+c copy/quit · shift+arrows select · ctrl+j newline · pgup/pgdn scroll"
+	footer := "enter send | ctrl+a all | ctrl+c copy/quit | shift+arrows select | ctrl+j newline | pgup/pgdn scroll"
 	if m.keyboardEnhanced {
-		footer = "enter send · shift+enter newline · shift+arrows select · ctrl+shift+←/→ words · ctrl+a all · ctrl+c copy/quit"
+		footer = "enter send | shift+enter newline | shift+arrows select | ctrl+shift+left/right words | ctrl+a all | ctrl+c copy/quit"
 	}
 	if m.composer.HasSelection() {
-		footer = "selection · ctrl+c copy · type replace · backspace/delete remove · esc clear"
+		footer = "selection | ctrl+c copy | type replace | backspace/delete remove | esc clear"
 	}
 	if m.messageEdit.Active {
-		footer = "enter fork/reroll · ctrl+j newline · esc cancel edit"
+		footer = "enter fork/reroll | ctrl+j newline | esc cancel edit"
 	} else if m.forkSelector.Active {
-		footer = "↑/↓ choose message · enter edit/reroll · esc cancel"
+		footer = "up/down choose message | enter edit/reroll | esc cancel"
 	} else if m.mode == modeModal {
 		if m.modal != nil && len(m.modal.Options) > 0 {
-			footer = "↑/↓ choose option · ←/→ choose action · enter confirm · esc cancel"
+			footer = "up/down choose option | left/right choose action | enter confirm | esc cancel"
 		} else {
-			footer = "←/→ choose action · enter confirm · esc deny/cancel"
+			footer = "left/right choose action | enter confirm | esc deny/cancel"
 		}
 	} else if m.mode == modeForkTree {
-		footer = "↑/↓ select · ← parent · → child · wheel/pgup/pgdn preview · enter open session · esc close · text only"
+		footer = "up/down select | left parent | right child | wheel/pgup/pgdn preview | enter open session | esc close | text only"
 	} else if m.mode == modeKeyEntry {
-		footer = "enter next/save · ctrl+v paste · esc cancel · secret input is masked"
+		footer = "enter next/save | ctrl+v paste | esc cancel | secret input is masked"
 	} else if m.mode == modeThemeEntry {
-		footer = "↑/↓ preset · enter apply/next · tab field · d default · esc cancel"
+		footer = "up/down preset | enter apply/next | tab field | d default | esc cancel"
 	} else if m.mode == modeKeyPicker {
-		footer = "↑/↓ choose key · enter activate · a add · d delete · esc close"
+		footer = "up/down choose key | enter activate | a add | d delete | esc close"
 	} else if m.mode == modeSessionPicker {
-		footer = "↑/↓ choose session · enter switch · esc close"
+		footer = "up/down choose session | enter switch | esc close"
 	} else if m.showSlashPalette() {
-		footer = "↑/↓ choose command · enter/tab complete"
+		footer = "up/down choose command | enter/tab complete"
+	} else if m.showFileMentionPalette() {
+		footer = "up/down choose file | enter/tab insert"
 	}
 
 	footerText := mutedSt.Render(footer)
 	if m.err != "" {
 		copyHint := ""
 		if m.runtime != nil && m.runtime.logPath != "" {
-			copyHint = " · log: " + m.runtime.logPath
+			copyHint = " | log: " + m.runtime.logPath
 		}
 		footerText = errSt.Render(oneLine(m.err, max(20, m.width-20-len(copyHint))) + copyHint)
 	}
 	return footerStyle.Width(m.width).Render(footerText)
 }
-
 func (m model) renderModal(height int) string {
 	if m.modal == nil {
 		return ""
 	}
+	return m.renderModalState(*m.modal, height)
+}
 
-	modal := *m.modal
+func (m model) renderModalState(modal modalState, height int) string {
+	return m.renderModalStateAligned(modal, height, lipgloss.Center, lipgloss.Bottom)
+}
+func (m model) renderModalStateAligned(modal modalState, height int, horizontal lipgloss.Position, vertical lipgloss.Position) string {
+	panel := m.renderModalPanel(modal, height)
+	return m.placeModalPanel(panel, height, horizontal, vertical)
+}
+
+func (m model) renderModalPanel(modal modalState, height int) string {
 	panelWidth := min(max(48, m.width-12), 92)
 	contentWidth := max(20, panelWidth-6)
 
@@ -214,11 +236,22 @@ func (m model) renderModal(height int) string {
 
 	if len(modal.Options) > 0 {
 		b.WriteString("\n\n")
-		for i, option := range modal.Options {
+		optionRows := max(1, height-renderedLineCount(b.String())-4)
+		window := visibleListWindow(len(modal.Options), modal.OptionCursor, optionRows)
+		if window.HasAbove {
+			b.WriteString(mutedSt.Render(fmt.Sprintf("  more above (%d)", window.Start)))
+			b.WriteString("\n")
+		}
+		for i := window.Start; i < window.End; i++ {
+			option := modal.Options[i]
 			marker := "  "
 			label := lipgloss.NewStyle().Foreground(cyan).Bold(true).Render(option.Label)
 			description := mutedSt.Render(option.Description)
-			line := fmt.Sprintf("%s%s", label, descriptionSuffix(description))
+			activeMarker := " "
+			if option.Active {
+				activeMarker = "•"
+			}
+			line := fmt.Sprintf("%s%s%s", activeMarker, label, descriptionSuffix(description))
 			if i == modal.OptionCursor {
 				marker = selectSt.Render("› ")
 				line = selectSt.Render(line)
@@ -226,9 +259,12 @@ func (m model) renderModal(height int) string {
 				marker = mutedSt.Render(marker)
 			}
 			b.WriteString(marker + line)
-			if i < len(modal.Options)-1 {
+			if i < window.End-1 || window.HasBelow {
 				b.WriteString("\n")
 			}
+		}
+		if window.HasBelow {
+			b.WriteString(mutedSt.Render(fmt.Sprintf("  more below (%d)", len(modal.Options)-window.End)))
 		}
 	}
 
@@ -250,8 +286,11 @@ func (m model) renderModal(height int) string {
 		}
 	}
 
-	panel := lipgloss.NewStyle().Background(surface).Foreground(text).Padding(1, 2).Width(panelWidth).Render(b.String())
-	return lipgloss.Place(max(1, m.width-4), max(1, height), lipgloss.Center, lipgloss.Bottom, panel)
+	return lipgloss.NewStyle().Foreground(text).Padding(1, 2).Width(panelWidth).Render(b.String())
+}
+
+func (m model) placeModalPanel(panel string, height int, horizontal lipgloss.Position, vertical lipgloss.Position) string {
+	return lipgloss.Place(max(1, m.width-4), max(1, height), horizontal, vertical, panel)
 }
 
 func descriptionSuffix(description string) string {
@@ -288,7 +327,7 @@ func (m model) renderSessionPicker() string {
 			b.WriteString("\n")
 		}
 	}
-	return lipgloss.NewStyle().Background(surface).Padding(1, 2).Width(max(20, m.width-4)).Render(b.String())
+	return lipgloss.NewStyle().Padding(1, 2).Width(max(20, m.width-4)).Render(b.String())
 }
 
 func (m *model) refreshViewport() {

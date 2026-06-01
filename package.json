@@ -10,6 +10,8 @@
     "build": "pnpm run build:runtime && pnpm run build:cli",
     "build:runtime": "tsc -p tsconfig.json",
     "build:cli": "go build -o bin/qubit.exe .",
+    "test": "node --import tsx --test tools/**/*.test.ts utils/**/*.test.ts",
+    "test:runtime": "pnpm run test",
     "check": "pnpm run check:runtime && go test ./...",
     "check:runtime": "tsc --noEmit -p tsconfig.json && pnpm run build:runtime && node dist/runtime.js --check"
   },
@@ -32,6 +34,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }
 }

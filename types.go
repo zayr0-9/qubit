@@ -124,6 +124,25 @@ type messageEditState struct {
 	Original     string
 }
 
+type fileMentionEntry struct {
+	Path  string
+	Name  string
+	IsDir bool
+}
+
+type fileMentionSelection struct {
+	Display string
+	Path    string
+}
+
+type fileMentionState struct {
+	Entries    []fileMentionEntry
+	Cursor     int
+	IndexedCwd string
+	Err        string
+	Selections []fileMentionSelection
+}
+
 type uiMode int
 
 const (
@@ -163,11 +182,11 @@ type modalField struct {
 	Label string
 	Value string
 }
-
 type modalOption struct {
 	ID          string
 	Label       string
 	Description string
+	Active      bool
 }
 
 type modalState struct {
@@ -276,6 +295,7 @@ type runtimeErrMsg struct{ err error }
 type sendDoneMsg struct{ err error }
 type terminalSetupResultMsg terminalSetupResult
 type fakeStreamTickMsg struct{}
+type toolCallRevealTickMsg struct{}
 
 type runtimeClient struct {
 	cmd       *exec.Cmd
@@ -328,6 +348,7 @@ type model struct {
 	sessionCursor int
 	apiKeyCursor  int
 	slashCursor   int
+	fileMention   fileMentionState
 	modal         *modalState
 	keyEntry      *keyEntryState
 	themeEntry    *themeEntryState
@@ -335,6 +356,10 @@ type model struct {
 	autoScroll    bool
 	toolHitboxes  []toolHitbox
 	chatTopY      int
+
+	toolCallRevealing          bool
+	toolCallRevealMessageIndex int
+	toolCallRevealVisibleRunes int
 
 	streaming             bool
 	streamingMessageIndex int

@@ -82,6 +82,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateTerminalSetupResult(terminalSetupResult(msg)), nil
 	case fakeStreamTickMsg:
 		return m.updateFakeStreamTick()
+	case toolCallRevealTickMsg:
+		return m.updateToolCallRevealTick()
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -138,6 +140,10 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case "esc":
+		if m.showFileMentionPalette() {
+			m.fileMention.Cursor = 0
+			return m, nil
+		}
 		if m.messageEdit.Active {
 			m.messageEdit = messageEditState{}
 			m.composer.Reset()
@@ -158,10 +164,15 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		return m, tea.Quit
+		m.status = "ready"
+		return m, nil
 	case "up", "ctrl+p":
 		if m.showSlashPalette() {
 			m.moveSlashCursor(-1)
+			return m, nil
+		}
+		if m.showFileMentionPalette() {
+			m.moveFileMentionCursor(-1)
 			return m, nil
 		}
 		if next, ok := m.cycleInputHistory(-1); ok {
@@ -172,6 +183,10 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.moveSlashCursor(1)
 			return m, nil
 		}
+		if m.showFileMentionPalette() {
+			m.moveFileMentionCursor(1)
+			return m, nil
+		}
 		if next, ok := m.cycleInputHistory(1); ok {
 			return next, nil
 		}
@@ -180,14 +195,30 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.moveSlashCursor(-1)
 			return m, nil
 		}
+		if m.showFileMentionPalette() {
+			m.moveFileMentionCursor(-1)
+			return m, nil
+		}
 		return m.cyclePermissionMode()
 	case "tab":
 		if m.showSlashPalette() {
 			return m.acceptSlashSelection()
 		}
+		if m.showFileMentionPalette() {
+			if next, ok := m.acceptFileMentionSelection(); ok {
+				next.layout()
+				return next, nil
+			}
+		}
 	case "enter":
 		if m.showSlashPalette() {
 			return m.acceptSlashSelection()
+		}
+		if m.showFileMentionPalette() {
+			if next, ok := m.acceptFileMentionSelection(); ok {
+				next.layout()
+				return next, nil
+			}
 		}
 		return m.submitInput()
 	case "pgup":
@@ -208,6 +239,15 @@ func (m model) updateComposerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if handled {
 		m.inputHistoryActive = false
 		m.inputHistoryIndex = len(m.inputHistory)
+		if m.showFileMentionPalette() {
+			m.ensureFileMentionIndex()
+			matches := m.filteredFileMentionEntries()
+			if len(matches) == 0 {
+				m.fileMention.Cursor = 0
+			} else if m.fileMention.Cursor >= len(matches) {
+				m.fileMention.Cursor = 0
+			}
+		}
 		m.layout()
 		return m, cmd
 	}
@@ -231,7 +271,7 @@ func (m model) updateMouseClick(msg tea.MouseClickMsg) tea.Model {
 	if mouse.Button != tea.MouseLeft || mouse.Y < m.chatTopY || mouse.Y >= m.chatTopY+m.viewport.Height() {
 		return m
 	}
-	contentY := m.viewport.YOffset() + mouse.Y - m.chatTopY + 1
+	contentY := m.viewport.YOffset() + mouse.Y - m.chatTopY
 	for _, hitbox := range m.toolHitboxes {
 		if contentY >= hitbox.StartY && contentY <= hitbox.EndY {
 			m.autoScroll = false
@@ -274,6 +314,7 @@ func (m model) submitInput() (tea.Model, tea.Cmd) {
 	if input == "" || m.busy || !m.ready {
 		return m, nil
 	}
+	input = m.expandFileMentionsForSend(input)
 
 	m.composer.Reset()
 	m.layout()
@@ -401,11 +442,12 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	case "tool.permission.request":
 		if m.permissionMode == permissionModeAlwaysAllow {
 			m.status = "thinking"
-			return m, sendRuntime(m.runtime, map[string]any{"type": "tool.permission.response", "id": ev.ID, "allow": true})
+			return m, tea.Batch(sendRuntime(m.runtime, map[string]any{"type": "tool.permission.response", "id": ev.ID, "allow": true}), waitRuntimeEvent(m.runtime))
 		}
 		m = m.openToolPermissionModal(ev)
 	case "tool.call.start":
 		m.applyToolCallStart(ev)
+		return m, tea.Batch(waitRuntimeEvent(m.runtime), toolCallRevealTick())
 	case "tool.call.finish":
 		m.applyToolCallFinish(ev)
 	case "session.created":
@@ -714,15 +756,10 @@ func (m *model) layout() {
 	mainHeight := max(1, m.height-bottomHeight)
 	bodyHeight := max(1, mainHeight-lipgloss.Height(header))
 	m.chatTopY = lipgloss.Height(header)
-	paletteHeight := 0
-	if m.showSlashPalette() {
-		paletteHeight = lipgloss.Height(m.renderSlashPalette())
-	}
-
 	previousYOffset := m.viewport.YOffset()
 	previousWidth := m.viewport.Width()
 	m.viewport.SetWidth(chatW)
-	m.viewport.SetHeight(max(1, bodyHeight-paletteHeight))
+	m.viewport.SetHeight(max(1, bodyHeight))
 	if previousWidth != chatW {
 		m.refreshViewport()
 		return

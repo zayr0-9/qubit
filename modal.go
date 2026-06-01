@@ -84,7 +84,7 @@ func (m model) openProviderSelectorModal() model {
 		if provider.ID == activeProvider {
 			activeIndex = i
 		}
-		options = append(options, modalOption{ID: provider.ID, Label: provider.Label, Description: provider.Description})
+		options = append(options, modalOption{ID: provider.ID, Label: provider.Label, Description: provider.Description, Active: provider.ID == activeProvider})
 	}
 	m.modal = &modalState{
 		ID:           "provider_selector",
@@ -116,7 +116,7 @@ func (m model) openModelSelectorModal(models []modelInfo) model {
 		if info.Active {
 			activeIndex = i
 		}
-		options = append(options, modalOption{ID: info.ID, Label: label, Description: info.Description})
+		options = append(options, modalOption{ID: info.ID, Label: label, Description: info.Description, Active: info.Active})
 	}
 	if len(options) == 0 {
 		options = []modalOption{{ID: fallback(m.model, "glm-4.6"), Label: fallback(m.model, "glm-4.6"), Description: "Current runtime model"}}
@@ -254,7 +254,7 @@ func (m model) resolveModalAction(actionID string) (tea.Model, tea.Cmd) {
 			payload["reason"] = "Denied by user."
 		}
 		m.status = "thinking"
-		return m, sendRuntime(m.runtime, payload)
+		return m, tea.Batch(sendRuntime(m.runtime, payload), waitRuntimeEvent(m.runtime))
 	}
 
 	if modal.Kind == modalKindConfirm {

@@ -28,6 +28,10 @@ func TestToolCallEventsGroupSameTool(t *testing.T) {
 	if len(group.Calls) != 2 {
 		t.Fatalf("tool call count = %d, want 2", len(group.Calls))
 	}
+	for i := 0; m.toolCallRevealing && i < 20; i++ {
+		updatedModel, _ := m.updateToolCallRevealTick()
+		m = updatedModel.(model)
+	}
 	viewport := plainText(m.viewport.View())
 	if !strings.Contains(viewport, "Read 2 files") {
 		t.Fatalf("viewport = %q, want grouped read label", viewport)
@@ -93,7 +97,7 @@ func TestToolGroupExpandedRenderingAndMouseToggle(t *testing.T) {
 	if len(m.toolHitboxes) == 0 {
 		t.Fatal("tool hitbox missing")
 	}
-	updated := m.updateMouseClick(tea.MouseClickMsg{X: 2, Y: m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset() - 1, Button: tea.MouseLeft}).(model)
+	updated := m.updateMouseClick(tea.MouseClickMsg{X: 2, Y: m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset(), Button: tea.MouseLeft}).(model)
 	if !updated.messages[1].ToolGroup.Expanded {
 		t.Fatal("tool group not expanded after click")
 	}
@@ -153,7 +157,7 @@ func TestExpandedToolGroupHitboxOnlyCoversHeader(t *testing.T) {
 		t.Fatalf("hitbox = %#v, want single header row", m.toolHitboxes[0])
 	}
 
-	detailClickY := m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset()
+	detailClickY := m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset() + 1
 	updated := m.updateMouseClick(tea.MouseClickMsg{X: 4, Y: detailClickY, Button: tea.MouseLeft}).(model)
 	if !updated.messages[1].ToolGroup.Expanded {
 		t.Fatal("detail-row click collapsed group; want only header row clickable")
@@ -213,5 +217,75 @@ func TestToolGroupShowsDevDetailsWithFlag(t *testing.T) {
 	viewport := plainText(m.viewport.View())
 	if !strings.Contains(viewport, "duration: 9ms") || !strings.Contains(viewport, "size: 1234 bytes") || !strings.Contains(viewport, "completed · 9ms") {
 		t.Fatalf("viewport = %q, want duration/size with dev flag", viewport)
+	}
+}
+
+func TestToolCallStartAnimatesLabelReveal(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "read"}}
+
+	m.applyToolCallStart(runtimeEvent{
+		Type:       "tool.call.start",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "read_1",
+		ToolName:   "readFile",
+		Status:     "running",
+		Args:       map[string]any{"path": "agent.md"},
+	})
+
+	if !m.toolCallRevealing {
+		t.Fatal("toolCallRevealing = false, want true")
+	}
+	initialViewport := plainText(m.viewport.View())
+	if strings.Contains(initialViewport, "Read 1 file") {
+		t.Fatalf("viewport = %q, want partial tool label before reveal ticks", initialViewport)
+	}
+
+	updatedModel, cmd := m.updateToolCallRevealTick()
+	m = updatedModel.(model)
+	if cmd == nil {
+		t.Fatal("first reveal tick returned nil command, want next tick")
+	}
+	if !m.toolCallRevealing {
+		t.Fatal("toolCallRevealing = false after partial tick, want true")
+	}
+	if m.toolCallRevealVisibleRunes != 4 {
+		t.Fatalf("visible runes = %d, want one-rune reveal step for short label", m.toolCallRevealVisibleRunes)
+	}
+	if strings.Contains(plainText(m.viewport.View()), "Read 1 file") {
+		t.Fatalf("viewport = %q, want short label to remain partial after one tick", plainText(m.viewport.View()))
+	}
+
+	for i := 0; m.toolCallRevealing && i < 20; i++ {
+		updatedModel, _ = m.updateToolCallRevealTick()
+		m = updatedModel.(model)
+	}
+	if m.toolCallRevealing {
+		t.Fatal("toolCallRevealing = true after draining ticks, want false")
+	}
+	if !strings.Contains(plainText(m.viewport.View()), "Read 1 file") {
+		t.Fatalf("viewport = %q, want full tool label after reveal", plainText(m.viewport.View()))
+	}
+}
+
+func TestToolCallFinishCompletesActiveReveal(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "search"}}
+
+	m.applyToolCallStart(runtimeEvent{Type: "tool.call.start", SessionID: "sess_1", Step: 1, ToolCallID: "rg_1", ToolName: "ripgrep", Status: "running", Args: map[string]any{"pattern": "tool.call"}})
+	m.applyToolCallFinish(runtimeEvent{Type: "tool.call.finish", SessionID: "sess_1", Step: 1, ToolCallID: "rg_1", ToolName: "ripgrep", Status: "completed", Result: map[string]any{"matchCount": float64(7)}})
+
+	viewport := plainText(m.viewport.View())
+	if !strings.Contains(viewport, "Searched 1 time") || !strings.Contains(viewport, "7 matches") {
+		t.Fatalf("viewport = %q, want completed full tool label", viewport)
 	}
 }

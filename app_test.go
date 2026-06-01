@@ -398,6 +398,25 @@ func TestEscapeWhileThinkingSendsCancel(t *testing.T) {
 	}
 }
 
+func TestEscapeInIdleChatDoesNotQuit(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.status = "ready"
+
+	updated, cmd := m.updateKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatal("idle escape returned command, want nil")
+	}
+	if got.mode != modeChat {
+		t.Fatalf("mode = %v, want chat", got.mode)
+	}
+	if got.status != "ready" {
+		t.Fatalf("status = %q, want ready", got.status)
+	}
+}
+
 func TestFakeStreamTickAfterAbortKeepsPartialContent(t *testing.T) {
 	m := model{
 		busy:     false,
@@ -1517,5 +1536,262 @@ func TestFilteredSlashCommandsPrioritizesNameMatches(t *testing.T) {
 		if seenDescriptionOnly && strings.Contains(command.Name, "provider") {
 			t.Fatalf("name match %q appeared after description-only match; matches=%#v", command.Name, matches)
 		}
+	}
+}
+
+func TestStreamingLifecycleAfterToolCalls(t *testing.T) {
+	// Simulate the full event sequence: run_started → tool.call.start →
+	// tool.call.finish → assistant → run_finished, verifying that streaming
+	// starts correctly after the assistant event and that run_finished properly
+	// completes the lifecycle, including draining remaining content.
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	// 1. run_started
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "run_started", RunID: "run_tool", SessionID: "sess_1"})
+	m = updated.(model)
+	if !m.busy {
+		t.Fatal("busy = false after run_started, want true")
+	}
+	if m.activeRunID != "run_tool" {
+		t.Fatalf("activeRunID = %q, want run_tool", m.activeRunID)
+	}
+	if m.status != "thinking" {
+		t.Fatalf("status = %q, want thinking after run_started", m.status)
+	}
+
+	// 2. tool.call.start (editFile)
+	m.applyToolCallStart(runtimeEvent{
+		Type:       "tool.call.start",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "edit_1",
+		ToolName:   "editFile",
+		Status:     "running",
+		Args:       map[string]any{"path": "test.txt", "operation": "replace"},
+	})
+	if m.status != "using tools" {
+		t.Fatalf("status = %q after tool.call.start, want 'using tools'", m.status)
+	}
+
+	// 3. tool.call.finish (editFile)
+	m.applyToolCallFinish(runtimeEvent{
+		Type:       "tool.call.finish",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "edit_1",
+		ToolName:   "editFile",
+		Status:     "completed",
+		Result:     map[string]any{"success": true, "replacements": float64(1)},
+	})
+	if m.status != "thinking" {
+		t.Fatalf("status = %q after tool.call.finish, want 'thinking'", m.status)
+	}
+
+	// 4. assistant event — should start streaming
+	updated, cmd := m.updateRuntime(runtimeEvent{
+		Type:      "assistant",
+		SessionID: "sess_1",
+		RunID:     "run_tool",
+		Content:   "I've edited the file for you.",
+	})
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("assistant event returned nil command, want fake stream tick")
+	}
+	if !m.streaming {
+		t.Fatal("streaming = false after assistant event, want true")
+	}
+	if m.streamingFullContent != "I've edited the file for you." {
+		t.Fatalf("streamingFullContent = %q, want assistant content", m.streamingFullContent)
+	}
+	if m.streamingFinished {
+		t.Fatal("streamingFinished = true before run_finished, want false")
+	}
+
+	// 5. run_finished arrives while streaming — should set streamingFinished
+	updated, _ = m.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_tool", Status: "completed"})
+	m = updated.(model)
+	if !m.streaming {
+		t.Fatal("streaming = false after run_finished during streaming, want true")
+	}
+	if !m.streamingFinished {
+		t.Fatal("streamingFinished = false after run_finished, want true")
+	}
+	if !m.busy {
+		t.Fatal("busy = false while streaming not yet drained, want true")
+	}
+	if m.streamingFinishStatus != "completed" {
+		t.Fatalf("streamingFinishStatus = %q, want completed", m.streamingFinishStatus)
+	}
+
+	// 6. Drain fake stream ticks until streaming completes
+	for i := 0; m.streaming && i < 100; i++ {
+		updated, _ = m.updateFakeStreamTick()
+		m = updated.(model)
+	}
+	if m.streaming {
+		t.Fatal("streaming = true after draining all ticks, want false")
+	}
+	if m.busy {
+		t.Fatal("busy = true after stream drained and run_finished, want false")
+	}
+	if m.activeRunID != "" {
+		t.Fatalf("activeRunID = %q after completion, want empty", m.activeRunID)
+	}
+	if m.status != "completed" {
+		t.Fatalf("status = %q after completion, want completed", m.status)
+	}
+	// Verify the assistant content was fully rendered
+	foundAssistant := false
+	for _, msg := range m.messages {
+		if msg.Role == "assistant" && msg.Content == "I've edited the file for you." {
+			foundAssistant = true
+			break
+		}
+	}
+	if !foundAssistant {
+		t.Fatalf("assistant message not found in messages after stream completion; messages=%#v", m.messages)
+	}
+}
+
+func TestRunFinishedWithoutAssistantAfterToolCall(t *testing.T) {
+	// Test the edge case: after tool.call.finish, if run_finished arrives
+	// before any assistant event (no assistant response after tool use),
+	// the model should transition cleanly to not-busy.
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	// 1. run_started
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "run_started", RunID: "run_silent", SessionID: "sess_1"})
+	m = updated.(model)
+	if !m.busy {
+		t.Fatal("busy = false after run_started, want true")
+	}
+
+	// 2. tool.call.start
+	m.applyToolCallStart(runtimeEvent{
+		Type: "tool.call.start", SessionID: "sess_1", Step: 1,
+		ToolCallID: "call_1", ToolName: "readFile", Status: "running",
+	})
+
+	// 3. tool.call.finish
+	m.applyToolCallFinish(runtimeEvent{
+		Type: "tool.call.finish", SessionID: "sess_1", Step: 1,
+		ToolCallID: "call_1", ToolName: "readFile", Status: "completed",
+	})
+
+	// 4. run_finished without any intervening assistant event
+	// This is the "edit file breaks streaming" scenario — the model
+	// doesn't produce an assistant response after the tool call.
+	updated, _ = m.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_silent", Status: "completed"})
+	m = updated.(model)
+
+	// Since there's no streaming active, run_finished should directly clear busy
+	if m.busy {
+		t.Fatal("busy = true after run_finished with no streaming, want false")
+	}
+	if m.activeRunID != "" {
+		t.Fatalf("activeRunID = %q after run_finished, want empty", m.activeRunID)
+	}
+	if m.status != "completed" {
+		t.Fatalf("status = %q after run_finished, want completed", m.status)
+	}
+	// Streaming should not be stuck on
+	if m.streaming {
+		t.Fatal("streaming = true after run_finished with no assistant event, want false")
+	}
+}
+
+func TestMultipleToolCallsBeforeAssistant(t *testing.T) {
+	// Verify that multiple tool calls (e.g. editFile then readFile) followed
+	// by an assistant event produce correct streaming behavior.
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	// run_started
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "run_started", RunID: "run_multi", SessionID: "sess_1"})
+	m = updated.(model)
+
+	// First tool: editFile
+	m.applyToolCallStart(runtimeEvent{
+		Type: "tool.call.start", SessionID: "sess_1", Step: 1,
+		ToolCallID: "edit_1", ToolName: "editFile", Status: "running",
+	})
+	m.applyToolCallFinish(runtimeEvent{
+		Type: "tool.call.finish", SessionID: "sess_1", Step: 1,
+		ToolCallID: "edit_1", ToolName: "editFile", Status: "completed",
+	})
+
+	// Second tool: readFile (same step — grouped)
+	m.applyToolCallStart(runtimeEvent{
+		Type: "tool.call.start", SessionID: "sess_1", Step: 1,
+		ToolCallID: "read_1", ToolName: "readFile", Status: "running",
+	})
+	m.applyToolCallFinish(runtimeEvent{
+		Type: "tool.call.finish", SessionID: "sess_1", Step: 1,
+		ToolCallID: "read_1", ToolName: "readFile", Status: "completed",
+	})
+
+	// assistant event
+	updated, cmd := m.updateRuntime(runtimeEvent{
+		Type: "assistant", SessionID: "sess_1", RunID: "run_multi",
+		Content: "Done with both tools.",
+	})
+	m = updated.(model)
+	if !m.streaming {
+		t.Fatal("streaming = false after assistant event, want true")
+	}
+	if cmd == nil {
+		t.Fatal("assistant event returned nil command, want fake stream tick")
+	}
+
+	// run_finished while streaming
+	updated, _ = m.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_multi", Status: "completed"})
+	m = updated.(model)
+	if !m.streamingFinished {
+		t.Fatal("streamingFinished = false after run_finished, want true")
+	}
+
+	// Drain fake stream ticks until streaming completes
+	for i := 0; m.streaming && i < 100; i++ {
+		updated, _ = m.updateFakeStreamTick()
+		m = updated.(model)
+	}
+	if m.streaming {
+		t.Fatal("streaming = true after draining all ticks, want false")
+	}
+	if m.busy {
+		t.Fatal("busy = true after drain, want false")
+	}
+}
+
+func TestRenderSlashCommandsUsesModalListWindow(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 12
+	m.ready = true
+	m.composer.SetValue("/")
+	m.slashCursor = len(slashCommands) - 1
+
+	rendered := plainText(m.renderSlashCommandModal(8))
+	last := slashCommands[len(slashCommands)-1]
+	if !strings.Contains(rendered, last.Usage) {
+		t.Fatalf("rendered slash modal missing selected command %q:\n%s", last.Usage, rendered)
+	}
+	if strings.Contains(rendered, slashCommands[0].Usage) {
+		t.Fatalf("rendered slash modal includes hidden first command:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "more above") {
+		t.Fatalf("rendered slash modal missing list-window hint:\n%s", rendered)
 	}
 }

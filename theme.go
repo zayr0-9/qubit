@@ -266,7 +266,7 @@ func (m model) renderThemeEntry(height int) string {
 	b.WriteString("\n")
 	b.WriteString(mutedSt.Render(wrap("Custom colors accept #RRGGBB or RRGGBB. Example: #easd217 is invalid because hex uses only 0-9 and A-F.", contentWidth)))
 
-	panel := lipgloss.NewStyle().Background(surface).Foreground(text).Padding(1, 2).Width(panelWidth).Render(b.String())
+	panel := lipgloss.NewStyle().Foreground(text).Padding(1, 2).Width(panelWidth).Render(b.String())
 	return lipgloss.Place(max(1, m.width-4), max(1, height), lipgloss.Center, lipgloss.Bottom, panel)
 }
 

@@ -539,7 +539,7 @@ async function handleLine(line) {
       signal: controller.signal,
       sessionId: runSessionId,
       input: request.input,
-      maxSteps: 4,
+      maxSteps: 400,
       metadata: { workspaceCwd: getDefaultToolCwd() },
     });
 
@@ -960,8 +960,8 @@ async function writeModelUpdated(id, status) {
 function normalizeModel(value) {
   const normalized = String(value || "").trim();
   if (!normalized) throw new Error("Model is required.");
-  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(normalized)) {
-    throw new Error("Model may contain only letters, numbers, dash, underscore, dot, and colon.");
+  if (!/^[A-Za-z0-9_.:/-]{1,128}$/.test(normalized)) {
+    throw new Error("Model may contain only letters, numbers, dash, underscore, dot, colon, and slash.");
   }
   return normalized;
 }

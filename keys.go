@@ -332,7 +332,7 @@ func (m model) renderKeyPicker() string {
 	b.WriteString(mutedSt.Render("↑/↓ select · enter activate · a add · d delete · esc close") + "\n\n")
 	if len(m.apiKeys) == 0 {
 		b.WriteString(mutedSt.Render("no api keys configured · press a to add a secure OS keychain key"))
-		return lipgloss.NewStyle().Background(surface).Padding(1, 2).Width(max(20, m.width-4)).Render(b.String())
+		return lipgloss.NewStyle().Padding(1, 2).Width(max(20, m.width-4)).Render(b.String())
 	}
 	for i, key := range m.apiKeys {
 		active := " "
@@ -354,7 +354,7 @@ func (m model) renderKeyPicker() string {
 			b.WriteString("\n")
 		}
 	}
-	return lipgloss.NewStyle().Background(surface).Padding(1, 2).Width(max(20, m.width-4)).Render(b.String())
+	return lipgloss.NewStyle().Padding(1, 2).Width(max(20, m.width-4)).Render(b.String())
 }
 
 func (m model) renderKeyEntry(height int) string {
@@ -387,7 +387,7 @@ func (m model) renderKeyEntry(height int) string {
 	b.WriteString("\n\n")
 	b.WriteString(mutedSt.Render("provider: ↑/↓ choose · enter next/save · ctrl+v paste · esc cancel"))
 
-	panel := lipgloss.NewStyle().Background(surface).Foreground(text).Padding(1, 2).Width(panelWidth).Render(b.String())
+	panel := lipgloss.NewStyle().Foreground(text).Padding(1, 2).Width(panelWidth).Render(b.String())
 	return lipgloss.Place(max(1, m.width-4), max(1, height), lipgloss.Center, lipgloss.Bottom, panel)
 }
 

@@ -196,7 +196,7 @@ func TestAlwaysAllowPermissionModeAutoApproves(t *testing.T) {
 	if got.status != "thinking" {
 		t.Fatalf("status = %q, want thinking", got.status)
 	}
-	payload := runSendCommand(t, cmd, stdin)
+	payload := runBatchSendCommand(t, cmd, stdin, "tool.permission.response")
 	if payload["type"] != "tool.permission.response" {
 		t.Fatalf("payload type = %#v, want tool.permission.response; payload=%#v", payload["type"], payload)
 	}
@@ -340,5 +340,37 @@ func TestProviderSelectorCanPersistDefaultProvider(t *testing.T) {
 	}
 	if payload["persistDefault"] != true {
 		t.Fatalf("persistDefault = %#v, want true", payload["persistDefault"])
+	}
+}
+
+func TestRenderModalKeepsSelectedOptionVisible(t *testing.T) {
+	m := model{width: 80, height: 12, mode: modeModal, modal: &modalState{
+		Title:        "Choose item",
+		Description:  "Pick one.",
+		OptionCursor: 8,
+		Options: []modalOption{
+			{ID: "one", Label: "Option one"},
+			{ID: "two", Label: "Option two"},
+			{ID: "three", Label: "Option three"},
+			{ID: "four", Label: "Option four"},
+			{ID: "five", Label: "Option five"},
+			{ID: "six", Label: "Option six"},
+			{ID: "seven", Label: "Option seven"},
+			{ID: "eight", Label: "Option eight"},
+			{ID: "nine", Label: "Option nine"},
+			{ID: "ten", Label: "Option ten"},
+		},
+		Actions: []modalAction{{ID: "select", Label: "Select"}},
+	}}
+
+	rendered := plainText(m.renderModal(8))
+	if !strings.Contains(rendered, "Option nine") {
+		t.Fatalf("rendered modal does not include selected option:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Option one") {
+		t.Fatalf("rendered modal includes hidden first option:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "more above") {
+		t.Fatalf("rendered modal missing above hint:\n%s", rendered)
 	}
 }

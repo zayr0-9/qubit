@@ -5,6 +5,9 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 type toolCallUI struct {
@@ -43,6 +46,7 @@ func (m *model) applyToolCallStart(ev runtimeEvent) {
 		call.Status = "running"
 	}
 	upsertToolCall(group, call)
+	m.startToolCallReveal(group)
 	m.status = "using tools"
 	m.refreshViewport()
 }
@@ -54,6 +58,7 @@ func (m *model) applyToolCallFinish(ev runtimeEvent) {
 	group := m.ensureToolGroup(ev.ToolName, ev.Step)
 	call := toolCallFromEvent(ev)
 	upsertToolCall(group, call)
+	m.completeToolCallReveal(group)
 	m.status = "thinking"
 	m.refreshViewport()
 }
@@ -70,6 +75,93 @@ func toolCallFromEvent(ev runtimeEvent) toolCallUI {
 		FinishedAt: ev.FinishedAt,
 		DurationMs: ev.DurationMs,
 	}
+}
+
+func (m *model) startToolCallReveal(group *toolGroup) {
+	messageIndex := m.toolGroupMessageIndex(group)
+	if messageIndex < 0 {
+		return
+	}
+	labelRunes := len([]rune(toolGroupLabel(group)))
+	m.toolCallRevealing = true
+	m.toolCallRevealMessageIndex = messageIndex
+	m.toolCallRevealVisibleRunes = min(3, max(1, labelRunes))
+}
+
+func (m *model) completeToolCallReveal(group *toolGroup) {
+	if group == nil || !m.toolCallRevealing {
+		return
+	}
+	messageIndex := m.toolGroupMessageIndex(group)
+	if messageIndex != m.toolCallRevealMessageIndex {
+		return
+	}
+	m.toolCallRevealVisibleRunes = len([]rune(toolGroupLabel(group)))
+}
+
+func (m model) updateToolCallRevealTick() (tea.Model, tea.Cmd) {
+	if !m.toolCallRevealing {
+		return m, nil
+	}
+	if m.toolCallRevealMessageIndex < 0 || m.toolCallRevealMessageIndex >= len(m.messages) {
+		m.clearToolCallReveal()
+		return m, nil
+	}
+	group := m.messages[m.toolCallRevealMessageIndex].ToolGroup
+	if group == nil {
+		m.clearToolCallReveal()
+		return m, nil
+	}
+	labelRunes := len([]rune(toolGroupLabel(group)))
+	if m.toolCallRevealVisibleRunes < labelRunes {
+		m.toolCallRevealVisibleRunes = min(labelRunes, m.toolCallRevealVisibleRunes+toolCallRevealChunkSize(labelRunes, m.toolCallRevealVisibleRunes))
+		m.refreshViewport()
+		return m, toolCallRevealTick()
+	}
+	m.clearToolCallReveal()
+	m.refreshViewport()
+	return m, nil
+}
+
+func (m *model) clearToolCallReveal() {
+	m.toolCallRevealing = false
+	m.toolCallRevealMessageIndex = 0
+	m.toolCallRevealVisibleRunes = 0
+}
+
+func (m *model) toolGroupMessageIndex(group *toolGroup) int {
+	if group == nil {
+		return -1
+	}
+	for i := range m.messages {
+		if m.messages[i].ToolGroup == group {
+			return i
+		}
+		if m.messages[i].ToolGroup != nil && m.messages[i].ToolGroup.ID == group.ID {
+			return i
+		}
+	}
+	return -1
+}
+
+const (
+	toolCallRevealTickInterval = 25 * time.Millisecond
+	toolCallRevealDuration     = 300 * time.Millisecond
+)
+
+func toolCallRevealTick() tea.Cmd {
+	return tea.Tick(toolCallRevealTickInterval, func(time.Time) tea.Msg {
+		return toolCallRevealTickMsg{}
+	})
+}
+
+func toolCallRevealChunkSize(totalRunes int, visibleRunes int) int {
+	remaining := totalRunes - visibleRunes
+	if remaining <= 0 {
+		return 0
+	}
+	steps := max(1, int(toolCallRevealDuration/toolCallRevealTickInterval))
+	return max(1, min(remaining, (totalRunes+steps-1)/steps))
 }
 
 func (m *model) ensureToolGroup(toolName string, step int) *toolGroup {
@@ -156,7 +248,7 @@ func (m *model) renderToolGroup(group *toolGroup, width int) string {
 	if group == nil {
 		return mutedSt.Render("tool activity")
 	}
-	label := toolGroupLabel(group)
+	label := m.visibleToolGroupLabel(group)
 	icon := "▸"
 	if group.Expanded {
 		icon = "▾"
@@ -181,6 +273,16 @@ func (m *model) renderToolGroup(group *toolGroup, width int) string {
 		return line
 	}
 	return line + "\n" + m.renderToolGroupDetails(group, width)
+}
+
+func (m *model) visibleToolGroupLabel(group *toolGroup) string {
+	label := toolGroupLabel(group)
+	if !m.toolCallRevealing || m.toolGroupMessageIndex(group) != m.toolCallRevealMessageIndex {
+		return label
+	}
+	runes := []rune(label)
+	visible := min(len(runes), max(1, m.toolCallRevealVisibleRunes))
+	return string(runes[:visible])
 }
 
 func toolGroupLabel(group *toolGroup) string {
