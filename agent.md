@@ -23,7 +23,7 @@ Qubit CLI
   Owns rendering, keyboard interaction, local UI state, slash command palette, and session picker.
 ```
 
-Current MVP scope is basic chat plus session UI, including transcript reload on session switch, session forking through `/fork`, a keyboard-first fork tree through `/tree`, and frontend-simulated assistant streaming. Archive/delete flows and true provider token streaming can come later.
+Current MVP scope is basic chat plus session UI, including transcript reload on session switch, session forking through `/fork`, edit/reroll forks from prior user messages, a keyboard-first fork tree through `/tree`, and frontend-simulated assistant streaming. Archive/delete flows and true provider token streaming can come later.
 
 ## Extra Context Files
 
@@ -179,6 +179,7 @@ Follow standard Go conventions:
 - New features and bug fixes must include meaningful tests at the right level, not only compile checks.
 - For user-visible feature work, add integration-style model/runtime-flow tests that exercise the complete interaction path where practical. For example: user input or keypress -> model update -> outbound runtime JSON command -> runtime event response -> final model/message/viewport state.
 - Session, slash-command, runtime-protocol, and transcript-loading changes should assert the exact outbound request type and important fields (`sessionId`, `title`, `input`, etc.), then simulate the expected runtime event and assert the resulting UI state.
+- Fork/edit/reroll flows must be tested end-to-end at the model/protocol boundary: selecting a fork point or edited message -> outbound `session.fork`, `chat`, or `session.messages` request -> runtime events -> final active session and transcript. Edited reroll forks must not merge the original edited-away message/response back into the loaded chat history.
 - Bubble Tea `tea.Cmd` and `tea.Batch` values should be tested carefully. Do not run blocking commands like `waitRuntimeEvent` sequentially in tests; use a recording/fake runtime client, inspect outbound JSON writes, and use short timeouts when probing batched commands.
 - Prefer focused integration-style tests in Go for CLI behavior over manual-only verification. Manual smoke checks are still useful for rendering/terminal behavior, but they should not be the only coverage for core flows.
 - When fixing a regression, add a test that would have failed before the fix.

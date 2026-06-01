@@ -66,7 +66,7 @@ func (s *forkTreeState) buildForkTreeLayout(currentSessionID string) {
 	roots := make([]int, 0)
 	for i := range s.Nodes {
 		parentID := s.Nodes[i].ParentSessionID
-		if parentID != "" {
+		if parentID != "" && !isVirtualRootFork(s.Nodes[i]) {
 			if parentIndex, ok := idToIndex[parentID]; ok && parentIndex != i {
 				s.Nodes[i].Parent = parentIndex
 				s.Nodes[parentIndex].Children = append(s.Nodes[parentIndex].Children, i)
@@ -123,6 +123,10 @@ func (s *forkTreeState) buildForkTreeLayout(currentSessionID string) {
 	if s.Selected < 0 || s.Selected >= len(s.Nodes) {
 		s.Selected = 0
 	}
+}
+
+func isVirtualRootFork(node forkTreeNode) bool {
+	return node.ParentSessionID != "" && node.ForkedFromMessageIndex == 0 && strings.HasPrefix(strings.TrimSpace(node.SessionTitle), "Edit:")
 }
 
 func (m model) updateForkTree(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

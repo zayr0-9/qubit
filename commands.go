@@ -10,7 +10,7 @@ import (
 
 var slashCommands = []slashCommand{
 	{Name: "new", Usage: "/new [title]", Description: "Create a new chat session", NeedsArg: false},
-	{Name: "fork", Usage: "/fork [title]", Description: "Fork current chat into a new session", NeedsArg: false},
+	{Name: "fork", Usage: "/fork [title]", Description: "Fork current chat from here or a previous user message", NeedsArg: false},
 	{Name: "tree", Usage: "/tree", Description: "Open the fork tree", NeedsArg: false, OpensOnSelect: true},
 	{Name: "sessions", Usage: "/sessions", Description: "Open the session picker", NeedsArg: false, OpensOnSelect: true},
 	{Name: "keys", Usage: "/keys", Description: "Manage provider API keys", NeedsArg: false, OpensOnSelect: true},
@@ -108,14 +108,10 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.status = "creating session"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.new", "title": title})
 	case "fork", "branch":
-		m.busy = true
-		m.autoNewSessionOnChat = false
-		m.status = "forking session"
-		payload := map[string]any{"type": "session.fork", "sessionId": m.session, "messageIndex": len(m.messages)}
-		if arg != "" {
-			payload["title"] = arg
+		if arg == "" {
+			return m.startForkSelector(), nil
 		}
-		return m, sendRuntime(m.runtime, payload)
+		return m.requestFork(len(m.messages), arg)
 	case "tree", "branches", "forks", "map":
 		m.mode = modeForkTree
 		m.forkTree = newForkTreeState()
@@ -170,12 +166,108 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title] - fork current chat into a new session\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <ask|always> - choose whether gated tools ask or auto-allow\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title] - fork current chat from here or a previous user message\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <ask|always> - choose whether gated tools ask or auto-allow\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
 		return m, nil
 	}
+}
+
+func (m model) requestFork(messageIndex int, title string) (tea.Model, tea.Cmd) {
+	m.busy = true
+	m.autoNewSessionOnChat = false
+	m.forkSelector = forkSelectorState{}
+	m.status = "forking session"
+	payload := map[string]any{"type": "session.fork", "sessionId": m.session, "messageIndex": messageIndex}
+	if title != "" {
+		payload["title"] = title
+	}
+	return m, sendRuntime(m.runtime, payload)
+}
+
+func (m model) startForkSelector() model {
+	m.forkSelector = forkSelectorState{Active: true, Points: m.forkPoints(), Cursor: -1}
+	m.status = "fork point"
+	m.composer.SetValue("/fork")
+	m.layout()
+	return m
+}
+
+func (m model) forkPoints() []forkPoint {
+	points := make([]forkPoint, 0)
+	for i, message := range m.messages {
+		if message.Role != "user" {
+			continue
+		}
+		content := strings.TrimSpace(normalizeInputNewlines(message.Content))
+		if content == "" {
+			continue
+		}
+		points = append(points, forkPoint{MessageIndex: i + 1, EditMessageIndex: i, Content: content})
+	}
+	return points
+}
+
+func (m model) updateForkSelector(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		if m.forkSelector.Cursor >= 0 && m.forkSelector.Cursor < len(m.forkSelector.Points) {
+			point := m.forkSelector.Points[m.forkSelector.Cursor]
+			m.forkSelector = forkSelectorState{}
+			m.messageEdit = messageEditState{Active: true, MessageIndex: point.EditMessageIndex, Original: point.Content}
+			m.composer.SetValue(point.Content)
+			m.status = "editing message"
+			m.layout()
+			return m, nil
+		}
+		m.composer.Reset()
+		m.layout()
+		return m.requestFork(len(m.messages), "")
+	case "up", "ctrl+p":
+		m.moveForkSelector(-1)
+		return m, nil
+	case "down", "ctrl+n":
+		m.moveForkSelector(1)
+		return m, nil
+	case "esc":
+		m.forkSelector = forkSelectorState{}
+		m.composer.Reset()
+		m.status = "ready"
+		m.layout()
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+
+	return m.updateComposerKey(msg)
+}
+
+func (m *model) moveForkSelector(delta int) {
+	if !m.forkSelector.Active || len(m.forkSelector.Points) == 0 {
+		return
+	}
+	if m.forkSelector.Cursor == -1 {
+		if delta < 0 {
+			m.forkSelector.Cursor = len(m.forkSelector.Points) - 1
+		} else {
+			return
+		}
+	} else {
+		m.forkSelector.Cursor += delta
+		if m.forkSelector.Cursor >= len(m.forkSelector.Points) {
+			m.forkSelector.Cursor = -1
+		} else if m.forkSelector.Cursor < 0 {
+			m.forkSelector.Cursor = 0
+		}
+	}
+	if m.forkSelector.Cursor == -1 {
+		m.composer.SetValue("/fork")
+	} else {
+		point := m.forkSelector.Points[m.forkSelector.Cursor]
+		m.composer.SetValue("/fork " + oneLine(point.Content, max(20, m.width-8)))
+	}
+	m.layout()
 }
 
 func (m model) setPermissionMode(arg string) (tea.Model, tea.Cmd) {
@@ -215,7 +307,7 @@ func (m model) permissionModeLabel() string {
 
 func (m model) showSlashPalette() bool {
 	value := m.composer.Value()
-	return strings.HasPrefix(value, "/") && !strings.Contains(value, " ") && m.mode == modeChat && !m.busy && m.ready
+	return strings.HasPrefix(value, "/") && !strings.Contains(value, " ") && m.mode == modeChat && !m.busy && m.ready && !m.forkSelector.Active
 }
 
 func (m model) filteredSlashCommands() []slashCommand {

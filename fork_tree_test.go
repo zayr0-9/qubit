@@ -148,3 +148,44 @@ func TestRenderForkTreeModalColorsSelectedNode(t *testing.T) {
 		t.Fatalf("rendered tree = %q, want ANSI colored selected node marker", rendered)
 	}
 }
+
+func TestForkTreeLayoutTreatsZeroIndexForksAsRootSiblings(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_edit"
+	m.mode = modeForkTree
+	m.forkTree = newForkTreeState()
+	m.applyForkTree(runtimeEvent{Type: "session.tree", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_root", SessionID: "sess_root", SessionTitle: "Root", MessageRole: "user", MessageContent: "Hi there"},
+		{ID: "sess_edit", SessionID: "sess_edit", SessionTitle: "Edit: Root", ParentSessionID: "sess_root", ForkedFromMessageIndex: 0, MessageRole: "user", MessageContent: "Hi"},
+		{ID: "sess_later", SessionID: "sess_later", SessionTitle: "Later", ParentSessionID: "sess_root", ForkedFromMessageIndex: 2, MessageRole: "user", MessageContent: "Later fork"},
+	}})
+
+	rootIndex := -1
+	editIndex := -1
+	laterIndex := -1
+	for i, node := range m.forkTree.Nodes {
+		switch node.SessionID {
+		case "sess_root":
+			rootIndex = i
+		case "sess_edit":
+			editIndex = i
+		case "sess_later":
+			laterIndex = i
+		}
+	}
+	if rootIndex < 0 || editIndex < 0 || laterIndex < 0 {
+		t.Fatalf("missing expected nodes: root=%d edit=%d later=%d", rootIndex, editIndex, laterIndex)
+	}
+	if m.forkTree.Nodes[editIndex].Parent != -1 {
+		t.Fatalf("zero-index edited fork parent = %d, want root-level sibling", m.forkTree.Nodes[editIndex].Parent)
+	}
+	if m.forkTree.Nodes[editIndex].X != m.forkTree.Nodes[rootIndex].X {
+		t.Fatalf("zero-index edited fork X = %d, root X = %d; want same level", m.forkTree.Nodes[editIndex].X, m.forkTree.Nodes[rootIndex].X)
+	}
+	if m.forkTree.Nodes[laterIndex].Parent != rootIndex {
+		t.Fatalf("nonzero fork parent = %d, want root index %d", m.forkTree.Nodes[laterIndex].Parent, rootIndex)
+	}
+	if m.forkTree.Nodes[laterIndex].X <= m.forkTree.Nodes[rootIndex].X {
+		t.Fatalf("nonzero fork X = %d, root X = %d; want child level", m.forkTree.Nodes[laterIndex].X, m.forkTree.Nodes[rootIndex].X)
+	}
+}

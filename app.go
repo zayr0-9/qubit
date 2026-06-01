@@ -123,6 +123,9 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modeSessionPicker {
 		return m.updateSessionPicker(msg)
 	}
+	if m.forkSelector.Active {
+		return m.updateForkSelector(msg)
+	}
 	if isNewlineKey(msg) {
 		return m.insertInputNewline()
 	}
@@ -135,6 +138,13 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case "esc":
+		if m.messageEdit.Active {
+			m.messageEdit = messageEditState{}
+			m.composer.Reset()
+			m.status = "ready"
+			m.layout()
+			return m, nil
+		}
 		if m.composer.HasSelection() {
 			m.composer.ClearSelection()
 			m.layout()
@@ -273,6 +283,9 @@ func (m model) submitInput() (tea.Model, tea.Cmd) {
 	if strings.HasPrefix(input, "/") {
 		return m.handleSlashCommand(input)
 	}
+	if m.messageEdit.Active {
+		return m.submitMessageEdit(input)
+	}
 
 	runID := newRunID()
 	m.messages = append(m.messages, chatMessage{Role: "user", Content: input})
@@ -289,6 +302,24 @@ func (m model) submitInput() (tea.Model, tea.Cmd) {
 	} else {
 		payload["sessionId"] = m.session
 	}
+	return m, tea.Batch(sendRuntime(m.runtime, payload), m.spinner.Tick)
+}
+
+func (m model) submitMessageEdit(input string) (tea.Model, tea.Cmd) {
+	target := clampInt(m.messageEdit.MessageIndex, 0, len(m.messages))
+	runID := newRunID()
+
+	nextMessages := append([]chatMessage(nil), m.messages[:target]...)
+	nextMessages = append(nextMessages, chatMessage{Role: "user", Content: input})
+	m.messages = nextMessages
+	m.messageEdit = messageEditState{}
+	m.busy = true
+	m.activeRunID = runID
+	m.status = "thinking"
+	m.autoScroll = true
+	m.refreshViewport()
+
+	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "sessionId": m.session, "replaceFromMessageIndex": target, "title": "Edit: " + fallback(m.title, m.currentSessionTitle())}
 	return m, tea.Batch(sendRuntime(m.runtime, payload), m.spinner.Tick)
 }
 

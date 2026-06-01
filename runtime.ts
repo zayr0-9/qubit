@@ -468,13 +468,33 @@ async function handleLine(line) {
   const runId = String(request.runId || request.id || createRunId());
   const controller = new AbortController();
   let runSessionId = request.sessionId || activeSessionId;
-  if (request.newSession === true || !request.sessionId) {
+  const replaceFromMessageIndex = Number(request.replaceFromMessageIndex);
+  if (Number.isFinite(replaceFromMessageIndex)) {
+    const sourceSessionId = String(request.sessionId || activeSessionId);
+    const source = sessionIndex.sessions.find((candidate) => candidate.id === sourceSessionId);
+    if (!source) {
+      write({ type: "error", id: request.id, error: `Unknown session: ${sourceSessionId}` });
+      return;
+    }
+    const session = await forkSession({
+      sourceSessionId,
+      messageIndex: replaceFromMessageIndex,
+      title: request.title || `Edit: ${source.title || "Untitled chat"}`,
+      includeUiMessageAtIndex: false,
+    });
+    if (!session) {
+      write({ type: "error", id: request.id, error: `Unknown session: ${sourceSessionId}` });
+      return;
+    }
+    runSessionId = session.id;
+  } else if (request.newSession === true || !request.sessionId) {
     const session = await createSession({ title: request.title || titleFromInput(request.input) });
     runSessionId = session.id;
   } else {
     await ensureSession(runSessionId);
     activeSessionId = runSessionId;
   }
+
   activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, controller, runtime: runtimeState.runtime });
   write({ type: "run_started", id: request.id, runId, sessionId: runSessionId });
 
@@ -1311,7 +1331,7 @@ async function createSession(options = {}) {
   return session;
 }
 
-async function forkSession({ sourceSessionId, messageIndex, title } = {}) {
+async function forkSession({ sourceSessionId, messageIndex, title, includeUiMessageAtIndex = true } = {}) {
   const source = sessionIndex.sessions.find((candidate) => candidate.id === sourceSessionId);
   if (!source) return null;
 
@@ -1319,9 +1339,11 @@ async function forkSession({ sourceSessionId, messageIndex, title } = {}) {
   const sourceUiMessages = transcriptMessagesForUi(sourceMessages);
   const requestedIndex = Number.isFinite(messageIndex) ? Math.trunc(messageIndex) : sourceUiMessages.length;
   const normalizedUiIndex = Math.max(0, Math.min(sourceUiMessages.length, requestedIndex));
-  const normalizedIndex = normalizedUiIndex >= sourceUiMessages.length
-    ? sourceMessages.length
-    : rawMessageIndexForUiMessageIndex(sourceMessages, normalizedUiIndex);
+  const normalizedIndex = includeUiMessageAtIndex
+    ? (normalizedUiIndex >= sourceUiMessages.length
+      ? sourceMessages.length
+      : rawMessageIndexForUiMessageIndex(sourceMessages, normalizedUiIndex))
+    : rawMessageStartIndexForUiMessageIndex(sourceMessages, normalizedUiIndex);
   const forkMessages = sourceMessages.slice(0, normalizedIndex);
   const forkTitle = String(title || "").trim() || `Fork: ${source.title || "Untitled chat"}`;
   const now = new Date().toISOString();
@@ -1437,7 +1459,8 @@ async function buildSessionTreeNodes(focalSessionId = activeSessionId) {
 
     let preview = null;
     if (node.parentSessionId) {
-      preview = await textPreviewForFork(node.parentSessionId, node.forkedFromMessageIndex, previewCache);
+      preview = await divergentTextPreviewForFork(session.id, node.forkedFromMessageIndex, previewCache)
+        || await textPreviewForFork(node.parentSessionId, node.forkedFromMessageIndex, previewCache);
     } else {
       preview = await firstTextPreviewForSession(session.id, previewCache);
     }
@@ -1496,6 +1519,12 @@ async function textPreviewForFork(sessionId, rawForkIndex, cache) {
   return lastTextPreview(messages.slice(0, normalizedIndex));
 }
 
+async function divergentTextPreviewForFork(sessionId, rawForkIndex, cache) {
+  const messages = await rawSessionMessagesCached(sessionId, cache);
+  const normalizedIndex = Math.max(0, Math.min(messages.length, Number.isFinite(rawForkIndex) ? Math.trunc(rawForkIndex) : 0));
+  return firstTextPreview(messages.slice(normalizedIndex));
+}
+
 async function firstTextPreviewForSession(sessionId, cache) {
   const messages = await rawSessionMessagesCached(sessionId, cache);
   const uiMessages = transcriptMessagesForUi(messages);
@@ -1528,10 +1557,58 @@ function lastTextPreview(messages) {
   return null;
 }
 
+function firstTextPreview(messages) {
+  const uiMessages = transcriptMessagesForUi(messages);
+  for (const message of uiMessages) {
+    const preview = treeTextMessage(message);
+    if (preview) return preview;
+  }
+  return null;
+}
+
 function treeTextMessage(message) {
   if (!message || (message.role !== "user" && message.role !== "assistant")) return null;
   const content = typeof message.content === "string" ? message.content.trim() : "";
   return content ? { role: message.role, content } : null;
+}
+
+function rawMessageStartIndexForUiMessageIndex(messages, uiMessageIndex) {
+  if (uiMessageIndex <= 0) return 0;
+  const visibleStartIndexes = [];
+  const consumedToolResults = new Set();
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message || message.role === "system") continue;
+
+    if (message.role === "user") {
+      const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
+      if (content.trim()) visibleStartIndexes.push(index);
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
+      if (toolCalls.length > 0) visibleStartIndexes.push(index);
+      for (const toolCall of toolCalls) {
+        const toolCallId = toolCall.id || "";
+        if (!toolCallId) continue;
+        const resultIndex = messages.findIndex((candidate, candidateIndex) => candidateIndex > index && candidate?.role === "tool" && candidate.toolCallId === toolCallId);
+        if (resultIndex >= 0) consumedToolResults.add(toolCallId);
+      }
+      const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
+      if (content.trim()) visibleStartIndexes.push(index);
+      continue;
+    }
+
+    if (message.role === "tool" && message.toolCallId && !consumedToolResults.has(message.toolCallId)) {
+      visibleStartIndexes.push(index);
+      consumedToolResults.add(message.toolCallId);
+    }
+  }
+
+  if (uiMessageIndex >= visibleStartIndexes.length) return messages.length;
+  return visibleStartIndexes[uiMessageIndex];
 }
 
 function rawMessageIndexForUiMessageIndex(messages, uiMessageIndex) {

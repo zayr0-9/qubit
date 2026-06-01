@@ -117,6 +117,13 @@ func idleInputPrompt() string {
 }
 
 func (m model) renderInputStatus() string {
+	if m.messageEdit.Active {
+		return footerStyle.Width(m.width).Render(mutedSt.Render("Edit message, then press enter to fork and reroll from here"))
+	}
+	if m.forkSelector.Active {
+		return footerStyle.Width(m.width).Render(mutedSt.Render("Press enter to fork here or up key to fork at a previous point"))
+	}
+
 	mode := m.permissionModeLabel()
 	style := lipgloss.NewStyle().Bold(true)
 	if m.permissionMode == permissionModeAlwaysAllow {
@@ -136,7 +143,11 @@ func (m model) renderFooter() string {
 	if m.composer.HasSelection() {
 		footer = "selection · ctrl+c copy · type replace · backspace/delete remove · esc clear"
 	}
-	if m.mode == modeModal {
+	if m.messageEdit.Active {
+		footer = "enter fork/reroll · ctrl+j newline · esc cancel edit"
+	} else if m.forkSelector.Active {
+		footer = "↑/↓ choose message · enter edit/reroll · esc cancel"
+	} else if m.mode == modeModal {
 		if m.modal != nil && len(m.modal.Options) > 0 {
 			footer = "↑/↓ choose option · ←/→ choose action · enter confirm · esc cancel"
 		} else {

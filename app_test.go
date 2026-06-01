@@ -826,7 +826,7 @@ func TestCreateNewSessionCommandAndCreatedEvent(t *testing.T) {
 	}
 }
 
-func TestForkCommandRequestsForkAndLoadsForkTranscript(t *testing.T) {
+func TestForkCommandWithTitleRequestsForkAndLoadsForkTranscript(t *testing.T) {
 	rt, stdin := newTestRuntime(t)
 	m := initialModel(rt)
 	m.ready = true
@@ -878,6 +878,181 @@ func TestForkCommandRequestsForkAndLoadsForkTranscript(t *testing.T) {
 	}
 	if len(got.messages) != len(loaded) {
 		t.Fatalf("message count = %d, want %d", len(got.messages), len(loaded))
+	}
+}
+
+func TestForkCommandEnterStartsInlineSelectorAndEnterForksHere(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.session = "sess_parent"
+	m.autoNewSessionOnChat = false
+	m.messages = []chatMessage{{Role: "user", Content: "question"}, {Role: "assistant", Content: "answer"}}
+	m.composer.SetValue("/fork")
+
+	updated, cmd := m.submitInput()
+	got := updated.(model)
+	if cmd != nil {
+		t.Fatalf("submit /fork command = %T, want nil while selector is active", cmd)
+	}
+	if !got.forkSelector.Active {
+		t.Fatal("fork selector inactive, want active")
+	}
+	if got.status != "fork point" {
+		t.Fatalf("status = %q, want fork point", got.status)
+	}
+	if !strings.Contains(plainText(got.renderInputStatus()), "Press enter to fork here or up key to fork at a previous point") {
+		t.Fatalf("input status = %q, want fork selector hint", plainText(got.renderInputStatus()))
+	}
+
+	updated, cmd = got.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got = updated.(model)
+	if !got.busy {
+		t.Fatal("busy = false, want true while forking session")
+	}
+	if got.forkSelector.Active {
+		t.Fatal("fork selector still active after fork request")
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.fork", "sess_parent")
+	if payload["messageIndex"] != float64(2) {
+		t.Fatalf("session.fork messageIndex = %#v, want 2", payload["messageIndex"])
+	}
+}
+
+func TestForkSelectorUpDownSelectsUserMessagesAndEnterStartsEdit(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 24
+	m.session = "sess_parent"
+	m.inputHistory = []string{"history should not appear"}
+	m.inputHistoryIndex = len(m.inputHistory)
+	m.messages = []chatMessage{
+		{Role: "user", Content: "first question"},
+		{Role: "assistant", Content: "first answer"},
+		{Role: "user", Content: "second question"},
+		{Role: "assistant", Content: "second answer"},
+	}
+	m.layout()
+	m.composer.SetValue("/fork")
+
+	updated, _ := m.submitInput()
+	got := updated.(model)
+
+	updated, _ = got.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	got = updated.(model)
+	if got.composer.Value() != "/fork second question" {
+		t.Fatalf("composer after first up = %q, want /fork second question", got.composer.Value())
+	}
+
+	updated, _ = got.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	got = updated.(model)
+	if got.composer.Value() != "/fork first question" {
+		t.Fatalf("composer after second up = %q, want /fork first question", got.composer.Value())
+	}
+
+	updated, _ = got.updateKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	got = updated.(model)
+	if got.composer.Value() != "/fork second question" {
+		t.Fatalf("composer after down = %q, want /fork second question", got.composer.Value())
+	}
+
+	updated, cmd := got.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got = updated.(model)
+	if cmd != nil {
+		t.Fatalf("enter on selected fork point command = %T, want nil while editing", cmd)
+	}
+	if got.forkSelector.Active {
+		t.Fatal("fork selector active after entering edit mode")
+	}
+	if !got.messageEdit.Active {
+		t.Fatal("message edit inactive, want active")
+	}
+	if got.messageEdit.MessageIndex != 2 {
+		t.Fatalf("edit message index = %d, want 2", got.messageEdit.MessageIndex)
+	}
+	if got.composer.Value() != "second question" {
+		t.Fatalf("composer in edit mode = %q, want selected message", got.composer.Value())
+	}
+	if !strings.Contains(plainText(got.renderInputStatus()), "Edit message, then press enter to fork and reroll from here") {
+		t.Fatalf("input status = %q, want edit hint", plainText(got.renderInputStatus()))
+	}
+}
+
+func TestSubmitEditedMessagePreviewsTruncatedForkAndRequestsForkedReroll(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.width = 80
+	m.height = 24
+	m.session = "sess_parent"
+	m.messages = []chatMessage{
+		{Role: "user", Content: "first question"},
+		{Role: "assistant", Content: "first answer"},
+		{Role: "user", Content: "second question"},
+		{Role: "assistant", Content: "second answer"},
+	}
+	m.messageEdit = messageEditState{Active: true, MessageIndex: 2, Original: "second question"}
+	m.composer.SetValue("edited second question")
+	m.layout()
+
+	updated, cmd := m.submitInput()
+	got := updated.(model)
+	if !got.busy {
+		t.Fatal("busy = false, want true while rerolling edited message")
+	}
+	if got.messageEdit.Active {
+		t.Fatal("message edit still active after submit")
+	}
+	if len(got.messages) != 3 {
+		t.Fatalf("message count = %d, want 3 after truncating from selected point", len(got.messages))
+	}
+	if got.messages[2].Role != "user" || got.messages[2].Content != "edited second question" {
+		t.Fatalf("last message = %#v, want edited user message", got.messages[2])
+	}
+
+	payload := runBatchSendCommand(t, cmd, stdin, "chat")
+	assertPayload(t, payload, "chat", "sess_parent")
+	if payload["input"] != "edited second question" {
+		t.Fatalf("chat input = %#v, want edited second question", payload["input"])
+	}
+	if payload["replaceFromMessageIndex"] != float64(2) {
+		t.Fatalf("replaceFromMessageIndex = %#v, want 2", payload["replaceFromMessageIndex"])
+	}
+	if payload["title"] != "Edit: " {
+		t.Fatalf("title = %#v, want Edit: ", payload["title"])
+	}
+	if _, ok := payload["newSession"]; ok {
+		t.Fatalf("newSession present in edit reroll payload: %#v", payload)
+	}
+}
+
+func TestForkSelectorNoUserMessagesStillForksHere(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.session = "sess_parent"
+	m.messages = []chatMessage{{Role: "assistant", Content: "hello"}}
+	m.composer.SetValue("/fork")
+
+	updated, _ := m.submitInput()
+	got := updated.(model)
+	updated, _ = got.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	got = updated.(model)
+	if got.composer.Value() != "/fork" {
+		t.Fatalf("composer after up with no user messages = %q, want /fork", got.composer.Value())
+	}
+
+	updated, cmd := got.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got = updated.(model)
+	if !got.busy {
+		t.Fatal("busy = false, want true while forking here")
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.fork", "sess_parent")
+	if payload["messageIndex"] != float64(1) {
+		t.Fatalf("session.fork messageIndex = %#v, want 1", payload["messageIndex"])
 	}
 }
 
@@ -1200,5 +1375,107 @@ func assertPayload(t *testing.T, payload map[string]any, wantType string, wantSe
 	}
 	if payload["id"] == "" {
 		t.Fatalf("payload missing generated id: %#v", payload)
+	}
+}
+
+func TestRuntimeForkedEditRerollEventFlowActivatesFork(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.busy = true
+	m.session = "sess_parent"
+	m.title = "Parent"
+	m.activeRunID = "run_edit"
+	m.messages = []chatMessage{
+		{Role: "user", Content: "first question"},
+		{Role: "user", Content: "edited second question"},
+	}
+
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "run_started", RunID: "run_edit", SessionID: "sess_fork"})
+	got := updated.(model)
+	if got.session != "sess_fork" {
+		t.Fatalf("session after run_started = %q, want sess_fork", got.session)
+	}
+
+	updated, _ = got.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_edit", SessionID: "sess_fork", Status: "ready"})
+	got = updated.(model)
+	if got.session != "sess_fork" {
+		t.Fatalf("session after run_finished = %q, want sess_fork", got.session)
+	}
+	if got.busy {
+		t.Fatal("busy = true, want false after forked reroll finish")
+	}
+}
+
+func TestActivatingEditedForkFromTreeLoadsOnlyForkLineageMessages(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.width = 100
+	m.height = 30
+	m.session = "sess_parent"
+	m.title = "Parent"
+	m.mode = modeForkTree
+	m.messages = []chatMessage{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "Hi! What can I help you with?"},
+		{Role: "user", Content: "how are you"},
+		{Role: "assistant", Content: "I'm doing great, thanks for asking!"},
+	}
+	m.forkTree = newForkTreeState()
+	m.applyForkTree(runtimeEvent{Type: "session.tree", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_parent", SessionID: "sess_parent", SessionTitle: "Parent", MessageRole: "user", MessageContent: "how are you", MessageCount: 4},
+		{ID: "sess_edit", SessionID: "sess_edit", SessionTitle: "Edit: Parent", ParentSessionID: "sess_parent", ForkedFromMessageIndex: 2, MessageRole: "user", MessageContent: "how are you?", MessageCount: 4},
+	}})
+	for i, node := range m.forkTree.Nodes {
+		if node.SessionID == "sess_edit" {
+			m.forkTree.Selected = i
+			break
+		}
+	}
+
+	updated, cmd := m.activateSelectedForkTreeSession()
+	got := updated.(model)
+	if got.mode != modeChat {
+		t.Fatalf("mode = %v, want chat", got.mode)
+	}
+	if got.session != "sess_edit" {
+		t.Fatalf("session = %q, want sess_edit", got.session)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.activate", "sess_edit")
+
+	updated, cmd = got.updateRuntime(runtimeEvent{Type: "session.activated", SessionID: "sess_edit", SessionTitle: "Edit: Parent"})
+	got = updated.(model)
+	transcriptPayload := runBatchSendCommand(t, cmd, stdin, "session.messages")
+	assertPayload(t, transcriptPayload, "session.messages", "sess_edit")
+
+	loadedForkLineage := []chatMessage{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "Hi! What can I help you with?"},
+		{Role: "user", Content: "how are you?"},
+		{Role: "assistant", Content: "I'm good!"},
+	}
+	updated, _ = got.updateRuntime(runtimeEvent{Type: "session.messages", SessionID: "sess_edit", SessionTitle: "Edit: Parent", Messages: loadedForkLineage})
+	got = updated.(model)
+
+	if len(got.messages) != len(loadedForkLineage) {
+		t.Fatalf("loaded message count = %d, want %d", len(got.messages), len(loadedForkLineage))
+	}
+	for i, want := range loadedForkLineage {
+		if got.messages[i] != want {
+			t.Fatalf("message[%d] = %#v, want %#v", i, got.messages[i], want)
+		}
+	}
+	for _, message := range got.messages {
+		if message.Content == "how are you" || strings.Contains(message.Content, "doing great") {
+			t.Fatalf("loaded edited fork merged original branch message: %#v in %#v", message, got.messages)
+		}
+	}
+	viewport := plainText(got.viewport.View())
+	if strings.Contains(viewport, "how are you\n") || strings.Contains(viewport, "doing great") {
+		t.Fatalf("viewport merged original branch content: %q", viewport)
+	}
+	if !strings.Contains(viewport, "how are you?") || !strings.Contains(viewport, "I'm good!") {
+		t.Fatalf("viewport = %q, want edited fork lineage", viewport)
 	}
 }

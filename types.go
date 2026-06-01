@@ -90,6 +90,24 @@ type themeEntryState struct {
 	Err        string
 }
 
+type forkPoint struct {
+	MessageIndex     int
+	EditMessageIndex int
+	Content          string
+}
+
+type forkSelectorState struct {
+	Active bool
+	Points []forkPoint
+	Cursor int
+}
+
+type messageEditState struct {
+	Active       bool
+	MessageIndex int
+	Original     string
+}
+
 type uiMode int
 
 const (
@@ -281,6 +299,8 @@ type model struct {
 	inputHistory          []string
 	inputHistoryIndex     int
 	inputHistoryActive    bool
+	forkSelector          forkSelectorState
+	messageEdit           messageEditState
 
 	mode          uiMode
 	previousMode  uiMode
