@@ -1,6 +1,9 @@
 package main
 
-import "charm.land/lipgloss/v2"
+import (
+	"charm.land/bubbles/v2/key"
+	"charm.land/lipgloss/v2"
+)
 
 var (
 	bg        = lipgloss.Color("#101112")
@@ -13,11 +16,11 @@ var (
 	red       = lipgloss.Color("#ff6b6b")
 	green     = lipgloss.Color("#9be28f")
 
-	appStyle    = lipgloss.NewStyle().Background(bg).Foreground(text)
-	headerStyle = lipgloss.NewStyle().Background(bg).Foreground(text).Padding(0, 2)
-	chatStyle   = lipgloss.NewStyle().Background(bg).Foreground(text).Padding(0, 2)
+	appStyle    = lipgloss.NewStyle().Foreground(text)
+	headerStyle = lipgloss.NewStyle().Foreground(text).Padding(0, 2)
+	chatStyle   = lipgloss.NewStyle().Foreground(text).Padding(0, 2)
 	inputStyle  = lipgloss.NewStyle().Background(surface).Foreground(text).Padding(0, 2)
-	footerStyle = lipgloss.NewStyle().Background(bg).PaddingLeft(2)
+	footerStyle = lipgloss.NewStyle().Foreground(muted).PaddingLeft(2)
 	userName    = lipgloss.NewStyle().Foreground(accent).Bold(true)
 	aiName      = lipgloss.NewStyle().Foreground(cyan).Bold(true)
 	mutedSt     = lipgloss.NewStyle().Foreground(muted)
@@ -25,3 +28,5 @@ var (
 	okSt        = lipgloss.NewStyle().Foreground(green)
 	selectSt    = lipgloss.NewStyle().Foreground(text).Background(surfaceHi).Bold(true)
 )
+
+var inputNewlineBinding = key.NewBinding(key.WithKeys("shift+enter", "alt+enter", "ctrl+j"))

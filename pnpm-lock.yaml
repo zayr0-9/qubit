@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@hyper-labs/hyper-router':
-        specifier: file:hyper-labs-hyper-router-0.1.5.tgz
-        version: file:hyper-labs-hyper-router-0.1.5.tgz(sql.js@1.14.1)(zod@4.4.3)
+        specifier: file:hyper-labs-hyper-router-0.1.6.tgz
+        version: file:hyper-labs-hyper-router-0.1.6.tgz(sql.js@1.14.1)(zod@4.4.3)
       sql.js:
         specifier: ^1.14.1
         version: 1.14.1
@@ -20,9 +20,9 @@ importers:
 
 packages:
 
-  '@hyper-labs/hyper-router@file:hyper-labs-hyper-router-0.1.5.tgz':
-    resolution: {integrity: sha512-O7WQt4k0P8FYPDz+SLJ10BxlYLJ8e9iPE12T7gW05wLTiLSiMO7tFCzpYyxxI55FHgvBX4NY4A4SqmAlMZ+N6w==, tarball: file:hyper-labs-hyper-router-0.1.5.tgz}
-    version: 0.1.5
+  '@hyper-labs/hyper-router@file:hyper-labs-hyper-router-0.1.6.tgz':
+    resolution: {integrity: sha512-gPJ+P0n29Axxat4Nrj6vQq2gpoX6JW8Qz4FNvJ5RCQyksit0RMfh3DU6zHmmpPQOIHnnErJxvCGnQGlTUtCeQw==, tarball: file:hyper-labs-hyper-router-0.1.6.tgz}
+    version: 0.1.6
     engines: {node: '>=20'}
     peerDependencies:
       '@ai-sdk/amazon-bedrock': ^4.0.92
@@ -56,7 +56,7 @@ packages:
 
 snapshots:
 
-  '@hyper-labs/hyper-router@file:hyper-labs-hyper-router-0.1.5.tgz(sql.js@1.14.1)(zod@4.4.3)':
+  '@hyper-labs/hyper-router@file:hyper-labs-hyper-router-0.1.6.tgz(sql.js@1.14.1)(zod@4.4.3)':
     optionalDependencies:
       sql.js: 1.14.1
       zod: 4.4.3

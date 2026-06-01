@@ -23,7 +23,7 @@ Qubit CLI
   Owns rendering, keyboard interaction, local UI state, slash command palette, and session picker.
 ```
 
-Current MVP scope is basic chat plus session UI. Branch visualization, minimaps, archive/delete flows, transcript reload on session switch, and streaming can come later.
+Current MVP scope is basic chat plus session UI, including transcript reload on session switch. Branch visualization, minimaps, archive/delete flows, and streaming can come later.
 
 ## Important Paths
 
@@ -34,7 +34,7 @@ D:\qubit
   go.mod                    Go module config
   main.go                   CLI entrypoint
   app.go                    Bubble Tea app model/update logic
-  view.go                   TUI rendering
+  view.go                   TUI rendering, including Glow/Glamour Markdown message rendering
   commands.go               Slash commands and session picker interactions
   runtime_client.go         Go <-> Node JSON-lines client
   types.go                  Shared Go structs and message types
@@ -82,6 +82,7 @@ ready
 session.list
 session.new
 session.activate
+session.messages
 session.rename
 run_started
 assistant
@@ -140,11 +141,17 @@ Follow standard Go conventions:
 - All side effects should happen through `tea.Cmd` where possible.
 - Maintain value semantics for the model unless pointer mutation is clearer for local helpers.
 - Use `tea.Batch` for multiple commands.
-- Keep mouse capture disabled unless the user explicitly asks for mouse-driven UI:
+- The chat composer uses `textarea.Model`, not `textinput.Model`; preserve multiline input behavior.
+- Plain Enter sends the current chat message. Modified Enter (`Shift+Enter` when available, and `Alt+Enter` when the terminal does not reserve it) inserts a literal newline and must not submit. `Ctrl+J` is the reliable terminal fallback for inserting a newline.
+- Recalculate layout after composer changes so the input area can grow/shrink and the viewport height adjusts.
+- Keep mouse capture disabled so normal terminal text selection/copy remains easy:
 
 ```go
 view.MouseMode = tea.MouseModeNone
 ```
+
+- Mouse wheel scrolling should use normal terminal scrollback behavior, not Bubble Tea mouse capture. Do not switch to `MouseModeCellMotion`/`MouseModeAllMotion` just to fix scrolling unless the user explicitly accepts the selection tradeoff.
+- If chat scroll appears to work only after pressing `PgUp`/`PgDn`, inspect whether viewport auto-scroll/layout refresh is forcing `GotoBottom()`. Preserve viewport offset after generic viewport updates, and only resume auto-scroll when the user submits a new message or explicitly jumps to the bottom.
 
 - Alt-screen is currently enabled. If normal terminal scrollback becomes more important, revisit:
 
@@ -163,14 +170,20 @@ view.AltScreen = false
 ### UI/UX Standards
 
 - Chat should stay usable and calm by default.
-- Slash commands should be discoverable by typing `/`.
+- Render user and assistant message bodies as Markdown in `view.go` using the Glow/Glamour renderer path. Preserve fenced code blocks, lists, headings, and intentional newlines.
+- If Markdown appears flattened, inspect `.qubit/runtime.log` first to confirm whether message content contains real `\n` characters before changing the renderer.
+- Slash commands should be discoverable by typing `/` and must render in a reserved visible area above the input, not appended below the viewport where they can be clipped.
+- When reserving terminal layout space, preserve the composer/footer visibility without painting opaque chat/message rows. Avoid using `Style.Width(...).Height(...).Render(...)` or `lipgloss.Place(...)` around the chat viewport when the style has a background, because Lip Gloss/viewport padding can create full-line black bars behind messages and role names. Prefer transparent styles plus explicit blank-line padding helpers such as `renderFixedHeight`/`renderChat`.
+- Prefer existing Lip Gloss APIs already used by the project; do not assume newer helpers such as `lipgloss.WithWhitespaceBackground` are available without confirming the pinned dependency supports them.
 - Commands requiring arguments should insert a trailing space after completion.
 - `/sessions` should open an interactive picker, not print repeated lists into chat.
+- Session switching should happen through the interactive picker. Do not add a `/use` slash command unless explicitly requested.
+- `/terminal-setup` should patch Windows Terminal `settings.json` to map Shift+Enter to an enhanced keyboard escape sequence. It must be idempotent, create a timestamped backup before writing, remove the common misplaced top-level `command`/`keys` mistake, and report the settings/backup paths. It must not change non-Windows Terminal files.
 - Session picker should support:
   - Up/down selection
   - Enter activation
   - Esc close
-- Preserve normal terminal selection/copy behavior by keeping mouse capture disabled.
+- Preserve normal terminal selection/copy behavior by keeping mouse capture disabled unless richer mouse interaction is explicitly requested.
 
 ### Node Runtime Standards
 
@@ -226,21 +239,24 @@ Verify:
 4. Enter/Tab accepts the highlighted command.
 5. `/sessions` opens the session picker.
 6. Up/down changes the highlighted session.
-7. Enter activates the selected session.
+7. Enter activates the selected session and reloads that session's transcript.
 8. Session lists are not repeatedly appended after assistant responses.
 9. Terminal text selection/copy still works normally.
+10. Enter sends a message; Ctrl+J inserts a newline in the composer and expands the input area. Shift+Enter should also work when keyboard enhancements are supported. Alt+Enter works only if the terminal does not reserve it for fullscreen.
+11. `/terminal-setup` patches Windows Terminal settings for Shift+Enter newline support, or reports a clear failure/manual snippet.
+12. Pasted or typed fenced Markdown code blocks retain line breaks and render as Markdown in chat.
 
 ## Suggested Future Work
 
 Prefer incremental changes in this order:
 
-1. Improve session picker display: active marker, updated time, message count, truncation.
-2. Add transcript reload when switching sessions via a `session.messages` protocol command.
-3. Add archive/delete with confirmation.
-4. Add `/clear` with clearly defined behavior.
-5. Add better error surfaces and `/logs`.
-6. Add session auto-title generation.
-7. Add real or simulated token streaming.
+1. Improve session picker display: updated time and better truncation.
+2. Add archive/delete with confirmation.
+3. Add `/clear` with clearly defined behavior.
+4. Add better error surfaces and `/logs`.
+5. Add session auto-title generation.
+6. Add real or simulated token streaming.
+7. Add normal terminal paste handling improvements if any terminal still flattens multiline paste before Bubble Tea receives it.
 8. Add keyboard-first branch/session minimap later.
 
 ## Agent Operating Rules

@@ -44,10 +44,35 @@ const storage = new SqliteStorage({
   locateFile: (file) => require.resolve(`sql.js/dist/${file}`),
 });
 
+const pendingPermissions = new Map();
+
 const runtime = createRuntime({
   agent,
   provider,
   storage,
+  toolPermission: {
+    defaultMode: process.env.QUBIT_TOOL_PERMISSION_DEFAULT || "ask",
+  },
+  hooks: {
+    async requestToolPermission(request) {
+      write({
+        type: "tool.permission.request",
+        id: request.id,
+        sessionId: request.sessionId,
+        step: request.step,
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        args: request.args,
+        description: request.description,
+        inputSchema: request.inputSchema,
+        metadata: request.metadata,
+      });
+
+      return await new Promise((resolve) => {
+        pendingPermissions.set(request.id, resolve);
+      });
+    },
+  },
 });
 
 let sessionIndex = await loadSessionIndex();
@@ -75,10 +100,30 @@ const rl = readline.createInterface({
 let queue = Promise.resolve();
 
 rl.on("line", (line) => {
+  if (handleImmediateLine(line)) return;
+
   queue = queue.then(() => handleLine(line)).catch((error) => {
     write({ type: "error", error: error instanceof Error ? error.message : String(error) });
   });
 });
+
+function handleImmediateLine(line) {
+  if (!line.trim()) return true;
+
+  let request;
+  try {
+    request = JSON.parse(line);
+  } catch {
+    return false;
+  }
+
+  if (request.type !== "tool.permission.response") {
+    return false;
+  }
+
+  handlePermissionResponse(request);
+  return true;
+}
 
 async function handleLine(line) {
   if (!line.trim()) return;
@@ -94,6 +139,11 @@ async function handleLine(line) {
   if (request.type === "shutdown") {
     write({ type: "shutdown" });
     process.exit(0);
+  }
+
+  if (request.type === "tool.permission.response") {
+    handlePermissionResponse(request);
+    return;
   }
 
   if (request.type === "session.list") {
@@ -115,6 +165,34 @@ async function handleLine(line) {
       return;
     }
     write({ type: "session.activated", id: request.id, sessionId: activeSessionId, sessionTitle: session.title, session });
+    return;
+  }
+
+  if (request.type === "session.messages") {
+    const sessionId = String(request.sessionId || activeSessionId);
+    const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId);
+    if (!session) {
+      write({ type: "error", id: request.id, error: `Unknown session: ${sessionId}` });
+      return;
+    }
+
+    try {
+      const messages = await loadSessionMessages(sessionId);
+      write({
+        type: "session.messages",
+        id: request.id,
+        sessionId,
+        sessionTitle: session.title,
+        messages,
+      });
+    } catch (error) {
+      write({
+        type: "error",
+        id: request.id,
+        sessionId,
+        error: `Failed to load session messages: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
     return;
   }
 
@@ -167,6 +245,17 @@ async function handleLine(line) {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+function handlePermissionResponse(request) {
+  const resolve = pendingPermissions.get(request.id);
+  if (!resolve) return;
+  pendingPermissions.delete(request.id);
+  resolve(
+    request.allow
+      ? { type: "allow" }
+      : { type: "deny", reason: request.reason || "Denied by user." },
+  );
 }
 
 async function loadSessionIndex() {
@@ -285,6 +374,17 @@ function writeSessionList(id) {
     sessionTitle: activeSession()?.title,
     sessions: sessionIndex.sessions,
   });
+}
+
+async function loadSessionMessages(sessionId) {
+  const messages = await storage.loadMessages(sessionId);
+  return messages
+    .filter((message) => message?.role === "user" || message?.role === "assistant")
+    .map((message) => ({
+      role: message.role,
+      content: typeof message.content === "string" ? message.content : String(message.content ?? ""),
+    }))
+    .filter((message) => message.content.trim() !== "");
 }
 
 function createSessionId() {

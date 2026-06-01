@@ -11,7 +11,7 @@
     "check:runtime": "node runtime.mjs --check"
   },
   "dependencies": {
-    "@hyper-labs/hyper-router": "file:hyper-labs-hyper-router-0.1.5.tgz",
+    "@hyper-labs/hyper-router": "file:hyper-labs-hyper-router-0.1.6.tgz",
     "sql.js": "^1.14.1",
     "zod": "^4.4.3"
   },

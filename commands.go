@@ -11,12 +11,13 @@ import (
 var slashCommands = []slashCommand{
 	{Name: "new", Usage: "/new [title]", Description: "Create a new chat session", NeedsArg: false},
 	{Name: "sessions", Usage: "/sessions", Description: "Open the session picker", NeedsArg: false},
-	{Name: "use", Usage: "/use <id-prefix>", Description: "Switch to a session by id prefix", NeedsArg: true},
 	{Name: "rename", Usage: "/rename <title>", Description: "Rename current session", NeedsArg: true},
+	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal Shift+Enter newline setup", NeedsArg: false},
+	{Name: "permission-test", Usage: "/permission-test", Description: "Open a demo permission modal", NeedsArg: false},
 	{Name: "help", Usage: "/help", Description: "Show command help", NeedsArg: false},
 }
 
-func (m model) updateSessionPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.mode = modeChat
@@ -89,15 +90,6 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.busy = true
 		m.status = "loading sessions"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.list"})
-	case "use", "switch":
-		if arg == "" {
-			m.appendSystem("Usage: /use <session-id-or-prefix>")
-			return m, nil
-		}
-		sessionID := m.resolveSessionID(arg)
-		m.busy = true
-		m.status = "switching session"
-		return m, sendRuntime(m.runtime, map[string]any{"type": "session.activate", "sessionId": sessionID})
 	case "rename", "title":
 		if arg == "" {
 			m.appendSystem("Usage: /rename <title>")
@@ -106,8 +98,15 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.busy = true
 		m.status = "renaming session"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.rename", "sessionId": m.session, "title": arg})
+	case "terminal-setup", "terminal", "setup":
+		m.busy = true
+		m.status = "updating terminal settings"
+		m.appendSystem("Updating Windows Terminal settings for Shift+Enter newline support...")
+		return m, runTerminalSetup()
+	case "permission-test", "modal-test":
+		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/sessions - open the session picker\n/use <id-prefix> - switch chat\n/rename <title> - rename current chat\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/sessions - open the session picker\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
@@ -155,7 +154,7 @@ func (m model) acceptSlashSelection() (tea.Model, tea.Cmd) {
 	}
 	value := "/" + command.Name + " "
 	m.input.SetValue(value)
-	m.input.SetCursor(len(value))
+	m.input.MoveToEnd()
 	return m, nil
 }
 
@@ -179,4 +178,32 @@ func (m model) renderSlashPalette() string {
 		}
 	}
 	return lipgloss.NewStyle().Background(surface).Padding(1, 2).Width(max(20, m.width-4)).Render(b.String())
+}
+
+func terminalSetupResultMessage(result terminalSetupResult) string {
+	if result.Err != nil {
+		return strings.TrimSpace(fmt.Sprintf(`Windows Terminal setup failed
+
+%s
+
+Qubit still supports Ctrl+J for a reliable newline.
+
+Manual settings snippet:
+
+`+"```json"+`
+{
+  "command": {
+    "action": "sendInput",
+    "input": "\\u001b[13;2u"
+  },
+  "keys": "shift+enter"
+}
+`+"```", result.Err))
+	}
+
+	if !result.Changed {
+		return fmt.Sprintf("Windows Terminal Shift+Enter setup is already installed.\n\nSettings: %s\n\nRestart Qubit/Windows Terminal if Shift+Enter still does not work. Ctrl+J remains available as a reliable newline.", result.SettingsPath)
+	}
+
+	return fmt.Sprintf("Windows Terminal Shift+Enter setup installed.\n\nSettings: %s\nBackup: %s\n\nFully close and reopen Windows Terminal, then restart Qubit. Shift+Enter should insert a newline. Ctrl+J remains available as a reliable fallback.", result.SettingsPath, result.BackupPath)
 }
