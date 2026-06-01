@@ -70,6 +70,7 @@ D:\qubit
   .qubit\runtime.log        Runtime diagnostic log
   .qubit\input-history.json Persisted non-secret composer history
   .qubit\theme.json         Persisted selected `/theme` palette
+  .qubit\settings.json      Persisted non-secret app defaults, including default provider and per-provider default models
   ```
 
   ## Architecture Rules
@@ -229,7 +230,7 @@ view.MouseMode = tea.MouseModeCellMotion
 - Commands requiring arguments should insert a trailing space after completion.
 - Slash commands that open interactive UI directly from the palette should mark `slashCommand.OpensOnSelect` so Enter/Tab clears the composer and opens the UI instead of inserting command text.
 - Reusable modal selector lists use `modalState.Options` plus `OptionCursor`: Up/down moves the option cursor, left/right or tab/shift+tab moves actions, Enter resolves the selected action, and Esc cancels selector-style modals.
-- `/models` should open the model selector modal backed by runtime `model.list`/`model.use` protocol data, not a hardcoded demo list.
+- `/models` should open the model selector modal backed by runtime `model.list`/`model.use` protocol data, not a hardcoded demo list. The model selector offers Use now and Set default actions; Set default sends `model.use` with `persistDefault: true` so the runtime stores a non-secret per-provider default model in `.qubit/settings.json`.
 - `/sessions` should open an interactive picker, not print repeated lists into chat.
 - Session switching should happen through the interactive picker. Do not add a `/use` slash command unless explicitly requested.
 - `/terminal-setup` should patch Windows Terminal `settings.json` to map Shift+Enter to an enhanced keyboard escape sequence. It must be idempotent, create a timestamped backup before writing, remove the common misplaced top-level `command`/`keys` mistake, and report the settings/backup paths. It must not change non-Windows Terminal files.
@@ -237,6 +238,7 @@ view.MouseMode = tea.MouseModeCellMotion
   - Up/down selection
   - Enter activation
   - Esc close
+- `/providers` should open the provider selector modal. The selector offers Use now and Set default actions; Set default sends `provider.use` with `persistDefault: true` so the runtime stores the non-secret default provider in `.qubit/settings.json` for future launches.
 - `/keys` should open the API key manager, not require users to put raw API keys in slash-command text.
 - API key manager should support:
   - Listing masked keys for each provider, including read-only environment keys such as `env:ZAI_API_KEY`.

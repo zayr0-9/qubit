@@ -280,3 +280,62 @@ func TestRenderInputStatusShowsPermissionMode(t *testing.T) {
 		t.Fatalf("status section = %q, want current permission mode", status)
 	}
 }
+
+func TestModelSelectorCanPersistDefaultModel(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := model{mode: modeChat, runtime: rt}.openModelSelectorModal([]modelInfo{
+		{ID: "glm-4.6", Name: "glm-4.6", Description: "Default", Active: true},
+		{ID: "glm-4-air", Name: "glm-4-air", Description: "Fast"},
+	})
+
+	updated, cmd := m.updateModal(tea.KeyPressMsg{Code: tea.KeyRight})
+	if cmd != nil {
+		t.Fatal("right returned command, want nil")
+	}
+	m = updated.(model)
+	updated, cmd = m.updateModal(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(model)
+	if got.mode != modeChat || got.modal != nil {
+		t.Fatalf("model selector not closed: mode=%v modal=%#v", got.mode, got.modal)
+	}
+	if got.status != "saving default model" {
+		t.Fatalf("status = %q, want saving default model", got.status)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "model.use", "")
+	if payload["model"] != "glm-4.6" {
+		t.Fatalf("model.use model = %#v, want glm-4.6", payload["model"])
+	}
+	if payload["persistDefault"] != true {
+		t.Fatalf("persistDefault = %#v, want true", payload["persistDefault"])
+	}
+}
+
+func TestProviderSelectorCanPersistDefaultProvider(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.activeProvider = "codex"
+	m = m.openProviderSelectorModal()
+
+	updated, cmd := m.updateModal(tea.KeyPressMsg{Code: tea.KeyRight})
+	if cmd != nil {
+		t.Fatal("right returned command, want nil")
+	}
+	m = updated.(model)
+	updated, cmd = m.updateModal(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(model)
+	if got.mode != modeChat || got.modal != nil {
+		t.Fatalf("provider selector not closed: mode=%v modal=%#v", got.mode, got.modal)
+	}
+	if got.status != "saving default provider" {
+		t.Fatalf("status = %q, want saving default provider", got.status)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "provider.use", "")
+	if payload["provider"] != "codex" {
+		t.Fatalf("provider.use provider = %#v, want codex", payload["provider"])
+	}
+	if payload["persistDefault"] != true {
+		t.Fatalf("persistDefault = %#v, want true", payload["persistDefault"])
+	}
+}

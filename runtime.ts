@@ -27,6 +27,7 @@ const dataDir = join(rootDir, ".qubit");
 const storagePath = join(dataDir, "sessions.sqlite");
 const indexPath = join(dataDir, "session-index.json");
 const keyIndexPath = join(dataDir, "api-key-index.json");
+const settingsPath = join(dataDir, "settings.json");
 const defaultSessionId = process.env.QUBIT_SESSION_ID || "qubit-default";
 const providerDefinitions = {
   glm: {
@@ -67,7 +68,8 @@ const providerDefinitions = {
 };
 const providerAliasMap = new Map(Object.entries(providerDefinitions).flatMap(([name, definition]) => [name, ...(definition.aliases || [])].map((alias) => [alias, name])));
 const providerNames = Object.keys(providerDefinitions);
-const defaultProviderName = normalizeProvider(process.env.QUBIT_PROVIDER || "glm");
+let settings = await loadSettings();
+const defaultProviderName = normalizeProvider(process.env.QUBIT_PROVIDER || settings.defaultProvider || "glm");
 let activeProviderName = defaultProviderName;
 let model = defaultModelForProvider(activeProviderName);
 const providerModelLists = {
@@ -327,14 +329,23 @@ async function handleLine(line) {
   }
 
   if (request.type === "provider.use") {
-    await switchProvider(request.id, request.provider);
+    await switchProvider(request.id, request.provider, request.persistDefault === true);
     return;
   }
 
   if (request.type === "model.use") {
-    model = normalizeModel(request.model);
-    runtimeState = await createRuntimeState();
-    await writeModelUpdated(request.id, `Using ${runtimeState.providerName} model ${model}.`);
+    try {
+      model = normalizeModel(request.model);
+      if (request.persistDefault === true) {
+        settings.defaultModels[activeProviderName] = model;
+        await saveSettings();
+      }
+      runtimeState = await createRuntimeState();
+      const defaultStatus = request.persistDefault === true ? " Saved as default." : "";
+      await writeModelUpdated(request.id, `Using ${runtimeState.providerName} model ${model}.${defaultStatus}`);
+    } catch (error) {
+      write({ type: "error", id: request.id, error: error instanceof Error ? error.message : String(error) });
+    }
     return;
   }
 
@@ -531,7 +542,7 @@ function handleCancelRequest(request) {
 
 function defaultModelForProvider(provider) {
   const normalizedProvider = normalizeProvider(provider || defaultProviderName);
-  return firstEnvValue(providerDefinitions[normalizedProvider].modelEnvKeys) || providerDefinitions[normalizedProvider].defaultModel;
+  return firstEnvValue(providerDefinitions[normalizedProvider].modelEnvKeys) || settings.defaultModels?.[normalizedProvider] || providerDefinitions[normalizedProvider].defaultModel;
 }
 
 function handlePermissionResponse(request) {
@@ -645,6 +656,45 @@ async function resolveActiveProviderConfig(provider = defaultProviderName) {
   }
 
   return { providerName: "stub", keyAlias: "stub", keySource: "stub", apiKey: undefined };
+}
+
+async function loadSettings() {
+  let parsed;
+  try {
+    parsed = JSON.parse(await readFile(settingsPath, "utf8"));
+  } catch {
+    parsed = null;
+  }
+
+  let defaultProvider = "";
+  if (typeof parsed?.defaultProvider === "string" && parsed.defaultProvider.trim()) {
+    try {
+      defaultProvider = normalizeProvider(parsed.defaultProvider);
+    } catch {
+      defaultProvider = "";
+    }
+  }
+
+  const defaultModels = {};
+  if (parsed?.defaultModels && typeof parsed.defaultModels === "object") {
+    for (const [provider, value] of Object.entries(parsed.defaultModels)) {
+      try {
+        const normalizedProvider = normalizeProvider(provider);
+        defaultModels[normalizedProvider] = normalizeModel(value);
+      } catch {
+        // Drop invalid persisted providers/models.
+      }
+    }
+  }
+
+  const normalized = { version: 1, defaultProvider, defaultModels };
+  await saveSettings(normalized);
+  return normalized;
+}
+
+async function saveSettings(nextSettings = settings) {
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(settingsPath, `${JSON.stringify(nextSettings, null, 2)}\n`, { mode: 0o600 });
 }
 
 async function loadApiKeyIndex() {
@@ -809,13 +859,18 @@ async function resolveProviderApiKey(provider) {
   return envKey ? process.env[envKey] || "" : "";
 }
 
-async function switchProvider(id, provider) {
+async function switchProvider(id, provider, persistDefault = false) {
   try {
     const normalizedProvider = normalizeProvider(provider);
     activeProviderName = normalizedProvider;
+    if (persistDefault) {
+      settings.defaultProvider = normalizedProvider;
+      await saveSettings();
+    }
     model = defaultModelForProvider(normalizedProvider);
     runtimeState = await createRuntimeState();
-    await writeModelUpdated(id, `Using provider ${runtimeState.providerName} with model ${model}.`);
+    const defaultStatus = persistDefault ? " Saved as default provider." : "";
+    await writeModelUpdated(id, `Using provider ${runtimeState.providerName} with model ${model}.${defaultStatus}`);
   } catch (error) {
     write({ type: "error", id, error: error instanceof Error ? error.message : String(error) });
   }

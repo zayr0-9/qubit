@@ -90,11 +90,12 @@ func (m model) openProviderSelectorModal() model {
 		ID:           "provider_selector",
 		Kind:         modalKindCustom,
 		Title:        "Choose provider",
-		Description:  "Select the provider Qubit should use for new runs. Switching providers also resets to that provider's default model.",
+		Description:  "Select the provider Qubit should use for new runs. Use Set default to remember it for future launches.",
 		Options:      options,
 		OptionCursor: activeIndex,
 		Actions: []modalAction{
-			{ID: "select", Label: "Select", Style: "primary", Default: true},
+			{ID: "select", Label: "Use now", Style: "primary", Default: true},
+			{ID: "default", Label: "Set default"},
 			{ID: "cancel", Label: "Cancel"},
 		},
 		Payload: map[string]any{"action": "provider.select"},
@@ -128,10 +129,11 @@ func (m model) openModelSelectorModal(models []modelInfo) model {
 		ID:          "model_selector",
 		Kind:        modalKindCustom,
 		Title:       title,
-		Description: "Select the model Qubit should use for new runs.",
+		Description: "Select the model Qubit should use for new runs. Use Set default to remember it for this provider.",
 		Options:     options,
 		Actions: []modalAction{
-			{ID: "select", Label: "Select", Style: "primary", Default: true},
+			{ID: "select", Label: "Use now", Style: "primary", Default: true},
+			{ID: "default", Label: "Set default"},
 			{ID: "cancel", Label: "Cancel"},
 		},
 		OptionCursor: activeIndex,
@@ -270,22 +272,34 @@ func (m model) resolveModalAction(actionID string) (tea.Model, tea.Cmd) {
 	}
 
 	if modal.Payload["action"] == "model.select" {
-		if actionID == "select" {
+		if actionID == "select" || actionID == "default" {
 			selected := modalSelectedOption(modal)
 			m.busy = true
-			m.status = "switching model"
-			return m, sendRuntime(m.runtime, map[string]any{"type": "model.use", "model": selected.ID})
+			payload := map[string]any{"type": "model.use", "model": selected.ID}
+			if actionID == "default" {
+				payload["persistDefault"] = true
+				m.status = "saving default model"
+			} else {
+				m.status = "switching model"
+			}
+			return m, sendRuntime(m.runtime, payload)
 		}
 		m.status = "model selection cancelled"
 		return m, nil
 	}
 
 	if modal.Payload["action"] == "provider.select" {
-		if actionID == "select" {
+		if actionID == "select" || actionID == "default" {
 			selected := modalSelectedOption(modal)
 			m.busy = true
-			m.status = "switching provider"
-			return m, sendRuntime(m.runtime, map[string]any{"type": "provider.use", "provider": selected.ID})
+			payload := map[string]any{"type": "provider.use", "provider": selected.ID}
+			if actionID == "default" {
+				payload["persistDefault"] = true
+				m.status = "saving default provider"
+			} else {
+				m.status = "switching provider"
+			}
+			return m, sendRuntime(m.runtime, payload)
 		}
 		m.status = "provider selection cancelled"
 		return m, nil
