@@ -50,9 +50,7 @@ func (m model) renderHeader() string {
 	sessionTitle = fallback(sessionTitle, "untitled")
 
 	activity := okSt.Render(m.status)
-	if m.busy {
-		activity = m.spinner.View() + " " + lipgloss.NewStyle().Foreground(accent).Render(m.status)
-	} else if strings.Contains(m.status, "error") || m.err != "" {
+	if strings.Contains(m.status, "error") || m.err != "" {
 		activity = errSt.Render(m.status)
 	}
 
@@ -102,7 +100,7 @@ func (m model) renderInput() string {
 }
 
 func (m model) inputPrompt() string {
-	if m.streaming {
+	if m.busy || m.streaming {
 		return m.spinner.View() + " "
 	}
 	return idleInputPrompt()

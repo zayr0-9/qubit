@@ -5,10 +5,13 @@
   "type": "module",
   "description": "Runtime sidecar for the Qubit Bubble Tea chat MVP.",
   "scripts": {
-    "runtime": "node runtime.mjs",
+    "runtime": "node dist/runtime.js",
     "chat": "go run .",
+    "build": "pnpm run build:runtime && pnpm run build:cli",
+    "build:runtime": "tsc -p tsconfig.json",
     "build:cli": "go build -o bin/qubit.exe .",
-    "check:runtime": "node runtime.mjs --check"
+    "check": "pnpm run check:runtime && go test ./...",
+    "check:runtime": "tsc --noEmit -p tsconfig.json && pnpm run build:runtime && node dist/runtime.js --check"
   },
   "dependencies": {
     "@hyper-labs/hyper-router": "file:hyper-labs-hyper-router-0.1.6.tgz",
@@ -21,5 +24,9 @@
     "onlyBuiltDependencies": [
       "keytar"
     ]
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3"
   }
 }

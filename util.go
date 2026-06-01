@@ -97,10 +97,28 @@ func findAppRoot() (string, error) {
 			continue
 		}
 		seen[abs] = true
-		if _, err := os.Stat(filepath.Join(abs, "runtime.mjs")); err == nil {
+		if isAppRoot(abs) {
 			return abs, nil
 		}
 	}
 
-	return "", fmt.Errorf("could not find runtime.mjs. Run qubit from D:\\qubit or keep bin\\qubit.exe next to the project root")
+	return "", fmt.Errorf("could not find Qubit app root. Run from D:\\qubit or keep bin\\qubit.exe under the project root")
+}
+
+func isAppRoot(dir string) bool {
+	if hasFile(dir, "package.json") && hasFile(dir, "go.mod") {
+		return true
+	}
+	if hasFile(dir, filepath.Join("dist", "runtime.js")) {
+		return true
+	}
+	if hasFile(dir, "runtime.ts") {
+		return true
+	}
+	return hasFile(dir, "runtime.mjs")
+}
+
+func hasFile(dir, name string) bool {
+	info, err := os.Stat(filepath.Join(dir, name))
+	return err == nil && !info.IsDir()
 }

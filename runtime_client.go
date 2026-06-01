@@ -27,7 +27,10 @@ func startRuntime() (*runtimeClient, error) {
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
 	_ = os.WriteFile(logPath, []byte(""), 0644)
 
-	runtimePath := filepath.Join(appRoot, "runtime.mjs")
+	runtimePath := filepath.Join(appRoot, "dist", "runtime.js")
+	if _, err := os.Stat(runtimePath); err != nil {
+		return nil, fmt.Errorf("runtime not built at %s; run pnpm run build:runtime", runtimePath)
+	}
 	cmd := exec.Command(node, runtimePath)
 	cmd.Dir = appRoot
 	cmd.Env = os.Environ()

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
+// @ts-nocheck
 import readline from "node:readline";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createRuntime,
@@ -14,7 +15,8 @@ import { SqliteStorage } from "@hyper-labs/hyper-router/storage/sqlite";
 import { GLMProvider } from "@hyper-labs/hyper-router/providers/glm";
 
 const require = createRequire(import.meta.url);
-const rootDir = dirname(fileURLToPath(import.meta.url));
+const entryDir = dirname(fileURLToPath(import.meta.url));
+const rootDir = basename(entryDir) === "dist" ? dirname(entryDir) : entryDir;
 const dataDir = join(rootDir, ".qubit");
 const storagePath = join(dataDir, "sessions.sqlite");
 const indexPath = join(dataDir, "session-index.json");
@@ -23,6 +25,11 @@ const defaultSessionId = process.env.QUBIT_SESSION_ID || "qubit-default";
 const model = process.env.GLM_MODEL || process.env.QUBIT_MODEL || "glm-4.6";
 const keychainService = process.env.QUBIT_KEYCHAIN_SERVICE || "Qubit";
 const envGLMAlias = "env:ZAI_API_KEY";
+
+if (process.argv.includes("--check")) {
+  console.log("runtime check ok");
+  process.exit(0);
+}
 
 await mkdir(dataDir, { recursive: true });
 

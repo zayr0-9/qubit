@@ -30,7 +30,8 @@ Current MVP scope is basic chat plus session UI, including transcript reload on 
 ```txt
 D:\qubit
   package.json              Node runtime package config
-  runtime.mjs               Node sidecar runtime
+  runtime.ts                Node sidecar runtime source
+  dist\runtime.js           Compiled Node sidecar runtime launched by Go
   go.mod                    Go module config
   main.go                   CLI entrypoint
   app.go                    Bubble Tea app model/update logic
@@ -54,11 +55,12 @@ D:\qubit
    - Do not add Bubble Tea, terminal UI, app-specific sessions, Qubit keybindings, CLI code, or runtime sidecar code to `hyper-router`.
    - Treat it as a reusable SDK dependency.
 
-2. Keep provider/runtime work in `runtime.mjs`.
-   - GLM provider setup belongs in Node.
-   - `SqliteStorage` setup belongs in Node.
-   - Session transcript persistence through hyper-router belongs in Node.
+2. Keep provider/runtime work in TypeScript runtime source.
+   - GLM provider setup belongs in Node TypeScript runtime files.
+   - `SqliteStorage` setup belongs in Node TypeScript runtime files.
+   - Session transcript persistence through hyper-router belongs in Node TypeScript runtime files.
    - The Qubit session index belongs in Node for now.
+   - Go launches the compiled `dist\runtime.js`; do not edit `dist` directly.
 
 3. Keep terminal UX in Go.
    - Bubble Tea model/update/view code belongs in Go.
@@ -221,8 +223,12 @@ view.MouseMode = tea.MouseModeCellMotion
 ### Node Runtime Standards
 
 - Use pnpm for Node dependency management.
-- Keep `runtime.mjs` ESM.
-- Keep provider setup and key resolution in `runtime.mjs`.
+- Use plain `tsc` for the Node sidecar; do not use Vite or bundling for runtime/tool code.
+- Keep runtime source in TypeScript (`runtime.ts` and future `runtime/**/*.ts` modules).
+- Do not edit generated `dist` files directly.
+- Go launches the compiled `dist\runtime.js`.
+- Keep provider setup, key resolution, storage setup, and tool registration in TypeScript runtime files.
+- Run `pnpm run build:runtime` after runtime/tool source changes.
 - Support environment-driven provider configuration for automation and fallback:
 
 ```powershell
@@ -263,7 +269,8 @@ gofmt -w $files
 go test ./...
 go vet ./...
 go build -o bin\qubit.exe .
-node --check runtime.mjs
+pnpm run build:runtime
+pnpm run check:runtime
 node -e "import('keytar').then(async mod => { const keytar = mod.default ?? mod; const account = 'qubit-smoke-' + Date.now(); await keytar.setPassword('Qubit Test', account, 'secret'); const got = await keytar.getPassword('Qubit Test', account); await keytar.deletePassword('Qubit Test', account); if (got !== 'secret') throw new Error('keytar round trip failed'); console.log('keytar round trip ok'); })"
 ```
 
