@@ -241,7 +241,7 @@ view.MouseMode = tea.MouseModeCellMotion
   - Esc close/cancel.
 - API key entry must never render raw secret text. Pasted or typed keys should be displayed only as mask bullets, and tests should cover paste -> save flows, not only programmatic insertion.
 - Preserve normal terminal selection/copy behavior by keeping mouse capture disabled unless richer mouse interaction is explicitly requested.
-- Assistant responses may be frontend-simulated streamed: the runtime can send a complete `assistant` event, and the Go UI may progressively reveal it. Keep this fake streaming as terminal UX logic, not provider/runtime business logic, until true provider token streaming is explicitly added to the protocol.
+- Assistant responses may be frontend-simulated streamed: the runtime can send a complete `assistant` event, and the Go UI may progressively reveal it. During a running chat, Esc sends `chat.cancel` with the active `runId` so the Node runtime can abort the hyper-router model call; any assistant text already visible in the Go UI is preserved. If the full `assistant` event already arrived and only the frontend reveal is still streaming, Esc stops that reveal while keeping the visible partial text. Keep fake reveal streaming as terminal UX logic; true provider token streaming should be added explicitly to the protocol when needed.
 
 ### Node Runtime Standards
 

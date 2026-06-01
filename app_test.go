@@ -237,6 +237,7 @@ func TestFakeStreamTickAdvancesContent(t *testing.T) {
 func TestFakeStreamTickCompletesAfterRunFinished(t *testing.T) {
 	m := model{
 		busy:                  true,
+		activeRunID:           "run_1",
 		streaming:             true,
 		streamingMessageIndex: 0,
 		streamingFullContent:  "ok",
@@ -259,6 +260,9 @@ func TestFakeStreamTickCompletesAfterRunFinished(t *testing.T) {
 	}
 	if got.status != "completed" {
 		t.Fatalf("status = %q, want completed", got.status)
+	}
+	if got.activeRunID != "" {
+		t.Fatalf("activeRunID = %q, want cleared", got.activeRunID)
 	}
 	if got.messages[0].Content != "ok" {
 		t.Fatalf("content = %q, want ok", got.messages[0].Content)
@@ -291,6 +295,130 @@ func TestRunFinishedWaitsForFakeStream(t *testing.T) {
 	}
 }
 
+func TestEscapeAbortsFakeStreamPreservingVisibleContent(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := model{
+		runtime:               rt,
+		busy:                  true,
+		activeRunID:           "run_1",
+		streaming:             true,
+		streamingMessageIndex: 0,
+		streamingFullContent:  "hello world",
+		streamingVisibleRunes: 5,
+		streamingFinished:     true,
+		streamingFinishStatus: "completed",
+		lastRunStartedSession: "sess_1",
+		messages:              []chatMessage{{Role: "assistant", Content: "hello"}},
+	}
+
+	updated, cmd := m.updateKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	got := updated.(model)
+
+	payload := runSendCommand(t, cmd, stdin)
+	if payload["type"] != "chat.cancel" || payload["runId"] != "run_1" {
+		t.Fatalf("payload = %#v, want chat.cancel for run_1", payload)
+	}
+	if got.streaming {
+		t.Fatal("streaming = true, want false")
+	}
+	if got.busy {
+		t.Fatal("busy = true, want false")
+	}
+	if got.status != "aborted" {
+		t.Fatalf("status = %q, want aborted", got.status)
+	}
+	if got.activeRunID != "" {
+		t.Fatalf("activeRunID = %q, want cleared", got.activeRunID)
+	}
+	if got.lastRunStartedSession != "" {
+		t.Fatalf("lastRunStartedSession = %q, want cleared", got.lastRunStartedSession)
+	}
+	if got.streamingFullContent != "" || got.streamingVisibleRunes != 0 || got.streamingFinished || got.streamingFinishStatus != "" {
+		t.Fatalf("streaming state not cleared: %#v", got)
+	}
+	if len(got.messages) != 1 || got.messages[0].Content != "hello" {
+		t.Fatalf("messages = %#v, want partial assistant content preserved", got.messages)
+	}
+}
+
+func TestEscapeClearsSelectionBeforeAbortingFakeStream(t *testing.T) {
+	m := model{
+		busy:                  true,
+		activeRunID:           "run_1",
+		streaming:             true,
+		streamingMessageIndex: 0,
+		streamingFullContent:  "hello world",
+		messages:              []chatMessage{{Role: "assistant", Content: "hel"}},
+	}
+	m.composer.SetValue("draft")
+	m.composer.SelectAll()
+
+	updated, cmd := m.updateKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatal("escape with selection returned command, want nil")
+	}
+	if got.composer.HasSelection() {
+		t.Fatal("composer still has selection, want cleared")
+	}
+	if !got.streaming {
+		t.Fatal("streaming = false, want selection clear to leave stream active")
+	}
+	if !got.busy {
+		t.Fatal("busy = false, want selection clear to leave run busy")
+	}
+	if got.activeRunID != "run_1" {
+		t.Fatalf("activeRunID = %q, want run_1", got.activeRunID)
+	}
+	if got.messages[0].Content != "hel" {
+		t.Fatalf("content = %q, want hel", got.messages[0].Content)
+	}
+}
+
+func TestEscapeWhileThinkingSendsCancel(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := model{runtime: rt, busy: true, activeRunID: "run_thinking", status: "thinking"}
+
+	updated, cmd := m.updateKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	got := updated.(model)
+
+	payload := runSendCommand(t, cmd, stdin)
+	if payload["type"] != "chat.cancel" || payload["runId"] != "run_thinking" {
+		t.Fatalf("payload = %#v, want chat.cancel for run_thinking", payload)
+	}
+	if got.busy {
+		t.Fatal("busy = true, want false")
+	}
+	if got.activeRunID != "" {
+		t.Fatalf("activeRunID = %q, want cleared", got.activeRunID)
+	}
+	if got.status != "aborted" {
+		t.Fatalf("status = %q, want aborted", got.status)
+	}
+}
+
+func TestFakeStreamTickAfterAbortKeepsPartialContent(t *testing.T) {
+	m := model{
+		busy:     false,
+		status:   "aborted",
+		messages: []chatMessage{{Role: "assistant", Content: "hello"}},
+	}
+
+	updated, cmd := m.updateFakeStreamTick()
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatal("fake stream tick after abort returned command, want nil")
+	}
+	if got.messages[0].Content != "hello" {
+		t.Fatalf("content = %q, want partial content preserved", got.messages[0].Content)
+	}
+	if got.status != "aborted" {
+		t.Fatalf("status = %q, want aborted", got.status)
+	}
+}
+
 func TestApplySessionMessagesRelayoutsViewport(t *testing.T) {
 	m := initialModel(nil)
 	m.width = 80
@@ -316,6 +444,7 @@ func TestApplySessionMessagesClearsFakeStream(t *testing.T) {
 	m := model{
 		session:               "sess_1",
 		busy:                  true,
+		activeRunID:           "run_1",
 		streaming:             true,
 		streamingMessageIndex: 0,
 		streamingFullContent:  "old",
@@ -331,6 +460,9 @@ func TestApplySessionMessagesClearsFakeStream(t *testing.T) {
 	if m.busy {
 		t.Fatal("busy = true, want false")
 	}
+	if m.activeRunID != "" {
+		t.Fatalf("activeRunID = %q, want cleared", m.activeRunID)
+	}
 	if len(m.messages) != 1 || m.messages[0] != messages[0] {
 		t.Fatalf("messages = %#v, want transcript replacement", m.messages)
 	}
@@ -339,6 +471,7 @@ func TestApplySessionMessagesClearsFakeStream(t *testing.T) {
 func TestFakeStreamTickClearsInvalidIndex(t *testing.T) {
 	m := model{
 		busy:                  true,
+		activeRunID:           "run_1",
 		streaming:             true,
 		streamingMessageIndex: 3,
 		streamingFullContent:  "hello",
@@ -360,6 +493,9 @@ func TestFakeStreamTickClearsInvalidIndex(t *testing.T) {
 	if got.status != "ready" {
 		t.Fatalf("status = %q, want ready", got.status)
 	}
+	if got.activeRunID != "" {
+		t.Fatalf("activeRunID = %q, want cleared", got.activeRunID)
+	}
 }
 
 func TestChatArrowKeysEditInputInsteadOfScrollingViewport(t *testing.T) {
@@ -377,6 +513,85 @@ func TestChatArrowKeysEditInputInsteadOfScrollingViewport(t *testing.T) {
 
 	if got.viewport.YOffset() != startOffset {
 		t.Fatalf("viewport YOffset changed from %d to %d; arrow keys should stay in composer", startOffset, got.viewport.YOffset())
+	}
+}
+
+func TestInputHistoryCyclesFromEmptyComposer(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 24
+	m.inputHistory = []string{"first", "second"}
+	m.inputHistoryIndex = len(m.inputHistory)
+	m.layout()
+
+	updated, _ := m.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	got := updated.(model)
+	if got.composer.Value() != "second" {
+		t.Fatalf("composer value after first up = %q, want second", got.composer.Value())
+	}
+
+	updated, _ = got.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	got = updated.(model)
+	if got.composer.Value() != "first" {
+		t.Fatalf("composer value after second up = %q, want first", got.composer.Value())
+	}
+
+	updated, _ = got.updateKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	got = updated.(model)
+	if got.composer.Value() != "second" {
+		t.Fatalf("composer value after down = %q, want second", got.composer.Value())
+	}
+
+	updated, _ = got.updateKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	got = updated.(model)
+	if got.composer.Value() != "" {
+		t.Fatalf("composer value after down past newest = %q, want empty", got.composer.Value())
+	}
+	if got.inputHistoryActive {
+		t.Fatal("inputHistoryActive = true after returning to empty composer, want false")
+	}
+}
+
+func TestInputHistoryDoesNotStartWhenComposerHasText(t *testing.T) {
+	m := initialModel(nil)
+	m.inputHistory = []string{"old"}
+	m.inputHistoryIndex = len(m.inputHistory)
+	m.composer.SetValue("draft")
+
+	updated, _ := m.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	got := updated.(model)
+	if got.composer.Value() != "draft" {
+		t.Fatalf("composer value = %q, want draft", got.composer.Value())
+	}
+	if got.inputHistoryActive {
+		t.Fatal("inputHistoryActive = true, want false")
+	}
+}
+
+func TestSubmitInputPersistsInputHistory(t *testing.T) {
+	appRoot := t.TempDir()
+	rt, stdin := newTestRuntime(t)
+	rt.appRoot = appRoot
+	m := initialModel(rt)
+	m.ready = true
+	m.autoNewSessionOnChat = false
+	m.session = "sess_1"
+	m.composer.SetValue("remember me")
+
+	updated, cmd := m.submitInput()
+	got := updated.(model)
+	runBatchSendCommand(t, cmd, stdin, "chat")
+
+	if len(got.inputHistory) != 1 || got.inputHistory[0] != "remember me" {
+		t.Fatalf("inputHistory = %#v, want [remember me]", got.inputHistory)
+	}
+	loaded, err := loadInputHistory(appRoot)
+	if err != nil {
+		t.Fatalf("load input history: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0] != "remember me" {
+		t.Fatalf("loaded input history = %#v, want [remember me]", loaded)
 	}
 }
 
@@ -788,6 +1003,32 @@ func TestFirstChatAfterReadyRequestsNewSession(t *testing.T) {
 	}
 	if payload["title"] != "hello new work" {
 		t.Fatalf("title = %#v, want derived title", payload["title"])
+	}
+	runID, ok := payload["runId"].(string)
+	if !ok || !strings.HasPrefix(runID, "run_") {
+		t.Fatalf("runId = %#v, want generated run_ id", payload["runId"])
+	}
+	if got.activeRunID != runID {
+		t.Fatalf("activeRunID = %q, want payload runId %q", got.activeRunID, runID)
+	}
+}
+
+func TestRunLifecycleTracksActiveRunID(t *testing.T) {
+	m := model{busy: true, activeRunID: "run_local"}
+
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "run_started", RunID: "run_runtime", SessionID: "sess_1"})
+	got := updated.(model)
+	if got.activeRunID != "run_runtime" {
+		t.Fatalf("activeRunID after run_started = %q, want run_runtime", got.activeRunID)
+	}
+
+	updated, _ = got.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_runtime", Status: "completed"})
+	got = updated.(model)
+	if got.activeRunID != "" {
+		t.Fatalf("activeRunID after run_finished = %q, want cleared", got.activeRunID)
+	}
+	if got.busy {
+		t.Fatal("busy = true, want false after run_finished")
 	}
 }
 

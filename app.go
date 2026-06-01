@@ -16,6 +16,14 @@ func initialModel(rt *runtimeClient) model {
 	composer := newComposer()
 	theme := defaultTheme()
 	applyTheme(theme)
+	inputHistory := []string(nil)
+	if rt != nil {
+		var err error
+		inputHistory, err = loadInputHistory(rt.appRoot)
+		if err != nil {
+			inputHistory = nil
+		}
+	}
 
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(spinnerStyle))
 
@@ -30,6 +38,8 @@ func initialModel(rt *runtimeClient) model {
 		theme:                theme,
 		autoNewSessionOnChat: true,
 		autoScroll:           true,
+		inputHistory:         inputHistory,
+		inputHistoryIndex:    len(inputHistory),
 		runtime:              rt,
 	}
 }
@@ -125,16 +135,30 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.layout()
 			return m, nil
 		}
+		if m.streaming || (m.busy && m.activeRunID != "") {
+			runID := m.activeRunID
+			m.abortActiveRun()
+			if runID != "" {
+				return m, sendRuntime(m.runtime, map[string]any{"type": "chat.cancel", "runId": runID})
+			}
+			return m, nil
+		}
 		return m, tea.Quit
 	case "up", "ctrl+p":
 		if m.showSlashPalette() {
 			m.moveSlashCursor(-1)
 			return m, nil
 		}
+		if next, ok := m.cycleInputHistory(-1); ok {
+			return next, nil
+		}
 	case "down", "ctrl+n":
 		if m.showSlashPalette() {
 			m.moveSlashCursor(1)
 			return m, nil
+		}
+		if next, ok := m.cycleInputHistory(1); ok {
+			return next, nil
 		}
 	case "shift+tab":
 		if m.showSlashPalette() {
@@ -167,6 +191,8 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) updateComposerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	handled, cmd := m.composer.UpdateKey(msg)
 	if handled {
+		m.inputHistoryActive = false
+		m.inputHistoryIndex = len(m.inputHistory)
 		m.layout()
 		return m, cmd
 	}
@@ -237,16 +263,20 @@ func (m model) submitInput() (tea.Model, tea.Cmd) {
 	m.composer.Reset()
 	m.layout()
 	m.err = ""
+	m.recordInputHistory(input)
+	m.saveInputHistory()
 	if strings.HasPrefix(input, "/") {
 		return m.handleSlashCommand(input)
 	}
 
+	runID := newRunID()
 	m.messages = append(m.messages, chatMessage{Role: "user", Content: input})
 	m.busy = true
+	m.activeRunID = runID
 	m.status = "thinking"
 	m.autoScroll = true
 	m.refreshViewport()
-	payload := map[string]any{"type": "chat", "input": input}
+	payload := map[string]any{"type": "chat", "input": input, "runId": runID}
 	if m.autoNewSessionOnChat {
 		payload["newSession"] = true
 		payload["title"] = titleFromInput(input)
@@ -278,6 +308,9 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}))
 	case "run_started":
 		m.busy = true
+		if ev.RunID != "" {
+			m.activeRunID = ev.RunID
+		}
 		m.status = "thinking"
 		if ev.SessionID != "" {
 			m.session = ev.SessionID
@@ -287,6 +320,9 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.applyAssistantEvent(ev)
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), fakeStreamTick())
 	case "run_finished":
+		if ev.RunID != "" && m.activeRunID != "" && ev.RunID != m.activeRunID {
+			return m, waitRuntimeEvent(m.runtime)
+		}
 		if ev.SessionID != "" {
 			m.session = ev.SessionID
 		}
@@ -302,6 +338,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 			m.busy = false
 			m.status = finishStatus
 			m.lastRunStartedSession = ""
+			m.activeRunID = ""
 		}
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}))
 	case "session.list":
@@ -328,6 +365,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.applyToolCallFinish(ev)
 	case "session.created":
 		m.clearFakeStream()
+		m.activeRunID = ""
 		m.autoScroll = true
 		m.busy = false
 		m.session = ev.SessionID
@@ -338,6 +376,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 	case "session.activated", "session.forked":
 		m.clearFakeStream()
+		m.activeRunID = ""
 		m.autoScroll = true
 		m.busy = true
 		m.session = ev.SessionID
@@ -366,6 +405,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.clearFakeStream()
 		m.busy = false
 		m.lastRunStartedSession = ""
+		m.activeRunID = ""
 		m.err = ev.Error
 		m.status = "error"
 		m.messages = append(m.messages, chatMessage{Role: "error", Content: ev.Error})
@@ -376,6 +416,9 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 
 func (m *model) applyAssistantEvent(ev runtimeEvent) {
 	m.clearFakeStream()
+	if ev.RunID != "" {
+		m.activeRunID = ev.RunID
+	}
 	content := strings.TrimSpace(ev.Content)
 	if content == "" {
 		content = "(empty response)"
@@ -407,6 +450,7 @@ func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {
 		m.busy = false
 		m.status = "ready"
 		m.lastRunStartedSession = ""
+		m.activeRunID = ""
 		return m, nil
 	}
 
@@ -426,10 +470,20 @@ func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {
 		m.busy = false
 		m.status = fallback(finishStatus, "ready")
 		m.lastRunStartedSession = ""
+		m.activeRunID = ""
 	} else {
 		m.status = "responding"
 	}
 	return m, nil
+}
+
+func (m *model) abortActiveRun() {
+	m.clearFakeStream()
+	m.busy = false
+	m.status = "aborted"
+	m.lastRunStartedSession = ""
+	m.activeRunID = ""
+	m.refreshViewport()
 }
 
 func (m *model) clearFakeStream() {
@@ -439,6 +493,10 @@ func (m *model) clearFakeStream() {
 	m.streamingVisibleRunes = 0
 	m.streamingFinished = false
 	m.streamingFinishStatus = ""
+}
+
+func newRunID() string {
+	return fmt.Sprintf("run_%d", time.Now().UnixNano())
 }
 
 func fakeStreamTick() tea.Cmd {
@@ -481,6 +539,7 @@ func (m *model) applySessionList(ev runtimeEvent) {
 		m.status = "ready"
 		m.busy = false
 		m.lastRunStartedSession = ""
+		m.activeRunID = ""
 	}
 	m.ensureSessionCursor()
 }
@@ -490,6 +549,7 @@ func (m *model) applySessionMessages(ev runtimeEvent) {
 		return
 	}
 	m.clearFakeStream()
+	m.activeRunID = ""
 	if ev.SessionID != "" {
 		m.session = ev.SessionID
 	}

@@ -66,6 +66,7 @@ const storage = new SqliteStorage({
 });
 
 const pendingPermissions = new Map();
+const activeRuns = new Map();
 const hooks = {
   async requestToolPermission(request) {
     write({
@@ -161,12 +162,17 @@ function handleImmediateLine(line) {
     return false;
   }
 
-  if (request.type !== "tool.permission.response") {
-    return false;
+  if (request.type === "tool.permission.response") {
+    handlePermissionResponse(request);
+    return true;
   }
 
-  handlePermissionResponse(request);
-  return true;
+  if (request.type === "chat.cancel") {
+    handleCancelRequest(request);
+    return true;
+  }
+
+  return false;
 }
 
 async function handleLine(line) {
@@ -187,6 +193,11 @@ async function handleLine(line) {
 
   if (request.type === "tool.permission.response") {
     handlePermissionResponse(request);
+    return;
+  }
+
+  if (request.type === "chat.cancel") {
+    handleCancelRequest(request);
     return;
   }
 
@@ -320,6 +331,8 @@ async function handleLine(line) {
     return;
   }
 
+  const runId = String(request.runId || request.id || createRunId());
+  const controller = new AbortController();
   let runSessionId = request.sessionId || activeSessionId;
   if (request.newSession === true || !request.sessionId) {
     const session = await createSession({ title: request.title || titleFromInput(request.input) });
@@ -328,10 +341,13 @@ async function handleLine(line) {
     await ensureSession(runSessionId);
     activeSessionId = runSessionId;
   }
-  write({ type: "run_started", id: request.id, sessionId: runSessionId });
+  activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, controller, runtime: runtimeState.runtime });
+  write({ type: "run_started", id: request.id, runId, sessionId: runSessionId });
 
   try {
     const result = await runtimeState.runtime.run({
+      runId,
+      signal: controller.signal,
       sessionId: runSessionId,
       input: request.input,
       maxSteps: 4,
@@ -344,22 +360,50 @@ async function handleLine(line) {
       messageCount: result.messages.filter((message) => message.role !== "system").length,
     });
 
-    write({
-      type: "assistant",
-      id: request.id,
-      sessionId: runSessionId,
-      status: result.status,
-      content: assistant?.content || "",
-      reasoningContent: assistant?.reasoningContent,
-    });
-    write({ type: "run_finished", id: request.id, sessionId: runSessionId, status: result.status });
+    if (result.status !== "cancelled" || assistant?.content) {
+      write({
+        type: "assistant",
+        id: request.id,
+        runId,
+        sessionId: runSessionId,
+        status: result.status,
+        content: assistant?.content || "",
+        reasoningContent: assistant?.reasoningContent,
+      });
+    }
+    write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: result.status });
   } catch (error) {
-    write({
-      type: "error",
-      id: request.id,
-      error: redactSecrets(error instanceof Error ? error.message : String(error)),
-    });
+    if (controller.signal.aborted || isAbortError(error)) {
+      write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: "cancelled" });
+    } else {
+      write({
+        type: "error",
+        id: request.id,
+        runId,
+        sessionId: runSessionId,
+        error: redactSecrets(error instanceof Error ? error.message : String(error)),
+      });
+    }
+  } finally {
+    activeRuns.delete(runId);
   }
+}
+
+function handleCancelRequest(request) {
+  const runId = String(request.runId || "");
+  const active = activeRuns.get(runId);
+  if (!runId || !active) {
+    write({ type: "run_cancelled", id: request.id, runId, status: "not_found" });
+    return;
+  }
+
+  try {
+    active.runtime?.cancel?.(runId);
+  } catch {
+    // Best-effort: the AbortController below is the local cancellation path.
+  }
+  active.controller?.abort();
+  write({ type: "run_cancelled", id: request.id, runId, sessionId: active.sessionId, status: "cancelled" });
 }
 
 function handlePermissionResponse(request) {
@@ -1194,6 +1238,17 @@ function storedToolStatus(toolName, parsedResult) {
 
 function createSessionId() {
   return `sess_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createRunId() {
+  return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isAbortError(error) {
+  if (!error) return false;
+  if (error.name === "AbortError") return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /\babort(?:ed)?\b|\bcancell?ed\b/i.test(message);
 }
 
 function titleFromInput(input) {

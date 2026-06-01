@@ -186,6 +186,7 @@ type runtimeEvent struct {
 	Type             string         `json:"type"`
 	ID               string         `json:"id,omitempty"`
 	SessionID        string         `json:"sessionId,omitempty"`
+	RunID            string         `json:"runId,omitempty"`
 	SessionTitle     string         `json:"sessionTitle,omitempty"`
 	Session          *sessionInfo   `json:"session,omitempty"`
 	Sessions         []sessionInfo  `json:"sessions,omitempty"`
@@ -262,6 +263,10 @@ type model struct {
 	theme                 themeConfig
 	autoNewSessionOnChat  bool
 	lastRunStartedSession string
+	activeRunID           string
+	inputHistory          []string
+	inputHistoryIndex     int
+	inputHistoryActive    bool
 
 	mode          uiMode
 	previousMode  uiMode
