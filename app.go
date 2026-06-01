@@ -65,16 +65,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.PasteMsg:
-		m.composer.InsertString(msg.Content)
-		m.layout()
-		return m, nil
+		return m.updateKeyEntryTeaPaste(msg), nil
 	case composerPasteMsg:
-		if msg.err != nil {
-			return m.updateRuntimeError(msg.err), nil
-		}
-		m.composer.InsertString(msg.text)
-		m.layout()
-		return m, nil
+		return m.updateKeyEntryPaste(msg), nil
 	}
 
 	return m.updateInputAndViewport(msg)
@@ -83,6 +76,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modeModal {
 		return m.updateModal(msg)
+	}
+	if m.mode == modeKeyEntry {
+		return m.updateKeyEntry(msg)
+	}
+	if m.mode == modeKeyPicker {
+		return m.updateKeyPicker(msg)
 	}
 	if m.mode == modeSessionPicker {
 		return m.updateSessionPicker(msg)
@@ -211,6 +210,11 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	case "ready":
 		m.ready = true
 		m.provider = ev.Provider
+		m.activeProvider = ev.ActiveProvider
+		if m.activeProvider == "" {
+			m.activeProvider = ev.Provider
+		}
+		m.activeKeyAlias = ev.ActiveKeyAlias
 		m.model = ev.Model
 		m.session = ev.SessionID
 		m.title = ev.SessionTitle
@@ -241,6 +245,10 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}))
 	case "session.list":
 		m.applySessionList(ev)
+	case "key.list":
+		m.applyKeyList(ev)
+	case "key.updated":
+		m.applyKeyUpdated(ev)
 	case "tool.permission.request":
 		m = m.openToolPermissionModal(ev)
 	case "session.created":

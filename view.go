@@ -42,6 +42,9 @@ func newAppView(content string) tea.View {
 
 func (m model) renderHeader() string {
 	provider := fallback(m.provider, "...")
+	if m.activeKeyAlias != "" && m.activeKeyAlias != "stub" {
+		provider = provider + "/" + short(strings.TrimPrefix(m.activeKeyAlias, "env:"), 14)
+	}
 	modelName := fallback(m.model, "...")
 	sessionTitle := fallback(m.title, m.currentSessionTitle())
 	sessionTitle = fallback(sessionTitle, "untitled")
@@ -70,12 +73,16 @@ func (m model) renderMainArea(height int) string {
 	chatContent := m.viewport.View()
 	if m.mode == modeSessionPicker {
 		chatContent = m.renderSessionPicker()
+	} else if m.mode == modeKeyPicker {
+		chatContent = m.renderKeyPicker()
+	} else if m.mode == modeKeyEntry {
+		chatContent = m.renderKeyEntry(bodyHeight)
 	} else if m.mode == modeModal {
 		chatContent = m.renderModal(bodyHeight)
 	}
 	chat := renderChat(chatContent, m.width, max(1, bodyHeight))
 
-	if m.mode == modeModal || !m.showSlashPalette() {
+	if m.mode == modeModal || m.mode == modeKeyEntry || !m.showSlashPalette() {
 		return lipgloss.JoinVertical(lipgloss.Left, header, chat)
 	}
 	palette := m.renderSlashPalette()
@@ -115,6 +122,10 @@ func (m model) renderFooter() string {
 	}
 	if m.mode == modeModal {
 		footer = "←/→ choose action · enter confirm · esc deny/cancel"
+	} else if m.mode == modeKeyEntry {
+		footer = "enter next/save · ctrl+v paste · esc cancel · secret input is masked"
+	} else if m.mode == modeKeyPicker {
+		footer = "↑/↓ choose key · enter activate · a add · d delete · esc close"
 	} else if m.mode == modeSessionPicker {
 		footer = "↑/↓ choose session · enter switch · esc close"
 	} else if m.showSlashPalette() {

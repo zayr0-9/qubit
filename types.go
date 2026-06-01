@@ -29,11 +29,39 @@ type sessionInfo struct {
 	MessageCount int    `json:"messageCount"`
 }
 
+type apiKeyInfo struct {
+	Provider  string `json:"provider"`
+	Alias     string `json:"alias"`
+	Source    string `json:"source"`
+	Active    bool   `json:"active"`
+	Masked    string `json:"masked"`
+	Readonly  bool   `json:"readonly"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type keyEntryStep int
+
+const (
+	keyEntryProvider keyEntryStep = iota
+	keyEntryAlias
+	keyEntrySecret
+)
+
+type keyEntryState struct {
+	Step     keyEntryStep
+	Provider composerModel
+	Alias    composerModel
+	Secret   composerModel
+}
+
 type uiMode int
 
 const (
 	modeChat uiMode = iota
 	modeSessionPicker
+	modeKeyPicker
+	modeKeyEntry
 	modeModal
 )
 
@@ -85,7 +113,10 @@ type runtimeEvent struct {
 	Sessions         []sessionInfo  `json:"sessions,omitempty"`
 	Messages         []chatMessage  `json:"messages,omitempty"`
 	Provider         string         `json:"provider,omitempty"`
+	ActiveProvider   string         `json:"activeProvider,omitempty"`
+	ActiveKeyAlias   string         `json:"activeKeyAlias,omitempty"`
 	Model            string         `json:"model,omitempty"`
+	Keys             []apiKeyInfo   `json:"keys,omitempty"`
 	StoragePath      string         `json:"storagePath,omitempty"`
 	IndexPath        string         `json:"indexPath,omitempty"`
 	Status           string         `json:"status,omitempty"`
@@ -128,10 +159,13 @@ type model struct {
 
 	messages         []chatMessage
 	sessions         []sessionInfo
+	apiKeys          []apiKeyInfo
 	busy             bool
 	ready            bool
 	keyboardEnhanced bool
 	provider         string
+	activeProvider   string
+	activeKeyAlias   string
 	model            string
 	session          string
 	title            string
@@ -141,8 +175,10 @@ type model struct {
 	mode          uiMode
 	previousMode  uiMode
 	sessionCursor int
+	apiKeyCursor  int
 	slashCursor   int
 	modal         *modalState
+	keyEntry      *keyEntryState
 	autoScroll    bool
 
 	streaming             bool

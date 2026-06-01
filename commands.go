@@ -11,6 +11,7 @@ import (
 var slashCommands = []slashCommand{
 	{Name: "new", Usage: "/new [title]", Description: "Create a new chat session", NeedsArg: false},
 	{Name: "sessions", Usage: "/sessions", Description: "Open the session picker", NeedsArg: false},
+	{Name: "keys", Usage: "/keys", Description: "Manage provider API keys", NeedsArg: false},
 	{Name: "rename", Usage: "/rename <title>", Description: "Rename current session", NeedsArg: true},
 	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal Shift+Enter newline setup", NeedsArg: false},
 	{Name: "permission-test", Usage: "/permission-test", Description: "Open a demo permission modal", NeedsArg: false},
@@ -101,6 +102,8 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.busy = true
 		m.status = "loading sessions"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.list"})
+	case "keys", "key":
+		return m.openKeyPicker()
 	case "rename", "title":
 		if arg == "" {
 			m.appendSystem("Usage: /rename <title>")
@@ -117,7 +120,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/sessions - open the session picker\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
@@ -159,9 +162,9 @@ func (m model) acceptSlashSelection() (tea.Model, tea.Cmd) {
 		m.slashCursor = 0
 	}
 	command := matches[m.slashCursor]
-	if command.Name == "sessions" {
+	if command.Name == "sessions" || command.Name == "keys" {
 		m.composer.Reset()
-		return m.handleSlashCommand("/sessions")
+		return m.handleSlashCommand("/" + command.Name)
 	}
 	value := "/" + command.Name + " "
 	m.composer.SetValue(value)

@@ -37,6 +37,7 @@ D:\qubit
   streaming.go              Frontend-simulated assistant streaming helpers, if/when split out
   view.go                   TUI rendering, including Glow/Glamour Markdown message rendering
   commands.go               Slash commands and session picker interactions
+  keys.go                   API key picker and masked key-entry UI
   runtime_client.go         Go <-> Node JSON-lines client
   types.go                  Shared Go structs and message types
   styles.go                 Lip Gloss styling
@@ -85,6 +86,11 @@ session.new
 session.activate
 session.messages
 session.rename
+key.list
+key.set
+key.use
+key.delete
+key.updated
 run_started
 assistant
 run_finished
@@ -111,6 +117,7 @@ main.go            process entrypoint only
 app.go             Bubble Tea model lifecycle and state transitions
 view.go            top-level rendering composition and shared render helpers
 commands.go        slash commands and session picker interactions
+keys.go            API key picker, switching, deletion, and masked key-entry UI
 modal.go           reusable modal state/update/render helpers
 streaming.go       frontend-simulated assistant streaming helpers when streaming logic grows
 runtime_client.go  sidecar process/client code
@@ -137,6 +144,15 @@ Follow standard Go conventions:
 - Keep files focused; if a feature starts adding multiple helpers, tests, or state fields, consider a dedicated file/component instead of expanding an already-large file.
 - Prefer small composed helpers and self-contained UI components for modal/picker/streaming-style features.
 - Prefer table-driven tests when adding tests.
+
+### Testing Standards
+
+- New features and bug fixes must include meaningful tests at the right level, not only compile checks.
+- For user-visible feature work, add integration-style model/runtime-flow tests that exercise the complete interaction path where practical. For example: user input or keypress -> model update -> outbound runtime JSON command -> runtime event response -> final model/message/viewport state.
+- Session, slash-command, runtime-protocol, and transcript-loading changes should assert the exact outbound request type and important fields (`sessionId`, `title`, `input`, etc.), then simulate the expected runtime event and assert the resulting UI state.
+- Bubble Tea `tea.Cmd` and `tea.Batch` values should be tested carefully. Do not run blocking commands like `waitRuntimeEvent` sequentially in tests; use a recording/fake runtime client, inspect outbound JSON writes, and use short timeouts when probing batched commands.
+- Prefer focused integration-style tests in Go for CLI behavior over manual-only verification. Manual smoke checks are still useful for rendering/terminal behavior, but they should not be the only coverage for core flows.
+- When fixing a regression, add a test that would have failed before the fix.
 
 ### Bubble Tea Standards
 
@@ -190,6 +206,15 @@ view.MouseMode = tea.MouseModeCellMotion
   - Up/down selection
   - Enter activation
   - Esc close
+- `/keys` should open the API key manager, not require users to put raw API keys in slash-command text.
+- API key manager should support:
+  - Listing masked keys for each provider, including read-only environment keys such as `env:ZAI_API_KEY`.
+  - Up/down selection.
+  - Enter activation/switching.
+  - `a` to add a key through masked input.
+  - `d` to delete stored keychain keys, while blocking deletion of env keys.
+  - Esc close/cancel.
+- API key entry must never render raw secret text. Pasted or typed keys should be displayed only as mask bullets, and tests should cover paste -> save flows, not only programmatic insertion.
 - Preserve normal terminal selection/copy behavior by keeping mouse capture disabled unless richer mouse interaction is explicitly requested.
 - Assistant responses may be frontend-simulated streamed: the runtime can send a complete `assistant` event, and the Go UI may progressively reveal it. Keep this fake streaming as terminal UX logic, not provider/runtime business logic, until true provider token streaming is explicitly added to the protocol.
 
@@ -197,7 +222,8 @@ view.MouseMode = tea.MouseModeCellMotion
 
 - Use pnpm for Node dependency management.
 - Keep `runtime.mjs` ESM.
-- Keep provider selection environment-driven:
+- Keep provider setup and key resolution in `runtime.mjs`.
+- Support environment-driven provider configuration for automation and fallback:
 
 ```powershell
 $env:ZAI_API_KEY = "your-zai-key"
@@ -205,6 +231,15 @@ $env:GLM_MODEL = "glm-4.6"
 $env:GLM_ENDPOINT = "coding" # optional
 ```
 
+- Support secure in-app API key management through OS keychain integration (`keytar`).
+  - Raw API keys must be stored in the OS keychain, not plaintext `.qubit` JSON files.
+  - `.qubit\api-key-index.json` may store only non-secret metadata such as provider, alias, active key, source, account name, and timestamps.
+  - Runtime protocol events must only expose masked keys and metadata; never send raw key material back to Go.
+  - Runtime stdout/stderr and `.qubit\runtime.log` must not contain raw API keys. Redaction should avoid hiding useful non-secret diagnostics such as function names.
+  - `keytar` ESM import shape should be handled as `module.default ?? module`; verify `setPassword`, `getPassword`, and `deletePassword` exist.
+  - `pnpm` native build approval may be required for `keytar`; keep `package.json`/lockfile in sync and verify a keychain smoke test when changing this area.
+  - Environment keys such as `ZAI_API_KEY` should appear as read-only virtual keys and must not be deleted from the UI.
+  - Switching the active key should rebuild the provider/runtime state before the next chat run.
 - Support stub mode for local development:
 
 ```powershell
@@ -229,6 +264,7 @@ go test ./...
 go vet ./...
 go build -o bin\qubit.exe .
 node --check runtime.mjs
+node -e "import('keytar').then(async mod => { const keytar = mod.default ?? mod; const account = 'qubit-smoke-' + Date.now(); await keytar.setPassword('Qubit Test', account, 'secret'); const got = await keytar.getPassword('Qubit Test', account); await keytar.deletePassword('Qubit Test', account); if (got !== 'secret') throw new Error('keytar round trip failed'); console.log('keytar round trip ok'); })"
 ```
 
 For manual smoke testing:
@@ -249,6 +285,9 @@ Verify:
 6. Up/down changes the highlighted session.
 7. Enter activates the selected session and reloads that session's transcript.
 8. Long loaded transcripts start with the correct chat viewport height: there should not be a large blank gap above the input area that only disappears after typing.
+9. `/keys` opens the API key manager.
+10. Adding a key through `a` uses masked input, accepts paste, saves to OS keychain, and returns a masked/listed key without showing the raw secret.
+11. Switching/deleting keys updates the key list and active provider metadata; env keys remain read-only.
 9. Session lists are not repeatedly appended after assistant responses.
 10. Terminal text selection/copy works via the terminal's mouse-capture override where available, or through supported keyboard/clipboard flows.
 11. Enter sends a message; Ctrl+J inserts a newline in the composer and expands the input area up to the composer max height. Shift+Enter should also work when keyboard enhancements are supported. Alt+Enter works only if the terminal does not reserve it for fullscreen.
