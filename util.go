@@ -129,3 +129,15 @@ func renderedLineCount(s string) int {
 	}
 	return strings.Count(s, "\n") + 1
 }
+
+func titleFromInput(input string) string {
+	cleaned := strings.Join(strings.Fields(input), " ")
+	if cleaned == "" {
+		return "New chat"
+	}
+	if len([]rune(cleaned)) > 48 {
+		runes := []rune(cleaned)
+		return string(runes[:45]) + "..."
+	}
+	return cleaned
+}

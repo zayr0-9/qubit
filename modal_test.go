@@ -52,6 +52,19 @@ func TestMoveModalCursorWraps(t *testing.T) {
 	}
 }
 
+func TestMoveModalOptionCursorWraps(t *testing.T) {
+	m := model{modal: &modalState{Options: []modalOption{{ID: "alpha", Label: "Alpha"}, {ID: "beta", Label: "Beta"}}}}
+
+	m.moveModalOptionCursor(-1)
+	if got := m.selectedModalOptionID(); got != "beta" {
+		t.Fatalf("selected option after -1 = %q, want beta", got)
+	}
+	m.moveModalOptionCursor(1)
+	if got := m.selectedModalOptionID(); got != "alpha" {
+		t.Fatalf("selected option after +1 = %q, want alpha", got)
+	}
+}
+
 func TestDemoPermissionModalResolvesAllowAndDeny(t *testing.T) {
 	allowModel := model{mode: modeChat}.openDemoPermissionModal()
 	allowUpdated, cmd := allowModel.resolveModalAction("allow")
@@ -77,6 +90,58 @@ func TestDemoPermissionModalResolvesAllowAndDeny(t *testing.T) {
 	}
 	if len(deny.messages) == 0 || !strings.Contains(deny.messages[len(deny.messages)-1].Content, "denied") {
 		t.Fatalf("deny did not append denied message: %#v", deny.messages)
+	}
+}
+
+func TestSlashSelectionRequestsModelList(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.composer.SetValue("/models")
+
+	updated, cmd := m.acceptSlashSelection()
+	got := updated.(model)
+	if got.mode != modeModal {
+		t.Fatalf("mode = %v, want modeModal while loading model selector", got.mode)
+	}
+	if !got.busy {
+		t.Fatal("busy = false, want true while loading models")
+	}
+	if got.composer.Value() != "" {
+		t.Fatalf("composer value = %q, want reset after opening selector", got.composer.Value())
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "model.list", "")
+}
+
+func TestModelSelectorSelectsModel(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := model{mode: modeChat, runtime: rt}.openModelSelectorModal([]modelInfo{
+		{ID: "glm-4.6", Name: "glm-4.6", Description: "Default", Active: true},
+		{ID: "glm-4-air", Name: "glm-4-air", Description: "Fast"},
+	})
+
+	updated, cmd := m.updateModal(tea.KeyPressMsg{Code: tea.KeyDown})
+	if cmd != nil {
+		t.Fatal("down returned command, want nil")
+	}
+	m = updated.(model)
+	if got := m.selectedModalOptionID(); got != "glm-4-air" {
+		t.Fatalf("selected option = %q, want glm-4-air", got)
+	}
+
+	updated, cmd = m.updateModal(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(model)
+	if got.mode != modeChat || got.modal != nil {
+		t.Fatalf("model selector not closed: mode=%v modal=%#v", got.mode, got.modal)
+	}
+	if !got.busy {
+		t.Fatal("busy = false, want true while switching model")
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "model.use", "")
+	if payload["model"] != "glm-4-air" {
+		t.Fatalf("model.use model = %#v, want glm-4-air", payload["model"])
 	}
 }
 

@@ -73,6 +73,40 @@ func (m model) openDemoPermissionModal() model {
 	})
 }
 
+func (m model) openModelSelectorModal(models []modelInfo) model {
+	m.previousMode = modeChat
+	m.mode = modeModal
+	m.models = models
+	options := make([]modalOption, 0, len(models))
+	activeIndex := 0
+	for i, info := range models {
+		label := fallback(info.Name, info.ID)
+		if info.Active {
+			activeIndex = i
+		}
+		options = append(options, modalOption{ID: info.ID, Label: label, Description: info.Description})
+	}
+	if len(options) == 0 {
+		options = []modalOption{{ID: fallback(m.model, "glm-4.6"), Label: fallback(m.model, "glm-4.6"), Description: "Current runtime model"}}
+	}
+	m.modal = &modalState{
+		ID:          "model_selector",
+		Kind:        modalKindCustom,
+		Title:       "Choose model",
+		Description: "Select the GLM model Qubit should use for new runs.",
+		Options:     options,
+		Actions: []modalAction{
+			{ID: "select", Label: "Select", Style: "primary", Default: true},
+			{ID: "cancel", Label: "Cancel"},
+		},
+		OptionCursor: activeIndex,
+		Payload:      map[string]any{"action": "model.select"},
+	}
+	m.busy = false
+	m.status = "choose model"
+	return m
+}
+
 func (m model) updateModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.modal == nil {
 		m.mode = modeChat
@@ -83,11 +117,28 @@ func (m model) updateModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
+		if len(m.modal.Options) > 0 {
+			return m.resolveModalAction("cancel")
+		}
 		return m.resolveModalAction("deny")
-	case "left", "shift+tab", "up", "ctrl+p":
+	case "up", "ctrl+p":
+		if len(m.modal.Options) > 0 {
+			m.moveModalOptionCursor(-1)
+		} else {
+			m.moveModalCursor(-1)
+		}
+		return m, nil
+	case "down", "ctrl+n":
+		if len(m.modal.Options) > 0 {
+			m.moveModalOptionCursor(1)
+		} else {
+			m.moveModalCursor(1)
+		}
+		return m, nil
+	case "left", "shift+tab":
 		m.moveModalCursor(-1)
 		return m, nil
-	case "right", "tab", "down", "ctrl+n":
+	case "right", "tab":
 		m.moveModalCursor(1)
 		return m, nil
 	case "enter":
@@ -101,6 +152,23 @@ func (m *model) moveModalCursor(delta int) {
 		return
 	}
 	m.modal.Cursor = (m.modal.Cursor + delta + len(m.modal.Actions)) % len(m.modal.Actions)
+}
+
+func (m *model) moveModalOptionCursor(delta int) {
+	if m.modal == nil || len(m.modal.Options) == 0 {
+		return
+	}
+	m.modal.OptionCursor = (m.modal.OptionCursor + delta + len(m.modal.Options)) % len(m.modal.Options)
+}
+
+func (m model) selectedModalOptionID() string {
+	if m.modal == nil || len(m.modal.Options) == 0 {
+		return ""
+	}
+	if m.modal.OptionCursor < 0 || m.modal.OptionCursor >= len(m.modal.Options) {
+		return m.modal.Options[0].ID
+	}
+	return m.modal.Options[m.modal.OptionCursor].ID
 }
 
 func (m model) selectedModalActionID() string {
@@ -152,8 +220,43 @@ func (m model) resolveModalAction(actionID string) (tea.Model, tea.Cmd) {
 		return m, sendRuntime(m.runtime, payload)
 	}
 
+	if modal.Kind == modalKindConfirm {
+		if modal.Payload["action"] == "key.delete" {
+			if actionID != "delete" {
+				m.status = "delete cancelled"
+				return m, nil
+			}
+			provider, _ := modal.Payload["provider"].(string)
+			alias, _ := modal.Payload["alias"].(string)
+			m.busy = true
+			m.status = "deleting api key"
+			return m, sendRuntime(m.runtime, map[string]any{"type": "key.delete", "provider": provider, "alias": alias})
+		}
+	}
+
+	if modal.Payload["action"] == "model.select" {
+		if actionID == "select" {
+			selected := modalSelectedOption(modal)
+			m.busy = true
+			m.status = "switching model"
+			return m, sendRuntime(m.runtime, map[string]any{"type": "model.use", "model": selected.ID})
+		}
+		m.status = "model selection cancelled"
+		return m, nil
+	}
+
 	m.status = "ready"
 	return m, nil
+}
+
+func modalSelectedOption(modal *modalState) modalOption {
+	if modal == nil || len(modal.Options) == 0 {
+		return modalOption{}
+	}
+	if modal.OptionCursor < 0 || modal.OptionCursor >= len(modal.Options) {
+		return modal.Options[0]
+	}
+	return modal.Options[modal.OptionCursor]
 }
 
 func compactJSON(v any, maxLen int) string {

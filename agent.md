@@ -34,6 +34,9 @@ Agents must read the relevant category context file before planning or changing 
 Agents must also update the relevant category context files when a change affects standards, architecture, workflows, file locations, tool behavior, testing expectations, or other durable guidance for that category.
 
 ```txt
+agent_design.md
+  Mandatory when working on terminal UI design, visual styling, layout, colors, borders, spacing, or rendering behavior.
+
 agent_tools.md
   Mandatory when working on model-callable tools, tool registration, runtime tool permissions, or shared filesystem/path infrastructure.
 ```
@@ -216,6 +219,9 @@ view.MouseMode = tea.MouseModeCellMotion
 - When reserving terminal layout space, preserve the composer/footer visibility without painting opaque chat/message rows. Avoid using `Style.Width(...).Height(...).Render(...)` or `lipgloss.Place(...)` around the chat viewport when the style has a background, because Lip Gloss/viewport padding can create full-line black bars behind messages and role names. Prefer transparent styles plus explicit blank-line padding helpers such as `renderFixedHeight`/`renderChat`.
 - Prefer existing Lip Gloss APIs already used by the project; do not assume newer helpers such as `lipgloss.WithWhitespaceBackground` are available without confirming the pinned dependency supports them.
 - Commands requiring arguments should insert a trailing space after completion.
+- Slash commands that open interactive UI directly from the palette should mark `slashCommand.OpensOnSelect` so Enter/Tab clears the composer and opens the UI instead of inserting command text.
+- Reusable modal selector lists use `modalState.Options` plus `OptionCursor`: Up/down moves the option cursor, left/right or tab/shift+tab moves actions, Enter resolves the selected action, and Esc cancels selector-style modals.
+- `/models` should open the model selector modal backed by runtime `model.list`/`model.use` protocol data, not a hardcoded demo list.
 - `/sessions` should open an interactive picker, not print repeated lists into chat.
 - Session switching should happen through the interactive picker. Do not add a `/use` slash command unless explicitly requested.
 - `/terminal-setup` should patch Windows Terminal `settings.json` to map Shift+Enter to an enhanced keyboard escape sequence. It must be idempotent, create a timestamped backup before writing, remove the common misplaced top-level `command`/`keys` mistake, and report the settings/backup paths. It must not change non-Windows Terminal files.
@@ -229,7 +235,7 @@ view.MouseMode = tea.MouseModeCellMotion
   - Up/down selection.
   - Enter activation/switching.
   - `a` to add a key through masked input.
-  - `d` to delete stored keychain keys, while blocking deletion of env keys.
+  - `d` to delete stored keychain keys after a confirmation modal, while blocking deletion of env keys.
   - Esc close/cancel.
 - API key entry must never render raw secret text. Pasted or typed keys should be displayed only as mask bullets, and tests should cover paste -> save flows, not only programmatic insertion.
 - Preserve normal terminal selection/copy behavior by keeping mouse capture disabled unless richer mouse interaction is explicitly requested.

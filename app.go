@@ -18,15 +18,16 @@ func initialModel(rt *runtimeClient) model {
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(accent)))
 
 	return model{
-		viewport:       viewport.New(),
-		composer:       composer,
-		spinner:        spin,
-		renderCache:    make(map[renderCacheKey]string),
-		messages:       []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
-		status:         "starting runtime",
-		permissionMode: permissionModeAsk,
-		autoScroll:     true,
-		runtime:        rt,
+		viewport:             viewport.New(),
+		composer:             composer,
+		spinner:              spin,
+		renderCache:          make(map[renderCacheKey]string),
+		messages:             []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
+		status:               "starting runtime",
+		permissionMode:       permissionModeAsk,
+		autoNewSessionOnChat: true,
+		autoScroll:           true,
+		runtime:              rt,
 	}
 }
 
@@ -227,7 +228,15 @@ func (m model) submitInput() (tea.Model, tea.Cmd) {
 	m.status = "thinking"
 	m.autoScroll = true
 	m.refreshViewport()
-	return m, tea.Batch(sendRuntime(m.runtime, map[string]any{"type": "chat", "sessionId": m.session, "input": input}), m.spinner.Tick)
+	payload := map[string]any{"type": "chat", "input": input}
+	if m.autoNewSessionOnChat {
+		payload["newSession"] = true
+		payload["title"] = titleFromInput(input)
+		m.autoNewSessionOnChat = false
+	} else {
+		payload["sessionId"] = m.session
+	}
+	return m, tea.Batch(sendRuntime(m.runtime, payload), m.spinner.Tick)
 }
 
 func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
@@ -246,11 +255,16 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		}
 		m.session = ev.SessionID
 		m.title = ev.SessionTitle
+		m.autoNewSessionOnChat = true
 		m.status = "ready"
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}))
 	case "run_started":
 		m.busy = true
 		m.status = "thinking"
+		if ev.SessionID != "" {
+			m.session = ev.SessionID
+			m.lastRunStartedSession = ev.SessionID
+		}
 	case "assistant":
 		m.applyAssistantEvent(ev)
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), fakeStreamTick())
@@ -269,12 +283,17 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		} else {
 			m.busy = false
 			m.status = finishStatus
+			m.lastRunStartedSession = ""
 		}
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}))
 	case "session.list":
 		m.applySessionList(ev)
 	case "key.list":
 		m.applyKeyList(ev)
+	case "model.list":
+		m = m.openModelSelectorModal(ev.Models)
+	case "model.updated":
+		m.applyModelUpdated(ev)
 	case "key.updated":
 		m.applyKeyUpdated(ev)
 	case "tool.permission.request":
@@ -293,6 +312,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.busy = false
 		m.session = ev.SessionID
 		m.title = ev.SessionTitle
+		m.autoNewSessionOnChat = false
 		m.messages = []chatMessage{{Role: "assistant", Content: fmt.Sprintf("Started new session: %s (%s)", m.title, short(m.session, 18))}}
 		m.status = "ready"
 		m.refreshViewport()
@@ -302,6 +322,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.busy = true
 		m.session = ev.SessionID
 		m.title = ev.SessionTitle
+		m.autoNewSessionOnChat = false
 		m.messages = []chatMessage{{Role: "assistant", Content: fmt.Sprintf("Loading session: %s (%s)", m.title, short(m.session, 18))}}
 		m.status = "loading transcript"
 		m.refreshViewport()
@@ -320,6 +341,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	case "error":
 		m.clearFakeStream()
 		m.busy = false
+		m.lastRunStartedSession = ""
 		m.err = ev.Error
 		m.status = "error"
 		m.messages = append(m.messages, chatMessage{Role: "error", Content: ev.Error})
@@ -360,6 +382,7 @@ func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {
 		m.clearFakeStream()
 		m.busy = false
 		m.status = "ready"
+		m.lastRunStartedSession = ""
 		return m, nil
 	}
 
@@ -378,6 +401,7 @@ func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {
 	if finished {
 		m.busy = false
 		m.status = fallback(finishStatus, "ready")
+		m.lastRunStartedSession = ""
 	} else {
 		m.status = "responding"
 	}
@@ -418,12 +442,12 @@ func fakeStreamChunkSize(totalRunes int, visibleRunes int) int {
 func (m *model) applySessionList(ev runtimeEvent) {
 	wasStreaming := m.streaming
 	m.sessions = ev.Sessions
-	if ev.SessionID != "" {
+	if ev.SessionID != "" && !(m.busy && m.lastRunStartedSession != "" && ev.SessionID != m.lastRunStartedSession) {
 		m.session = ev.SessionID
 	}
-	if ev.SessionTitle != "" {
+	if ev.SessionTitle != "" && ev.SessionID == m.session {
 		m.title = ev.SessionTitle
-	} else {
+	} else if !m.busy {
 		m.title = m.currentSessionTitle()
 	}
 	if wasStreaming {
@@ -432,6 +456,7 @@ func (m *model) applySessionList(ev runtimeEvent) {
 	} else {
 		m.status = "ready"
 		m.busy = false
+		m.lastRunStartedSession = ""
 	}
 	m.ensureSessionCursor()
 }

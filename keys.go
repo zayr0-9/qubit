@@ -42,9 +42,7 @@ func (m model) updateKeyPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.status = "env api keys are read-only"
 			return m, nil
 		}
-		m.busy = true
-		m.status = "deleting api key"
-		return m, sendRuntime(m.runtime, map[string]any{"type": "key.delete", "provider": selected.Provider, "alias": selected.Alias})
+		return m.openDeleteApiKeyConfirm(selected), nil
 	case "enter":
 		selected, ok := m.selectedApiKey()
 		if !ok {
@@ -60,6 +58,33 @@ func (m model) updateKeyPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, sendRuntime(m.runtime, map[string]any{"type": "key.use", "provider": selected.Provider, "alias": selected.Alias})
 	}
 	return m, nil
+}
+
+func (m model) openDeleteApiKeyConfirm(selected apiKeyInfo) model {
+	m.previousMode = m.mode
+	m.mode = modeModal
+	m.modal = &modalState{
+		ID:          "delete_api_key",
+		Kind:        modalKindConfirm,
+		Title:       "Delete API key?",
+		Description: fmt.Sprintf("Delete stored key %s/%s from the OS keychain? This cannot be undone.", fallback(selected.Provider, "glm"), selected.Alias),
+		Fields: []modalField{
+			{Label: "Provider", Value: fallback(selected.Provider, "glm")},
+			{Label: "Alias", Value: selected.Alias},
+			{Label: "Source", Value: selected.Source},
+		},
+		Actions: []modalAction{
+			{ID: "cancel", Label: "Cancel", Default: true},
+			{ID: "delete", Label: "Delete", Style: "danger"},
+		},
+		Payload: map[string]any{
+			"action":   "key.delete",
+			"provider": selected.Provider,
+			"alias":    selected.Alias,
+		},
+	}
+	m.status = "confirm api key delete"
+	return m
 }
 
 func (m model) openKeyEntry() model {
@@ -373,4 +398,20 @@ func looksLikeAPIKey(text string) bool {
 
 func accentSt() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(accent).Bold(true)
+}
+
+func (m *model) applyModelUpdated(ev runtimeEvent) {
+	if ev.Model != "" {
+		m.model = ev.Model
+	}
+	if len(ev.Models) > 0 {
+		m.models = ev.Models
+	}
+	m.applyActiveKeyMetadata(ev)
+	m.busy = false
+	m.status = "ready"
+	m.err = ""
+	if ev.Status != "" {
+		m.appendSystem(ev.Status)
+	}
 }

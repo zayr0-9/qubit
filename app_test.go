@@ -54,6 +54,26 @@ func TestNormalizeInputNewlines(t *testing.T) {
 	}
 }
 
+func TestRefreshViewportRendersRoleIconsInline(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 24
+	m.messages = []chatMessage{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi"},
+	}
+	m.layout()
+	m.refreshViewport()
+
+	viewport := plainText(m.viewport.View())
+	if strings.Contains(viewport, "You") || strings.Contains(viewport, "Qubit") {
+		t.Fatalf("viewport = %q, want role names removed", viewport)
+	}
+	if !strings.Contains(viewport, "◆   hello") || !strings.Contains(viewport, "◆   hi") {
+		t.Fatalf("viewport = %q, want inline user and assistant icons", viewport)
+	}
+}
+
 func TestSessionPickerEnterClearsOldMessagesWhileLoading(t *testing.T) {
 	m := initialModel(nil)
 	m.sessions = []sessionInfo{{ID: "sess_1", Title: "Empty old session"}}
@@ -681,8 +701,93 @@ func TestReadyRequestsSessionList(t *testing.T) {
 	if got.title != "First" {
 		t.Fatalf("title = %q, want First", got.title)
 	}
+	if !got.autoNewSessionOnChat {
+		t.Fatal("autoNewSessionOnChat = false, want true after fresh ready event")
+	}
 	payload := runBatchSendCommand(t, cmd, stdin, "session.list")
 	assertPayload(t, payload, "session.list", "")
+}
+
+func TestFirstChatAfterReadyRequestsNewSession(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.session = "sess_last"
+	m.title = "Last chat"
+	m.autoNewSessionOnChat = true
+	m.composer.SetValue("hello new work")
+
+	updated, cmd := m.submitInput()
+	got := updated.(model)
+
+	if got.autoNewSessionOnChat {
+		t.Fatal("autoNewSessionOnChat = true after submit, want consumed")
+	}
+	payload := runBatchSendCommand(t, cmd, stdin, "chat")
+	assertPayload(t, payload, "chat", "")
+	if payload["sessionId"] != nil {
+		t.Fatalf("sessionId = %#v, want omitted for auto-new first chat", payload["sessionId"])
+	}
+	if payload["newSession"] != true {
+		t.Fatalf("newSession = %#v, want true", payload["newSession"])
+	}
+	if payload["title"] != "hello new work" {
+		t.Fatalf("title = %#v, want derived title", payload["title"])
+	}
+}
+
+func TestSelectedSessionChatUsesExistingSession(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.session = "sess_selected"
+	m.autoNewSessionOnChat = false
+	m.composer.SetValue("continue here")
+
+	_, cmd := m.submitInput()
+	payload := runBatchSendCommand(t, cmd, stdin, "chat")
+	assertPayload(t, payload, "chat", "sess_selected")
+	if payload["newSession"] != nil {
+		t.Fatalf("newSession = %#v, want omitted for explicit session chat", payload["newSession"])
+	}
+}
+
+func TestStaleStartupSessionListDoesNotOverrideNewRunSession(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.busy = true
+	m.session = "sess_last"
+	m.lastRunStartedSession = "sess_new"
+
+	m.applySessionList(runtimeEvent{
+		Type:         "session.list",
+		SessionID:    "sess_last",
+		SessionTitle: "Last chat",
+		Sessions: []sessionInfo{
+			{ID: "sess_last", Title: "Last chat"},
+			{ID: "sess_new", Title: "New chat"},
+		},
+	})
+
+	if m.session != "sess_last" {
+		t.Fatalf("precondition changed unexpectedly, session = %q", m.session)
+	}
+
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "run_started", SessionID: "sess_new"})
+	got := updated.(model)
+	got.applySessionList(runtimeEvent{
+		Type:         "session.list",
+		SessionID:    "sess_last",
+		SessionTitle: "Last chat",
+		Sessions: []sessionInfo{
+			{ID: "sess_last", Title: "Last chat"},
+			{ID: "sess_new", Title: "New chat"},
+		},
+	})
+
+	if got.session != "sess_new" {
+		t.Fatalf("session = %q, want stale session.list not to override active new run session", got.session)
+	}
 }
 
 func newTestRuntime(t *testing.T) (*runtimeClient, *recordingWriteCloser) {
@@ -783,6 +888,7 @@ func plainText(s string) string {
 		"\x1b[m", "",
 		"\x1b[1;38;2;242;166;90m", "",
 		"\x1b[1;38;2;139;211;221m", "",
+		"\x1b[1;38;2;255;107;107m", "",
 		"\x1b[38;5;252m", "",
 	)
 	return replacer.Replace(s)

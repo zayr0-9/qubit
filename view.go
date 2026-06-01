@@ -133,7 +133,11 @@ func (m model) renderFooter() string {
 		footer = "selection · ctrl+c copy · type replace · backspace/delete remove · esc clear"
 	}
 	if m.mode == modeModal {
-		footer = "←/→ choose action · enter confirm · esc deny/cancel"
+		if m.modal != nil && len(m.modal.Options) > 0 {
+			footer = "↑/↓ choose option · ←/→ choose action · enter confirm · esc cancel"
+		} else {
+			footer = "←/→ choose action · enter confirm · esc deny/cancel"
+		}
 	} else if m.mode == modeKeyEntry {
 		footer = "enter next/save · ctrl+v paste · esc cancel · secret input is masked"
 	} else if m.mode == modeKeyPicker {
@@ -189,6 +193,26 @@ func (m model) renderModal(height int) string {
 		}
 	}
 
+	if len(modal.Options) > 0 {
+		b.WriteString("\n\n")
+		for i, option := range modal.Options {
+			marker := "  "
+			label := lipgloss.NewStyle().Foreground(cyan).Bold(true).Render(option.Label)
+			description := mutedSt.Render(option.Description)
+			line := fmt.Sprintf("%s%s", label, descriptionSuffix(description))
+			if i == modal.OptionCursor {
+				marker = selectSt.Render("› ")
+				line = selectSt.Render(line)
+			} else {
+				marker = mutedSt.Render(marker)
+			}
+			b.WriteString(marker + line)
+			if i < len(modal.Options)-1 {
+				b.WriteString("\n")
+			}
+		}
+	}
+
 	if len(modal.Actions) > 0 {
 		b.WriteString("\n\n")
 		for i, action := range modal.Actions {
@@ -209,6 +233,13 @@ func (m model) renderModal(height int) string {
 
 	panel := lipgloss.NewStyle().Background(surface).Foreground(text).Padding(1, 2).Width(panelWidth).Render(b.String())
 	return lipgloss.Place(max(1, m.width-4), max(1, height), lipgloss.Center, lipgloss.Bottom, panel)
+}
+
+func descriptionSuffix(description string) string {
+	if description == "" {
+		return ""
+	}
+	return "  " + description
 }
 
 func (m model) renderSessionPicker() string {
@@ -260,18 +291,8 @@ func (m *model) refreshViewport() {
 			contentLine += lineCount
 			continue
 		}
-		switch message.Role {
-		case "user":
-			b.WriteString(userName.Render("You"))
-		case "error":
-			b.WriteString(errSt.Bold(true).Render("Error"))
-		default:
-			b.WriteString(aiName.Render("Qubit"))
-		}
-		b.WriteString("\n")
-		contentLine++
 		cacheable := !(m.streaming && i == m.streamingMessageIndex)
-		rendered := m.renderMessageContent(message, cacheable)
+		rendered := renderMessageWithIcon(message, m.renderMessageContent(message, cacheable))
 		b.WriteString(rendered)
 		contentLine += renderedLineCount(rendered)
 	}
@@ -285,6 +306,32 @@ func (m *model) restoreViewportPosition(yOffset int) {
 		return
 	}
 	m.viewport.SetYOffset(clampInt(yOffset, 0, max(0, m.viewport.TotalLineCount()-m.viewport.Height())))
+}
+
+func renderMessageWithIcon(message chatMessage, content string) string {
+	icon := aiIcon.Render("◆")
+	if message.Role == "user" {
+		icon = userIcon.Render("◆")
+	} else if message.Role == "error" {
+		icon = errorIcon.Render("!")
+	}
+
+	if content == "" {
+		return icon
+	}
+
+	lines := strings.Split(content, "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+		lines = lines[1:]
+	}
+	if len(lines) == 0 {
+		return icon
+	}
+	lines[0] = icon + " " + strings.TrimLeft(lines[0], " \t")
+	for i := 1; i < len(lines); i++ {
+		lines[i] = "  " + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *model) renderMessageContent(message chatMessage, cacheable bool) string {

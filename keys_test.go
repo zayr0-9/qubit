@@ -183,3 +183,69 @@ func TestPastingAPIKeyJumpsToSecretStepAndSaves(t *testing.T) {
 		t.Fatalf("payload = %#v, want pasted key save", payload)
 	}
 }
+
+func TestKeyPickerDeleteOpensConfirmationModal(t *testing.T) {
+	m := initialModel(nil)
+	m.mode = modeKeyPicker
+	m.apiKeys = []apiKeyInfo{{Provider: "glm", Alias: "work", Source: "keychain", Masked: "zai-…abcd"}}
+
+	updated, cmd := m.updateKeyPicker(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatal("delete key returned command, want confirmation modal only")
+	}
+	if got.mode != modeModal {
+		t.Fatalf("mode = %v, want modal", got.mode)
+	}
+	if got.previousMode != modeKeyPicker {
+		t.Fatalf("previousMode = %v, want key picker", got.previousMode)
+	}
+	if got.modal == nil || got.modal.Kind != modalKindConfirm {
+		t.Fatalf("modal = %#v, want confirm modal", got.modal)
+	}
+	if got.selectedModalActionID() != "cancel" {
+		t.Fatalf("selected action = %q, want cancel default", got.selectedModalActionID())
+	}
+}
+
+func TestApiKeyDeleteConfirmationCancelDoesNotDelete(t *testing.T) {
+	m := initialModel(nil)
+	m.mode = modeKeyPicker
+	m = m.openDeleteApiKeyConfirm(apiKeyInfo{Provider: "glm", Alias: "work", Source: "keychain"})
+
+	updated, cmd := m.resolveModalAction("cancel")
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatal("cancel delete returned command, want nil")
+	}
+	if got.mode != modeKeyPicker {
+		t.Fatalf("mode = %v, want key picker", got.mode)
+	}
+	if got.status != "delete cancelled" {
+		t.Fatalf("status = %q, want delete cancelled", got.status)
+	}
+}
+
+func TestApiKeyDeleteConfirmationSendsDelete(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.mode = modeKeyPicker
+	m = m.openDeleteApiKeyConfirm(apiKeyInfo{Provider: "glm", Alias: "work", Source: "keychain"})
+
+	updated, cmd := m.resolveModalAction("delete")
+	got := updated.(model)
+
+	if got.mode != modeKeyPicker {
+		t.Fatalf("mode = %v, want key picker", got.mode)
+	}
+	if !got.busy {
+		t.Fatal("busy = false, want true while deleting")
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "key.delete", "")
+	if payload["provider"] != "glm" || payload["alias"] != "work" {
+		t.Fatalf("payload = %#v, want glm/work delete", payload)
+	}
+}

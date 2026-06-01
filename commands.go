@@ -10,8 +10,9 @@ import (
 
 var slashCommands = []slashCommand{
 	{Name: "new", Usage: "/new [title]", Description: "Create a new chat session", NeedsArg: false},
-	{Name: "sessions", Usage: "/sessions", Description: "Open the session picker", NeedsArg: false},
-	{Name: "keys", Usage: "/keys", Description: "Manage provider API keys", NeedsArg: false},
+	{Name: "sessions", Usage: "/sessions", Description: "Open the session picker", NeedsArg: false, OpensOnSelect: true},
+	{Name: "keys", Usage: "/keys", Description: "Manage provider API keys", NeedsArg: false, OpensOnSelect: true},
+	{Name: "models", Usage: "/models", Description: "Choose the active GLM model", NeedsArg: false, OpensOnSelect: true},
 	{Name: "rename", Usage: "/rename <title>", Description: "Rename current session", NeedsArg: true},
 	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal Shift+Enter newline setup", NeedsArg: false},
 	{Name: "permission", Usage: "/permission <ask|always>", Description: "Set tool permission mode", NeedsArg: true},
@@ -46,6 +47,7 @@ func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.busy = true
 		m.session = session.ID
 		m.title = session.Title
+		m.autoNewSessionOnChat = false
 		m.messages = nil
 		m.status = "loading transcript"
 		m.layout()
@@ -95,6 +97,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 			title = "New chat"
 		}
 		m.busy = true
+		m.autoNewSessionOnChat = false
 		m.status = "creating session"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.new", "title": title})
 	case "sessions", "session", "ls":
@@ -105,6 +108,11 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.list"})
 	case "keys", "key":
 		return m.openKeyPicker()
+	case "models", "model", "list":
+		m.mode = modeModal
+		m.busy = true
+		m.status = "loading models"
+		return m, sendRuntime(m.runtime, map[string]any{"type": "model.list"})
 	case "rename", "title":
 		if arg == "" {
 			m.appendSystem("Usage: /rename <title>")
@@ -123,7 +131,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <ask|always> - choose whether gated tools ask or auto-allow\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/models - choose the active GLM model\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <ask|always> - choose whether gated tools ask or auto-allow\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
@@ -200,7 +208,7 @@ func (m model) acceptSlashSelection() (tea.Model, tea.Cmd) {
 		m.slashCursor = 0
 	}
 	command := matches[m.slashCursor]
-	if command.Name == "sessions" || command.Name == "keys" {
+	if command.OpensOnSelect {
 		m.composer.Reset()
 		return m.handleSlashCommand("/" + command.Name)
 	}
@@ -212,24 +220,32 @@ func (m model) acceptSlashSelection() (tea.Model, tea.Cmd) {
 
 func (m model) renderSlashPalette() string {
 	matches := m.filteredSlashCommands()
+	paletteStyle := lipgloss.NewStyle().Padding(1, 2).Width(max(20, m.width-4))
 	if len(matches) == 0 {
-		return mutedSt.Render("no matching commands")
+		return paletteStyle.Render(errSt.Render("✦ no matching commands"))
 	}
+
 	maxItems := min(6, len(matches))
+	cmdStyle := lipgloss.NewStyle().Foreground(cyan).Bold(true)
+	badgeStyle := lipgloss.NewStyle().Foreground(accent).Bold(true)
+	selectedBadgeStyle := lipgloss.NewStyle().Foreground(accent).Bold(true)
+
 	var b strings.Builder
-	b.WriteString(mutedSt.Render("commands") + "\n")
+	b.WriteString(badgeStyle.Render("✦ commands") + "  " + mutedSt.Render("tab/enter to complete") + "\n")
 	for i := 0; i < maxItems; i++ {
 		command := matches[i]
-		line := fmt.Sprintf("  %-16s %s", command.Usage, mutedSt.Render(command.Description))
+		marker := "  "
+		usage := cmdStyle.Render(fmt.Sprintf("%-16s", command.Usage))
+		description := mutedSt.Render(command.Description)
 		if i == m.slashCursor {
-			line = selectSt.Render("  " + fmt.Sprintf("%-16s %s", command.Usage, command.Description))
+			marker = selectedBadgeStyle.Render("› ")
 		}
-		b.WriteString(line)
+		b.WriteString(fmt.Sprintf("%s%s %s", marker, usage, description))
 		if i < maxItems-1 {
 			b.WriteString("\n")
 		}
 	}
-	return lipgloss.NewStyle().Background(surface).Padding(1, 2).Width(max(20, m.width-4)).Render(b.String())
+	return paletteStyle.Render(b.String())
 }
 
 func terminalSetupResultMessage(result terminalSetupResult) string {

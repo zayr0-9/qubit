@@ -41,6 +41,13 @@ type apiKeyInfo struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
+type modelInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Active      bool   `json:"active"`
+}
+
 type keyEntryStep int
 
 const (
@@ -94,22 +101,31 @@ type modalField struct {
 	Value string
 }
 
-type modalState struct {
+type modalOption struct {
 	ID          string
-	Kind        modalKind
-	Title       string
+	Label       string
 	Description string
-	Fields      []modalField
-	Actions     []modalAction
-	Cursor      int
-	Payload     map[string]any
+}
+
+type modalState struct {
+	ID           string
+	Kind         modalKind
+	Title        string
+	Description  string
+	Fields       []modalField
+	Options      []modalOption
+	OptionCursor int
+	Actions      []modalAction
+	Cursor       int
+	Payload      map[string]any
 }
 
 type slashCommand struct {
-	Name        string
-	Usage       string
-	Description string
-	NeedsArg    bool
+	Name          string
+	Usage         string
+	Description   string
+	NeedsArg      bool
+	OpensOnSelect bool
 }
 
 type runtimeEvent struct {
@@ -125,6 +141,7 @@ type runtimeEvent struct {
 	ActiveKeyAlias   string         `json:"activeKeyAlias,omitempty"`
 	Model            string         `json:"model,omitempty"`
 	Keys             []apiKeyInfo   `json:"keys,omitempty"`
+	Models           []modelInfo    `json:"models,omitempty"`
 	StoragePath      string         `json:"storagePath,omitempty"`
 	IndexPath        string         `json:"indexPath,omitempty"`
 	WorkspaceCwd     string         `json:"workspaceCwd,omitempty"`
@@ -171,21 +188,24 @@ type model struct {
 
 	renderCache map[renderCacheKey]string
 
-	messages         []chatMessage
-	sessions         []sessionInfo
-	apiKeys          []apiKeyInfo
-	busy             bool
-	ready            bool
-	keyboardEnhanced bool
-	provider         string
-	activeProvider   string
-	activeKeyAlias   string
-	model            string
-	session          string
-	title            string
-	status           string
-	err              string
-	permissionMode   permissionMode
+	messages              []chatMessage
+	sessions              []sessionInfo
+	apiKeys               []apiKeyInfo
+	models                []modelInfo
+	busy                  bool
+	ready                 bool
+	keyboardEnhanced      bool
+	provider              string
+	activeProvider        string
+	activeKeyAlias        string
+	model                 string
+	session               string
+	title                 string
+	status                string
+	err                   string
+	permissionMode        permissionMode
+	autoNewSessionOnChat  bool
+	lastRunStartedSession string
 
 	mode          uiMode
 	previousMode  uiMode

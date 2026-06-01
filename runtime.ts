@@ -24,7 +24,13 @@ const storagePath = join(dataDir, "sessions.sqlite");
 const indexPath = join(dataDir, "session-index.json");
 const keyIndexPath = join(dataDir, "api-key-index.json");
 const defaultSessionId = process.env.QUBIT_SESSION_ID || "qubit-default";
-const model = process.env.GLM_MODEL || process.env.QUBIT_MODEL || "glm-4.6";
+let model = process.env.GLM_MODEL || process.env.QUBIT_MODEL || "glm-4.6";
+const glmModels = [
+  { id: "glm-4.6", name: "glm-4.6", description: "Default GLM coding/chat model" },
+  { id: "glm-4.5", name: "glm-4.5", description: "Previous GLM generation" },
+  { id: "glm-4-air", name: "glm-4-air", description: "Faster GLM option" },
+  { id: "glm-4-flash", name: "glm-4-flash", description: "Lightweight GLM option" },
+];
 const keychainService = process.env.QUBIT_KEYCHAIN_SERVICE || "Qubit";
 const envGLMAlias = "env:ZAI_API_KEY";
 const initialWorkspaceCwd = process.env.QUBIT_WORKSPACE_CWD || process.cwd();
@@ -189,6 +195,18 @@ async function handleLine(line) {
     return;
   }
 
+  if (request.type === "model.list") {
+    writeModelList(request.id);
+    return;
+  }
+
+  if (request.type === "model.use") {
+    model = normalizeModel(request.model);
+    runtimeState = await createRuntimeState();
+    writeModelUpdated(request.id, `Using model ${model}.`);
+    return;
+  }
+
   if (request.type === "key.set") {
     await setApiKey({ provider: request.provider, alias: request.alias, apiKey: request.apiKey });
     runtimeState = await createRuntimeState();
@@ -275,9 +293,14 @@ async function handleLine(line) {
     return;
   }
 
-  const runSessionId = request.sessionId || activeSessionId;
-  await ensureSession(runSessionId);
-  activeSessionId = runSessionId;
+  let runSessionId = request.sessionId || activeSessionId;
+  if (request.newSession === true || !request.sessionId) {
+    const session = await createSession({ title: request.title || titleFromInput(request.input) });
+    runSessionId = session.id;
+  } else {
+    await ensureSession(runSessionId);
+    activeSessionId = runSessionId;
+  }
   write({ type: "run_started", id: request.id, sessionId: runSessionId });
 
   try {
@@ -447,6 +470,47 @@ async function listApiKeys() {
   }
 
   return keys;
+}
+
+function listModels() {
+  const known = glmModels.some((candidate) => candidate.id === model)
+    ? glmModels
+    : [{ id: model, name: model, description: "Configured model" }, ...glmModels];
+  return known.map((candidate) => ({ ...candidate, active: candidate.id === model }));
+}
+
+function writeModelList(id) {
+  write({
+    type: "model.list",
+    id,
+    provider: runtimeState.providerName,
+    activeProvider: runtimeState.providerName,
+    activeKeyAlias: runtimeState.keyAlias,
+    model,
+    models: listModels(),
+  });
+}
+
+function writeModelUpdated(id, status) {
+  write({
+    type: "model.updated",
+    id,
+    provider: runtimeState.providerName,
+    activeProvider: runtimeState.providerName,
+    activeKeyAlias: runtimeState.keyAlias,
+    model,
+    status,
+    models: listModels(),
+  });
+}
+
+function normalizeModel(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) throw new Error("Model is required.");
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(normalized)) {
+    throw new Error("Model may contain only letters, numbers, dash, underscore, dot, and colon.");
+  }
+  return normalized;
 }
 
 async function writeKeyList(id) {
