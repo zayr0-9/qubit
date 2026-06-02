@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -330,6 +331,8 @@ func TestRenderForkTreeNodeIncludesAssistantText(t *testing.T) {
 }
 
 func TestRenderForkTreeModalColorsSelectedNode(t *testing.T) {
+	applyTheme(defaultTheme())
+	defer applyTheme(defaultTheme())
 	m := initialModel(nil)
 	m.width = 100
 	m.height = 30
@@ -343,6 +346,27 @@ func TestRenderForkTreeModalColorsSelectedNode(t *testing.T) {
 	rendered := m.renderForkTreeModal(20)
 	if !strings.Contains(rendered, "\x1b[") || !strings.Contains(rendered, "■") {
 		t.Fatalf("rendered tree = %q, want ANSI colored selected node marker", rendered)
+	}
+	if !strings.Contains(rendered, "38;2;155;226;143") {
+		t.Fatalf("rendered tree = %q, want selected node to use default theme green", rendered)
+	}
+}
+
+func TestRenderForkTreeModalSelectedNodeUsesThemeColor(t *testing.T) {
+	m := initialModel(nil).applyThemeConfig(builtinThemes[2])
+	defer applyTheme(defaultTheme())
+	m.width = 100
+	m.height = 30
+	m.mode = modeForkTree
+	m.forkTree = newForkTreeState()
+	m.applyForkTree(runtimeEvent{Type: "session.tree", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_root", SessionID: "sess_root", SessionTitle: "Root", MessageRole: "user", MessageContent: "root"},
+		{ID: "sess_child", SessionID: "sess_child", SessionTitle: "Child", ParentSessionID: "sess_root", MessageRole: "assistant", MessageContent: "child"},
+	}})
+
+	rendered := m.renderForkTreeModal(20)
+	if !strings.Contains(rendered, "38;2;57;255;20") {
+		t.Fatalf("rendered tree = %q, want selected node to use neon theme green", rendered)
 	}
 }
 
@@ -525,5 +549,89 @@ func TestForkTreeLayoutKeepsMultipleForksFromSameMessageAtSameLevel(t *testing.T
 	}
 	if byID["fork-one-b"].Y != firstFork.Y || byID["fork-two-b"].Y != secondFork.Y {
 		t.Fatalf("fork lineage rows changed: one A/B=%d/%d two A/B=%d/%d", firstFork.Y, byID["fork-one-b"].Y, secondFork.Y, byID["fork-two-b"].Y)
+	}
+}
+
+func TestForkTreePreviewScrollsSelectedMessageToTop(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_root"
+	m.mode = modeForkTree
+	m.forkTree = newForkTreeState()
+	m.forkTree.Preview = viewport.New()
+	m.forkTree.Preview.SetWidth(60)
+	m.forkTree.Preview.SetHeight(4)
+	m.forkTree.PreviewWidth = 60
+	m.forkTree.PreviewHeight = 4
+	m.applyForkTree(runtimeEvent{Type: "session.tree", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_root", SessionID: "sess_root", SessionTitle: "Root", LineageMessages: []forkTreeLineageMessage{
+			{Role: "user", Content: "first question"},
+			{Role: "assistant", Content: "first answer"},
+			{Role: "user", Content: "second question"},
+			{Role: "assistant", Content: "second answer"},
+		}, MessageNodes: []forkTreeMessageNode{
+			{ID: "root-a", SessionID: "sess_root", Role: "user", Content: "first question", MessageIndex: 0},
+			{ID: "root-b", ParentID: "root-a", SessionID: "sess_root", Role: "assistant", Content: "first answer", MessageIndex: 1},
+			{ID: "root-c", ParentID: "root-b", SessionID: "sess_root", Role: "user", Content: "second question", MessageIndex: 2},
+			{ID: "root-d", ParentID: "root-c", SessionID: "sess_root", Role: "assistant", Content: "second answer", MessageIndex: 3},
+		}},
+	}})
+
+	for i, node := range m.forkTree.Nodes {
+		if node.ID == "root-c" {
+			m.forkTree.Selected = i
+			break
+		}
+	}
+	m.updateForkTreePreview(true)
+
+	if got := m.forkTree.Preview.YOffset(); got <= 0 {
+		t.Fatalf("preview YOffset = %d, want scrolled to selected message", got)
+	}
+	visible := plainText(m.forkTree.Preview.View())
+	if !strings.Contains(visible, "second question") {
+		t.Fatalf("visible preview = %q, want selected message", visible)
+	}
+	if strings.Contains(visible, "first question") {
+		t.Fatalf("visible preview = %q, want earlier messages scrolled above selected message", visible)
+	}
+}
+
+func TestForkTreePreviewLeftToFirstMessagePositionsFirstMessageAtTop(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_root"
+	m.mode = modeForkTree
+	m.forkTree = newForkTreeState()
+	m.forkTree.Preview = viewport.New()
+	m.forkTree.Preview.SetWidth(60)
+	m.forkTree.Preview.SetHeight(3)
+	m.forkTree.PreviewWidth = 60
+	m.forkTree.PreviewHeight = 3
+	m.applyForkTree(runtimeEvent{Type: "session.tree", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_root", SessionID: "sess_root", SessionTitle: "Root", LineageMessages: []forkTreeLineageMessage{
+			{Role: "user", Content: "first question"},
+			{Role: "assistant", Content: "first answer"},
+			{Role: "user", Content: "second question"},
+		}, MessageNodes: []forkTreeMessageNode{
+			{ID: "root-a", SessionID: "sess_root", Role: "user", Content: "first question", MessageIndex: 0},
+			{ID: "root-b", ParentID: "root-a", SessionID: "sess_root", Role: "assistant", Content: "first answer", MessageIndex: 1},
+			{ID: "root-c", ParentID: "root-b", SessionID: "sess_root", Role: "user", Content: "second question", MessageIndex: 2},
+		}},
+	}})
+
+	for i, node := range m.forkTree.Nodes {
+		if node.ID == "root-b" {
+			m.forkTree.Selected = i
+			break
+		}
+	}
+	m.updateForkTreePreview(true)
+	m.moveForkTreeParent()
+
+	visible := plainText(m.forkTree.Preview.View())
+	if !strings.Contains(visible, "first question") {
+		t.Fatalf("visible preview = %q, want first selected user message", visible)
+	}
+	if strings.Contains(visible, "first answer") && strings.Index(visible, "first answer") < strings.Index(visible, "first question") {
+		t.Fatalf("visible preview = %q, response appears before first selected user message", visible)
 	}
 }

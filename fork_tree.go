@@ -35,7 +35,7 @@ func (m *model) applyForkTree(ev runtimeEvent) {
 	m.busy = false
 	m.status = "fork tree"
 	m.err = ""
-	m.updateForkTreePreview()
+	m.updateForkTreePreview(false)
 }
 
 func cloneForkTreeNodes(nodes []forkTreeNode) []forkTreeNode {
@@ -255,7 +255,7 @@ func (m *model) moveForkTreeOrder(delta int) {
 	}
 	currentPos = (currentPos + delta + len(m.forkTree.Order)) % len(m.forkTree.Order)
 	m.forkTree.Selected = m.forkTree.Order[currentPos]
-	m.updateForkTreePreview()
+	m.updateForkTreePreview(true)
 }
 
 func (m *model) moveForkTreeParallel(delta int) {
@@ -294,7 +294,7 @@ func (m *model) moveForkTreeParallel(delta int) {
 		return left.X < right.X
 	})
 	m.forkTree.Selected = candidates[0]
-	m.updateForkTreePreview()
+	m.updateForkTreePreview(true)
 }
 
 func absInt(n int) int {
@@ -311,7 +311,7 @@ func (m *model) moveForkTreeParent() {
 	parent := m.forkTree.Nodes[m.forkTree.Selected].Parent
 	if parent >= 0 {
 		m.forkTree.Selected = parent
-		m.updateForkTreePreview()
+		m.updateForkTreePreview(true)
 	}
 }
 
@@ -322,7 +322,7 @@ func (m *model) moveForkTreeChild() {
 	children := m.forkTree.Nodes[m.forkTree.Selected].Children
 	if len(children) > 0 {
 		m.forkTree.Selected = children[0]
-		m.updateForkTreePreview()
+		m.updateForkTreePreview(true)
 	}
 }
 
@@ -352,7 +352,7 @@ func (m model) activateSelectedForkTreeSession() (tea.Model, tea.Cmd) {
 	return m, sendRuntime(m.runtime, map[string]any{"type": "session.activate", "sessionId": node.SessionID})
 }
 
-func (m *model) updateForkTreePreview() {
+func (m *model) updateForkTreePreview(focusSelectedMessage bool) {
 	if m.forkTree.Preview.Width() <= 0 {
 		m.forkTree.Preview.SetWidth(max(20, m.forkTree.PreviewWidth))
 	}
@@ -374,23 +374,54 @@ func (m *model) updateForkTreePreview() {
 		}
 	}
 	meta := mutedSt.Render(strings.Join(metaParts, " · "))
-	m.forkTree.Preview.SetContent(header + "\n" + meta + "\n\n" + m.renderForkTreeLineagePreview(node, width))
+	content, selectedMessageOffset := m.renderForkTreeLineagePreviewWithOffset(node, width)
+	m.forkTree.Preview.SetContent(header + "\n" + meta + "\n\n" + content)
+	if focusSelectedMessage {
+		m.forkTree.Preview.SetYOffset(selectedMessageOffset + 3)
+	}
 }
 
 func (m *model) renderForkTreeLineagePreview(node forkTreeNode, width int) string {
+	content, _ := m.renderForkTreeLineagePreviewWithOffset(node, width)
+	return content
+}
+
+func (m *model) renderForkTreeLineagePreviewWithOffset(node forkTreeNode, width int) (string, int) {
 	messages := forkTreeLineageMessages(node)
 	if len(messages) == 0 {
-		return mutedSt.Render("No text message preview for this fork.")
+		return mutedSt.Render("No text message preview for this fork."), 0
 	}
+	selectedMessageOffset := 0
 	parts := make([]string, 0, len(messages))
-	for _, message := range messages {
+	for i, message := range messages {
 		rendered, err := renderMessageContentAtWidth(message, width)
 		if err != nil {
 			rendered = wrap(message.Content, width)
 		}
+		if i == selectedForkTreeLineageMessageIndex(node, len(messages)) {
+			selectedMessageOffset = forkTreePreviewLineCount(parts)
+		}
 		parts = append(parts, renderMessageWithIcon(message, rendered, 0))
 	}
-	return strings.Join(parts, "\n\n")
+	return strings.Join(parts, "\n\n"), selectedMessageOffset
+}
+
+func forkTreePreviewLineCount(parts []string) int {
+	if len(parts) == 0 {
+		return 0
+	}
+	return strings.Count(strings.Join(parts, "\n\n"), "\n") + 2
+}
+
+func selectedForkTreeLineageMessageIndex(node forkTreeNode, messageCount int) int {
+	if messageCount <= 0 {
+		return 0
+	}
+	index := node.ForkedFromMessageIndex
+	if index < 0 || index >= messageCount {
+		index = messageCount - 1
+	}
+	return index
 }
 
 func forkTreeLineageMessages(node forkTreeNode) []chatMessage {
@@ -447,7 +478,7 @@ func (m model) renderForkTreeModal(height int) string {
 	m.forkTree.PreviewHeight = paneHeight
 	m.forkTree.Preview.SetWidth(m.forkTree.PreviewWidth)
 	m.forkTree.Preview.SetHeight(paneHeight)
-	m.updateForkTreePreview()
+	m.updateForkTreePreview(false)
 
 	previewTitle := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("chat lineage")
 	preview := previewTitle + "\n" + m.forkTree.Preview.View()
@@ -544,7 +575,7 @@ func drawForkTreeNode(canvas *runeCanvas, node forkTreeNode, selected bool, show
 	if showDev {
 		devStyle := mutedSt
 		if selected {
-			devStyle = lipgloss.NewStyle().Foreground(accent).Bold(true)
+			devStyle = forkTreeSelectedSt
 		}
 		canvas.writeStyledString(node.X+2, node.Y, short(node.SessionID, 10), devStyle)
 	}
@@ -583,7 +614,7 @@ func forkTreeNodeExtraRows(node forkTreeNode) int {
 
 func forkTreeNodeMarkerStyle(role string, selected bool) lipgloss.Style {
 	if selected {
-		return lipgloss.NewStyle().Foreground(accent).Bold(true)
+		return forkTreeSelectedSt
 	}
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "assistant", "agent":
