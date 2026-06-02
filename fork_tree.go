@@ -475,7 +475,7 @@ func (m model) renderForkTreeCanvas(width int, height int) string {
 		if node.Parent >= 0 && node.Parent < len(m.forkTree.Nodes) {
 			parent := m.forkTree.Nodes[node.Parent]
 			edgeSelected := i == m.forkTree.Selected || selectedAncestors[i]
-			drawForkTreeEdge(canvas, parent.X+forkTreeNodeWidth, parent.Y, node.X, node.Y, edgeSelected)
+			drawForkTreeEdge(canvas, parent.X+forkTreeNodeWidth, parent.Y, node.X, node.Y, forkTreeEdgeStyle(edgeSelected, m.inputCursorPulse))
 		}
 	}
 	showDev := showForkTreeDevDetails()
@@ -505,11 +505,17 @@ func (s forkTreeState) selectedAncestorEdges() map[int]bool {
 	return ancestors
 }
 
-func drawForkTreeEdge(canvas *runeCanvas, x1 int, y1 int, x2 int, y2 int, selected bool) {
-	style := mutedSt
-	if selected {
-		style = lipgloss.NewStyle().Foreground(accent).Bold(true)
+func forkTreeEdgeStyle(selected bool, pulseFrame int) lipgloss.Style {
+	if !selected {
+		return mutedSt
 	}
+	if len(forkTreeBranchStyles) == 0 {
+		return selectSt
+	}
+	return forkTreeBranchStyles[pulseFrame%len(forkTreeBranchStyles)].Bold(true)
+}
+
+func drawForkTreeEdge(canvas *runeCanvas, x1 int, y1 int, x2 int, y2 int, style lipgloss.Style) {
 	midX := x1 + max(2, (x2-x1)/2)
 	canvas.drawHorizontal(x1, midX, y1, '─', style)
 	if y1 == y2 {

@@ -119,6 +119,7 @@ var (
 	inputSelectSt         lipgloss.Style
 	composerCursorSt      lipgloss.Style
 	composerCursorStyles  []lipgloss.Style
+	forkTreeBranchStyles  []lipgloss.Style
 	spinnerStyle          lipgloss.Style
 	toolReadSt            lipgloss.Style
 	toolSearchSt          lipgloss.Style
@@ -174,6 +175,7 @@ func applyTheme(theme themeConfig) {
 	inputSelectSt = lipgloss.NewStyle().Foreground(bg).Background(accent)
 	composerCursorSt = lipgloss.NewStyle().Foreground(bg).Background(text)
 	composerCursorStyles = smoothCursorStyles(theme.Background, fallback(theme.Muted, "#7c838a"), theme.Text)
+	forkTreeBranchStyles = smoothForegroundStyles(fallback(theme.Muted, "#7c838a"), fallback(theme.Accent, "#f2a65a"))
 	spinnerStyle = lipgloss.NewStyle().Foreground(accent)
 	toolReadSt = lipgloss.NewStyle().Foreground(toolRead)
 	toolSearchSt = lipgloss.NewStyle().Foreground(toolSearch)
