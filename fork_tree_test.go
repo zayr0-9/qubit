@@ -485,3 +485,45 @@ func TestForkTreeEscapeReturnsToSessionPickerWhenOpenedFromSessions(t *testing.T
 		t.Fatalf("status = %q, want ready", got.status)
 	}
 }
+
+func TestForkTreeLayoutKeepsMultipleForksFromSameMessageAtSameLevel(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_root"
+	m.mode = modeForkTree
+	m.forkTree = newForkTreeState()
+	m.applyForkTree(runtimeEvent{Type: "session.tree", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_root", SessionID: "sess_root", SessionTitle: "Root", MessageNodes: []forkTreeMessageNode{
+			{ID: "root-a", SessionID: "sess_root", Role: "user", Content: "A"},
+			{ID: "root-b", ParentID: "root-a", SessionID: "sess_root", Role: "assistant", Content: "B"},
+			{ID: "root-c", ParentID: "root-b", SessionID: "sess_root", Role: "user", Content: "C"},
+		}},
+		{ID: "sess_fork_one", SessionID: "sess_fork_one", SessionTitle: "Fork one", ParentSessionID: "sess_root", MessageNodes: []forkTreeMessageNode{
+			{ID: "fork-one-a", ParentID: "root-a", SessionID: "sess_fork_one", Role: "user", Content: "A1"},
+			{ID: "fork-one-b", ParentID: "fork-one-a", SessionID: "sess_fork_one", Role: "assistant", Content: "B1"},
+		}},
+		{ID: "sess_fork_two", SessionID: "sess_fork_two", SessionTitle: "Fork two", ParentSessionID: "sess_root", MessageNodes: []forkTreeMessageNode{
+			{ID: "fork-two-a", ParentID: "root-a", SessionID: "sess_fork_two", Role: "user", Content: "A2"},
+			{ID: "fork-two-b", ParentID: "fork-two-a", SessionID: "sess_fork_two", Role: "assistant", Content: "B2"},
+		}},
+	}})
+
+	byID := map[string]forkTreeNode{}
+	for _, node := range m.forkTree.Nodes {
+		byID[node.ID] = node
+	}
+
+	firstFork := byID["fork-one-a"]
+	secondFork := byID["fork-two-a"]
+	if firstFork.X != secondFork.X {
+		t.Fatalf("forks from same parent X = %d and %d, want same hierarchical level", firstFork.X, secondFork.X)
+	}
+	if firstFork.X <= byID["root-a"].X {
+		t.Fatalf("fork X = %d, parent X = %d; want fork to continue right of parent", firstFork.X, byID["root-a"].X)
+	}
+	if byID["root-a"].Y != byID["root-b"].Y || byID["root-b"].Y != byID["root-c"].Y {
+		t.Fatalf("root lineage not horizontal after fork layout: A=%d B=%d C=%d", byID["root-a"].Y, byID["root-b"].Y, byID["root-c"].Y)
+	}
+	if byID["fork-one-b"].Y != firstFork.Y || byID["fork-two-b"].Y != secondFork.Y {
+		t.Fatalf("fork lineage rows changed: one A/B=%d/%d two A/B=%d/%d", firstFork.Y, byID["fork-one-b"].Y, secondFork.Y, byID["fork-two-b"].Y)
+	}
+}

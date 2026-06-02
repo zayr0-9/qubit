@@ -151,16 +151,26 @@ func (s *forkTreeState) buildForkTreeLayout(currentSessionID string) {
 			maxRow = row
 		}
 		children := s.Nodes[index].Children
-		sameRowUsed := false
+		sameSessionChildren := make([]int, 0, len(children))
+		forkChildren := make([]int, 0, len(children))
 		for _, child := range children {
+			if s.Nodes[child].SessionID == s.Nodes[index].SessionID {
+				sameSessionChildren = append(sameSessionChildren, child)
+			} else {
+				forkChildren = append(forkChildren, child)
+			}
+		}
+		for i, child := range sameSessionChildren {
 			childRow := row
-			if sameRowUsed || s.Nodes[child].SessionID != s.Nodes[index].SessionID {
+			if i > 0 {
 				nextRow++
 				childRow = nextRow
-			} else {
-				sameRowUsed = true
 			}
 			walk(child, depth+1, childRow)
+		}
+		for _, child := range forkChildren {
+			nextRow++
+			walk(child, depth+1, nextRow)
 		}
 	}
 	for _, root := range roots {

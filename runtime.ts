@@ -1737,7 +1737,7 @@ async function buildMessageTreeNodesForSessions(sessions, cache) {
 
     let parentId = inheritedParentId;
     if (session.forkedFromSessionId && byId.has(session.forkedFromSessionId)) {
-      parentId = forkParentMessageNodeId(session, rawMessagesBySession, globalNodeIds) || inheritedParentId;
+      parentId = forkParentMessageNodeId(session, byId, rawMessagesBySession, globalNodeIds);
     }
 
     for (let index = startsAt; index < messages.length; index += 1) {
@@ -1759,14 +1759,28 @@ async function buildMessageTreeNodesForSessions(sessions, cache) {
   return nodesBySession;
 }
 
-function forkParentMessageNodeId(session, rawMessagesBySession, globalNodeIds) {
+function forkParentMessageNodeId(session, sessionsById, rawMessagesBySession, globalNodeIds) {
   const parentId = session?.forkedFromSessionId || "";
   if (!parentId) return "";
   const parentRawMessages = rawMessagesBySession.get(parentId) || [];
   const rawForkIndex = Number.isFinite(session.forkedFromMessageIndex) ? Math.trunc(session.forkedFromMessageIndex) : parentRawMessages.length;
   const parentMessageIndex = textTreeParentIndexForRawIndex(parentRawMessages, rawForkIndex);
   if (parentMessageIndex < 0) return "";
-  return globalNodeIds.get(`${parentId}:${parentMessageIndex}`) || "";
+  return sharedPrefixMessageNodeId(parentId, parentMessageIndex, sessionsById, rawMessagesBySession, globalNodeIds);
+}
+
+function sharedPrefixMessageNodeId(sessionId, messageIndex, sessionsById, rawMessagesBySession, globalNodeIds) {
+  const directNodeId = globalNodeIds.get(`${sessionId}:${messageIndex}`);
+  if (directNodeId) return directNodeId;
+
+  const session = sessionsById.get(sessionId);
+  const parentId = session?.forkedFromSessionId || "";
+  if (!parentId || !sessionsById.has(parentId)) return "";
+
+  const rawForkIndex = Number.isFinite(session.forkedFromMessageIndex) ? Math.trunc(session.forkedFromMessageIndex) : 0;
+  const copiedTextCount = textTreeStartIndexForRawIndex(rawMessagesBySession.get(sessionId) || [], rawForkIndex);
+  if (messageIndex >= copiedTextCount) return "";
+  return sharedPrefixMessageNodeId(parentId, messageIndex, sessionsById, rawMessagesBySession, globalNodeIds);
 }
 
 function textTreeParentIndexForRawIndex(rawMessages, rawIndex) {
