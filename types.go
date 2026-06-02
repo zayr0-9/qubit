@@ -9,9 +9,13 @@ import (
 )
 
 type chatMessage struct {
-	Role      string     `json:"role"`
-	Content   string     `json:"content"`
-	ToolGroup *toolGroup `json:"toolGroup,omitempty"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content"`
+	ReasoningContent string     `json:"reasoningContent,omitempty"`
+	ViewType         string     `json:"viewType,omitempty"`
+	Title            string     `json:"title,omitempty"`
+	Path             string     `json:"path,omitempty"`
+	ToolGroup        *toolGroup `json:"toolGroup,omitempty"`
 }
 
 type forkTreeLineageMessage struct {
@@ -31,9 +35,10 @@ type forkTreeMessageNode struct {
 }
 
 type renderCacheKey struct {
-	Role    string
-	Content string
-	Width   int
+	Role             string
+	Content          string
+	ReasoningContent string
+	Width            int
 }
 
 type sessionInfo struct {
@@ -65,6 +70,7 @@ type modelInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Active      bool   `json:"active"`
+	MaxContext  int    `json:"maxContext,omitempty"`
 }
 
 type apiKeyProviderOption struct {
@@ -107,6 +113,7 @@ type themeEntryState struct {
 }
 
 type forkPoint struct {
+	Number           int
 	MessageIndex     int
 	EditMessageIndex int
 	Content          string
@@ -284,8 +291,12 @@ type runtimeEvent struct {
 	Active           bool           `json:"active,omitempty"`
 	Status           string         `json:"status,omitempty"`
 	Content          string         `json:"content,omitempty"`
+	Name             string         `json:"name,omitempty"`
+	Path             string         `json:"path,omitempty"`
+	Cwd              string         `json:"cwd,omitempty"`
 	ReasoningContent string         `json:"reasoningContent,omitempty"`
 	ReasoningLevel   string         `json:"reasoningLevel,omitempty"`
+	MaxContext       int            `json:"maxContext,omitempty"`
 	Step             int            `json:"step,omitempty"`
 	ToolCallID       string         `json:"toolCallId,omitempty"`
 	ToolName         string         `json:"toolName,omitempty"`
@@ -319,6 +330,7 @@ type runtimeClient struct {
 	errs      chan error
 	appRoot   string
 	launchCwd string
+	qubitDir  string
 	logPath   string
 }
 
@@ -345,6 +357,7 @@ type model struct {
 	activeProvider        string
 	activeKeyAlias        string
 	model                 string
+	maxContext            int
 	reasoningLevel        reasoningLevel
 	session               string
 	title                 string

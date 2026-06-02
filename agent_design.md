@@ -10,7 +10,7 @@ Qubit's terminal interface should stay clean, minimal, and calm. Prefer readable
 
 - Keep the terminal UI minimal by default.
 - Do not add boxes, panels, heavy borders, cards, framed sections, or decorative containers unless explicitly requested.
-- Do not add background colors unless explicitly requested for a specific UI element or state.
+- Do not add background colors unless explicitly requested for a specific UI element or state. The inline edit diff UI is an explicit exception: removed rows use red background and added rows use green background.
 - Prefer foreground text color, bold text, dim text, symbols, and spacing for visual hierarchy.
 - Use color sparingly and consistently:
   - Accent color for active markers, prompts, titles, and important actions.
@@ -18,6 +18,7 @@ Qubit's terminal interface should stay clean, minimal, and calm. Prefer readable
   - Muted color for hints, metadata, shortcuts, and descriptions.
   - Red only for errors or destructive actions.
   - Green only for success or enabled/ready states.
+- Tool-call rows use theme-provided foreground colors by category (`ToolRead`, `ToolSearch`, `ToolWrite`, `ToolShell`, `ToolOther`) and communicate running/completed/failed state through colored symbols rather than status words.
 - Avoid full-row selection highlights. Prefer a small colored marker such as `›`, `•`, or an accent-colored label.
 - Avoid opaque full-width styles around chat, command palettes, pickers, and status areas unless a feature specifically requires it.
 - Preserve terminal transparency where possible. Do not paint large rectangular areas behind content.
@@ -39,3 +40,8 @@ Qubit's terminal interface should stay clean, minimal, and calm. Prefer readable
 - For selected rows, style only the marker and/or foreground text. Do not apply a background to the whole row.
 - When changing visual design, run `gofmt` and relevant Go tests.
 - If a design change affects durable UI conventions, update this file and `agent.md` if needed.
+
+## Context Status
+
+- The compact input status row may show approximate context usage next to mode/reasoning (for example `plan · medium · ctx 2.1k/400k`). Keep it terse and foreground-only.
+- Context usage is currently an MVP estimate using 1 token = 4 characters and includes visible chat messages, surfaced reasoning blocks, and tool-call summaries.

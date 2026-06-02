@@ -56,7 +56,9 @@ Your role is EXCLUSIVELY to inspect, understand, and plan. You may only use read
 
 ## Available Read-Only Exploration Tools
 
-Use these harness tools for codebase exploration:
+Use these harness tools for codebase exploration.
+
+When you are confident in advance that you know the next several read-only tool calls to make, prefer `multiCall` to execute them sequentially in one turn, such as `glob` -> `ripgrep` -> `readFile`, or several focused `readFile` calls. Keep each chain short and purposeful. Do not include mutating tools, shell commands that mutate state, or uncertain exploratory steps in `multiCall` while in plan mode.
 
 ### File Reading
 
@@ -86,6 +88,10 @@ Use:
   - Use file globs and `maxCount` to keep output focused
   - Use `contextLines` when understanding surrounding code matters
   - Use `filesWithMatches` when you only need matching filenames
+
+### Multi-call Chaining
+
+Use `multiCall` for simple sequential chains only when the full sequence is already clear. Good plan-mode examples: read a known context file and then search for a symbol; search for matching files and read the most likely targets; read several specific files. Avoid using it when you need to inspect one result before deciding the next step.
 
 ### Shell Commands
 

@@ -174,9 +174,9 @@ func TestRenderThemeEntryShowsPresetsAndHexHint(t *testing.T) {
 }
 
 func TestThemeConfigPersistsAndLoadsSelectedPreset(t *testing.T) {
-	appRoot := t.TempDir()
+	qubitDir := t.TempDir()
 	rt, _ := newTestRuntime(t)
-	rt.appRoot = appRoot
+	rt.qubitDir = qubitDir
 
 	m := initialModel(rt).applyThemeConfig(builtinThemes[2])
 	if m.err != "" {

@@ -14,15 +14,15 @@ type inputHistoryStore struct {
 	Entries []string `json:"entries"`
 }
 
-func inputHistoryPath(appRoot string) string {
-	return filepath.Join(appRoot, ".qubit", "input-history.json")
+func inputHistoryPath(qubitDir string) string {
+	return filepath.Join(qubitDir, "input-history.json")
 }
 
-func loadInputHistory(appRoot string) ([]string, error) {
-	if appRoot == "" {
+func loadInputHistory(qubitDir string) ([]string, error) {
+	if qubitDir == "" {
 		return nil, nil
 	}
-	data, err := os.ReadFile(inputHistoryPath(appRoot))
+	data, err := os.ReadFile(inputHistoryPath(qubitDir))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -36,11 +36,11 @@ func loadInputHistory(appRoot string) ([]string, error) {
 	return sanitizeInputHistory(store.Entries), nil
 }
 
-func saveInputHistory(appRoot string, entries []string) error {
-	if appRoot == "" {
+func saveInputHistory(qubitDir string, entries []string) error {
+	if qubitDir == "" {
 		return nil
 	}
-	path := inputHistoryPath(appRoot)
+	path := inputHistoryPath(qubitDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("create input history directory: %w", err)
 	}
@@ -87,11 +87,11 @@ func (m *model) recordInputHistory(input string) {
 }
 
 func (m *model) saveInputHistory() {
-	appRoot := ""
+	qubitDir := ""
 	if m.runtime != nil {
-		appRoot = m.runtime.appRoot
+		qubitDir = m.runtime.qubitDir
 	}
-	if err := saveInputHistory(appRoot, m.inputHistory); err != nil {
+	if err := saveInputHistory(qubitDir, m.inputHistory); err != nil {
 		m.err = err.Error()
 		m.status = "input history save failed"
 	}

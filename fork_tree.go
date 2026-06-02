@@ -250,10 +250,7 @@ func (m *model) moveForkTreeParallel(delta int) {
 	selected := m.forkTree.Nodes[m.forkTree.Selected]
 	candidates := make([]int, 0)
 	for i, node := range m.forkTree.Nodes {
-		if i == m.forkTree.Selected {
-			continue
-		}
-		if node.X != selected.X || node.Y == selected.Y {
+		if i == m.forkTree.Selected || node.Y == selected.Y {
 			continue
 		}
 		if delta < 0 && node.Y < selected.Y {
@@ -269,12 +266,17 @@ func (m *model) moveForkTreeParallel(delta int) {
 	sort.SliceStable(candidates, func(i, j int) bool {
 		left := m.forkTree.Nodes[candidates[i]]
 		right := m.forkTree.Nodes[candidates[j]]
-		leftDistance := absInt(left.Y - selected.Y)
-		rightDistance := absInt(right.Y - selected.Y)
-		if leftDistance == rightDistance {
-			return left.X < right.X
+		leftRowDistance := absInt(left.Y - selected.Y)
+		rightRowDistance := absInt(right.Y - selected.Y)
+		if leftRowDistance != rightRowDistance {
+			return leftRowDistance < rightRowDistance
 		}
-		return leftDistance < rightDistance
+		leftXDistance := absInt(left.X - selected.X)
+		rightXDistance := absInt(right.X - selected.X)
+		if leftXDistance != rightXDistance {
+			return leftXDistance < rightXDistance
+		}
+		return left.X < right.X
 	})
 	m.forkTree.Selected = candidates[0]
 	m.updateForkTreePreview()
@@ -371,7 +373,7 @@ func (m *model) renderForkTreeLineagePreview(node forkTreeNode, width int) strin
 		if err != nil {
 			rendered = wrap(message.Content, width)
 		}
-		parts = append(parts, renderMessageWithIcon(message, rendered))
+		parts = append(parts, renderMessageWithIcon(message, rendered, 0))
 	}
 	return strings.Join(parts, "\n\n")
 }

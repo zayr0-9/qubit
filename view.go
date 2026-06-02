@@ -123,13 +123,22 @@ func idleInputPrompt() string {
 }
 
 func (m model) renderInputStatus() string {
+	mode := m.permissionModeBadge()
 	if m.messageEdit.Active {
-		return footerStyle.Width(m.width).Render(mutedSt.Render("Edit message, then press enter to fork and reroll from here"))
+		return footerStyle.Width(m.width).Render(mode + mutedSt.Render(" · editing message, enter forks/rerolls from here"))
 	}
 	if m.forkSelector.Active {
-		return footerStyle.Width(m.width).Render(mutedSt.Render("Press enter to fork here or up key to fork at a previous point"))
+		return footerStyle.Width(m.width).Render(mode + mutedSt.Render(" · enter forks here, up chooses a previous user message"))
 	}
 
+	parts := []string{m.reasoningLevelValue()}
+	if contextStatus := m.contextStatusText(); contextStatus != "" {
+		parts = append(parts, contextStatus)
+	}
+	return footerStyle.Width(m.width).Render(mode + mutedSt.Render(" · "+strings.Join(parts, " · ")))
+}
+
+func (m model) permissionModeBadge() string {
 	mode := m.permissionModeLabel()
 	style := lipgloss.NewStyle().Bold(true)
 	if m.permissionMode == permissionModeAlwaysAllow {
@@ -137,9 +146,7 @@ func (m model) renderInputStatus() string {
 	} else {
 		style = style.Foreground(accent)
 	}
-	reasoning := mutedSt.Render(" reasoning " + m.reasoningLevelValue())
-
-	return footerStyle.Width(m.width).Render(style.Render(mode) + reasoning)
+	return style.Render(mode)
 }
 
 func (m model) renderFooter() string {
@@ -345,35 +352,48 @@ func renderSessionPickerRow(session sessionInfo, active bool, width int) string 
 	title := oneLine(session.Title, titleWidth)
 	return fmt.Sprintf("%s %-*s%s", activeMarker, titleWidth, title, suffix)
 }
-
 func (m *model) refreshViewport() {
 	previousYOffset := m.viewport.YOffset()
 	m.toolHitboxes = nil
 	var b strings.Builder
 	contentLine := 0
-	for i, message := range m.messages {
+	for i := 0; i < len(m.messages); i++ {
+		message := m.messages[i]
 		if i > 0 {
 			separator := messageSeparator(m.messages[i-1], message)
 			b.WriteString(separator)
 			contentLine += strings.Count(separator, "\n")
 		}
+		if message.Role == "view" {
+			rendered := m.renderViewMessage(message)
+			b.WriteString(rendered)
+			contentLine += renderedLineCount(rendered)
+			continue
+		}
 		if message.Role == "tool" {
 			startLine := contentLine
-			rendered := m.renderToolGroup(message.ToolGroup, max(20, m.viewport.Width()))
-			b.WriteString(rendered)
-			lineCount := renderedLineCount(rendered)
-			if message.ToolGroup != nil {
-				// Only the tool row header is clickable. Expanded detail rows often contain
-				// selectable text/previews and should not toggle the group accidentally.
-				m.toolHitboxes = append(m.toolHitboxes, toolHitbox{GroupID: message.ToolGroup.ID, StartY: startLine, EndY: startLine})
+			groups := []*toolGroup{}
+			for i < len(m.messages) && m.messages[i].Role == "tool" {
+				if m.messages[i].ToolGroup != nil {
+					groups = append(groups, m.messages[i].ToolGroup)
+				}
+				i++
 			}
-			contentLine += lineCount
+			i--
+			rendered := m.renderCollapsedToolGroups(groups, max(20, m.viewport.Width()))
+			b.WriteString(rendered)
+			m.appendToolGroupHitboxes(groups, startLine, max(20, m.viewport.Width()))
+			contentLine += renderedLineCount(rendered)
 			continue
 		}
 		cacheable := !(m.streaming && i == m.streamingMessageIndex)
-		rendered := renderMessageWithIcon(message, m.renderMessageContent(message, cacheable))
+		rendered := renderMessageWithIcon(message, m.renderMessageContent(message, cacheable), messageDisplayNumber(m.messages, i))
 		b.WriteString(rendered)
 		contentLine += renderedLineCount(rendered)
+		if message.Role == "user" && i == len(m.messages)-1 {
+			b.WriteString("\n")
+			contentLine++
+		}
 	}
 	m.viewport.SetContent(b.String())
 	m.restoreViewportPosition(previousYOffset)
@@ -388,6 +408,9 @@ func (m *model) restoreViewportPosition(yOffset int) {
 }
 
 func messageSeparator(prev chatMessage, next chatMessage) string {
+	if prev.Role == "user" {
+		return "\n\n"
+	}
 	if prev.Role == "tool" || next.Role == "tool" {
 		return "\n"
 	}
@@ -396,11 +419,39 @@ func messageSeparator(prev chatMessage, next chatMessage) string {
 	}
 	return "\n\n"
 }
+func (m *model) renderViewMessage(message chatMessage) string {
+	title := fallback(message.Title, "View")
+	if message.ViewType == "plan" && !strings.HasPrefix(title, "Plan:") {
+		title = "Plan: " + title
+	}
+	header := aiIcon.Render("◇") + " " + lipgloss.NewStyle().Foreground(accent).Bold(true).Render(title)
+	if message.Path != "" {
+		header += mutedSt.Render(" · " + oneLine(message.Path, max(12, m.viewport.Width()-lipgloss.Width(title)-8)))
+	}
+	content, err := renderMessageContentAtWidth(chatMessage{Role: "assistant", Content: message.Content}, max(20, m.viewport.Width()-2))
+	if err != nil {
+		content = wrap(message.Content, max(20, m.viewport.Width()-2))
+	}
+	if strings.TrimSpace(content) == "" {
+		return header
+	}
+	lines := strings.Split(content, "\n")
+	for i := range lines {
+		lines[i] = "  " + lines[i]
+	}
+	return header + "\n" + strings.Join(lines, "\n")
+}
 
-func renderMessageWithIcon(message chatMessage, content string) string {
+func renderMessageWithIcon(message chatMessage, content string, number int) string {
 	icon := aiIcon.Render("◆")
-	if message.Role == "user" {
-		icon = userIcon.Render("›")
+	if message.Role == "reasoning" {
+		icon = mutedSt.Render("◇")
+	} else if message.Role == "user" {
+		if number > 0 {
+			icon = userIcon.Render(fmt.Sprintf("›%d", number))
+		} else {
+			icon = userIcon.Render("›")
+		}
 	} else if message.Role == "error" {
 		icon = errorIcon.Render("!")
 	}
@@ -416,16 +467,23 @@ func renderMessageWithIcon(message chatMessage, content string) string {
 	if len(lines) == 0 {
 		return icon
 	}
+	indent := strings.Repeat(" ", max(2, lipgloss.Width(icon)+1))
 	lines[0] = icon + " " + strings.TrimLeft(lines[0], " \t")
 	for i := 1; i < len(lines); i++ {
-		lines[i] = "  " + lines[i]
+		lines[i] = indent + lines[i]
 	}
 	return strings.Join(lines, "\n")
 }
 
+func messageDisplayNumber(messages []chatMessage, index int) int {
+	if index < 0 || index >= len(messages) || messages[index].Role != "user" {
+		return 0
+	}
+	return index + 1
+}
 func (m *model) renderMessageContent(message chatMessage, cacheable bool) string {
 	width := max(20, m.viewport.Width())
-	key := renderCacheKey{Role: message.Role, Content: message.Content, Width: width}
+	key := renderCacheKey{Role: message.Role, Content: message.Content, ReasoningContent: message.ReasoningContent, Width: width}
 	if cacheable && m.renderCache != nil {
 		if cached, ok := m.renderCache[key]; ok {
 			return cached
@@ -444,7 +502,7 @@ func (m *model) renderMessageContent(message chatMessage, cacheable bool) string
 
 func renderMessageContentAtWidth(message chatMessage, width int) (string, error) {
 	width = max(20, width)
-	if message.Role == "error" {
+	if message.Role == "error" || message.Role == "reasoning" {
 		return wrap(message.Content, width), nil
 	}
 	markdown, err := renderMarkdown(message.Content, width)

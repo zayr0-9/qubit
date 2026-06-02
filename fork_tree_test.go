@@ -30,6 +30,35 @@ func TestTreeCommandOpensForkTreeAndRequestsSessionTree(t *testing.T) {
 	assertPayload(t, payload, "session.tree", "sess_root")
 }
 
+func TestCtrlSpaceOpensForkTreeDirectlyWithoutSlashPalette(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.session = "sess_root"
+	m.composer.SetValue("/")
+
+	updated, cmd := m.updateKey(tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModCtrl})
+	got := updated.(model)
+
+	if got.showSlashPalette() {
+		t.Fatal("slash palette visible after ctrl+space shortcut")
+	}
+	if got.composer.Value() != "" {
+		t.Fatalf("composer value = %q, want cleared", got.composer.Value())
+	}
+	if got.mode != modeForkTree {
+		t.Fatalf("mode = %v, want modeForkTree", got.mode)
+	}
+	if !got.busy {
+		t.Fatal("busy = false, want true while loading fork tree")
+	}
+	if got.status != "loading fork tree" {
+		t.Fatalf("status = %q, want loading fork tree", got.status)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.tree", "sess_root")
+}
+
 func TestApplyForkTreeSelectsCurrentSessionAndRendersPreview(t *testing.T) {
 	m := initialModel(nil)
 	m.width = 100
@@ -355,5 +384,45 @@ func TestForkTreeLayoutTreatsZeroIndexForksAsRootSiblings(t *testing.T) {
 	}
 	if m.forkTree.Nodes[laterIndex].X <= m.forkTree.Nodes[rootIndex].X {
 		t.Fatalf("nonzero fork X = %d, root X = %d; want child level", m.forkTree.Nodes[laterIndex].X, m.forkTree.Nodes[rootIndex].X)
+	}
+}
+
+func TestForkTreeUpDownJumpsBetweenForksFromDescendants(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_root"
+	m.mode = modeForkTree
+	m.forkTree = newForkTreeState()
+	m.applyForkTree(runtimeEvent{Type: "session.tree", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_root", SessionID: "sess_root", SessionTitle: "Root", MessageNodes: []forkTreeMessageNode{
+			{ID: "root-a", SessionID: "sess_root", Role: "user", Content: "A"},
+			{ID: "root-b", ParentID: "root-a", SessionID: "sess_root", Role: "assistant", Content: "B"},
+			{ID: "root-c", ParentID: "root-b", SessionID: "sess_root", Role: "user", Content: "C"},
+			{ID: "root-d", ParentID: "root-c", SessionID: "sess_root", Role: "assistant", Content: "D"},
+		}},
+		{ID: "sess_fork", SessionID: "sess_fork", SessionTitle: "Fork", ParentSessionID: "sess_root", MessageNodes: []forkTreeMessageNode{
+			{ID: "fork-b1", ParentID: "root-b", SessionID: "sess_fork", Role: "user", Content: "B1"},
+			{ID: "fork-c1", ParentID: "fork-b1", SessionID: "sess_fork", Role: "assistant", Content: "C1"},
+		}},
+	}})
+
+	for i, node := range m.forkTree.Nodes {
+		if node.ID == "root-d" {
+			m.forkTree.Selected = i
+			break
+		}
+	}
+	updated, cmd := m.updateForkTree(tea.KeyPressMsg{Code: tea.KeyDown})
+	if cmd != nil {
+		t.Fatal("down returned command, want nil")
+	}
+	m = updated.(model)
+	if got := m.forkTree.Nodes[m.forkTree.Selected].ID; got != "fork-c1" {
+		t.Fatalf("down selected %q, want nearest descendant on fork row", got)
+	}
+
+	updated, _ = m.updateForkTree(tea.KeyPressMsg{Code: tea.KeyUp})
+	m = updated.(model)
+	if got := m.forkTree.Nodes[m.forkTree.Selected].ID; got != "root-d" {
+		t.Fatalf("up selected %q, want nearest node on original branch row", got)
 	}
 }

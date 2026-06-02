@@ -65,13 +65,15 @@ D:\qubit
   styles.go                 Lip Gloss styling
   util.go                   Shared helpers
   bin\qubit.exe             Built Windows executable
-  .qubit\sessions.sqlite    hyper-router SQLite transcript store
-  .qubit\session-index.json Qubit-owned session index
-  .qubit\runtime.log        Runtime diagnostic log
-  .qubit\input-history.json Persisted non-secret composer history
-  .qubit\theme.json         Persisted selected `/theme` palette
-  .qubit\settings.json      Persisted non-secret app defaults, including default provider and per-provider default models
-  ```
+  .qubit\\sessions.sqlite    hyper-router SQLite transcript store in the terminal launch cwd
+  .qubit\\session-index.json Qubit-owned session index in the terminal launch cwd
+  .qubit\\runtime.log        Runtime diagnostic log in the terminal launch cwd
+  .qubit\\input-history.json Persisted non-secret composer history in the terminal launch cwd
+  .qubit\\theme.json         Persisted selected `/theme` palette in the terminal launch cwd
+  .qubit\\settings.json      Persisted non-secret app defaults, including default provider and per-provider default models
+  .qubit\\todos\\*.md        Project todo lists managed by todoMd
+  .qubit\\plans\\*.md        Project plans managed by planMd
+
 
   ## Architecture Rules
 
@@ -123,6 +125,7 @@ key.updated
 run_started
 assistant
 run_finished
+plan.view
 error
 shutdown
 chat

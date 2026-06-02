@@ -64,13 +64,22 @@ multiEdit
   Applies editFile-style operations sequentially across one or more files.
   Stops on first failure by default and shares editFile path/validation behavior; permission mode is ask.
 
+multiCall
+  Executes multiple registered Qubit tool calls sequentially in one tool invocation using simple items shaped as { tool, args }.
+  Stops on first failure by default unless stopOnError=false.
+  The outer tool is always-allowed so read-only chains do not prompt; nested ask/never tools are checked individually through the existing permission dialog path, so edit mode auto-allows and plan mode asks for non-whitelisted tools.
+
 deleteFile
   Deletes files within the default/supplied workspace.
   Supports optional allowedExtensions, rejects directories/sensitive paths, and permission mode is ask.
 
 todoMd
-  Manages Markdown todo lists stored in .qubit/todos under the default/supplied workspace.
+  Manages Markdown todo lists stored in the project .qubit/todos directory under the default/supplied workspace.
   Supports create/list/read/edit actions, auto-generated lowercase dash names, line replacement edits, and permission mode is ask.
+
+planMd
+  Manages Markdown plans stored in the project .qubit/plans directory under the default/supplied workspace.
+  Supports create/list/read/edit/view actions. The view action emits a UI-only plan.view event so Go can render the selected Markdown plan in chat without sending that content as a model message.
 ```
 
 ## Important Files
@@ -104,12 +113,23 @@ tools/editFile.ts
   editFile + multiEdit implementation and tool definitions.
   LSP integration from the old harness is intentionally deferred/removed.
 
+tools/multiCall.ts
+  Sequential tool-chain implementation and tool definition.
+  Wraps registered Qubit tools and checks nested gated tools through the runtime permission requester.
+
 tools/deleteFile.ts
   File deletion implementation and tool definition.
 
 tools/todoMd.ts
   Markdown todo-list implementation and tool definition.
-  Stores todo files in workspace-scoped .qubit/todos without Electron dependencies.
+  Stores todo files in project .qubit/todos without Electron dependencies.
+
+tools/planMd.ts
+  Markdown plan implementation and tool definition.
+  Stores plan files in project .qubit/plans and can emit UI-only plan.view events.
+
+utils/qubitProject.ts
+  Resolves Qubit-owned internal paths under the active project .qubit directory for project-scoped stores that should not be blocked by normal cwd file-tool containment.
 
 tools/shellShared.ts
   Shared shell output limiting, timeout, stderr filtering, and process-tree cleanup helpers.
@@ -200,10 +220,12 @@ If `cwd` is supplied or defaulted for a filesystem tool:
 
 Current policy intentionally does not migrate old managed-path exceptions from the previous harness. Keep behavior simple: stay inside `cwd`.
 
-Do not reintroduce old `YGG_*` concepts. If Qubit later needs managed internal exceptions, design them as Qubit-owned paths such as:
+Do not reintroduce old `YGG_*` concepts. Qubit-owned project storage is the hidden `.qubit` directory under the terminal launch cwd. Internal project stores such as `.qubit/todos` and `.qubit/plans` use `utils/qubitProject.ts` instead of the normal file-tool cwd gate, while ordinary read/edit/delete tools remain restricted to the workspace.
 
 ```txt
 .qubit/
+.qubit/todos/
+.qubit/plans/
 .qubit/tools/
 .qubit/generated/
 ```
@@ -324,6 +346,8 @@ pnpm run check:runtime
 go test ./...
 ```
 
+When changing `multiCall`, test read-only chains, gated nested tools in both plan and edit permission modes, stopOnError behavior, and unknown/nested multiCall rejection.
+
 When changing path handling, also test representative cases where available:
 
 ```txt
@@ -345,6 +369,7 @@ If WSL is unavailable on the development machine, document that WSL smoke cases 
 - Do not use Node filesystem APIs on raw `/home/...` paths while running on Windows; convert to UNC first.
 - Do not migrate `tools_to_migrate/managedToolPaths.ts` verbatim; it contains old harness-specific assumptions.
 - Do not expose support modules like `wslBridge` as model-callable tools.
+- Do not let `multiCall` bypass nested tool permissions; read-only nested tools may run directly, but gated nested tools must route through the existing permission dialog/auto-allow path.
 - Do not silently widen filesystem access outside `cwd`.
 - Do not use raw `process.cwd()` as a tool default; use `cwdOrDefault(...)` so tools operate under the terminal launch directory.
 - Keep dependency additions intentional and update `pnpm-lock.yaml` with `pnpm install`.

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -70,8 +71,8 @@ func TestRefreshViewportRendersRoleIconsInline(t *testing.T) {
 	if strings.Contains(viewport, "You") || strings.Contains(viewport, "Qubit") {
 		t.Fatalf("viewport = %q, want role names removed", viewport)
 	}
-	if !strings.Contains(viewport, "› hello") || !strings.Contains(viewport, "◆ hi") {
-		t.Fatalf("viewport = %q, want compact inline user and assistant icons", viewport)
+	if !strings.Contains(viewport, "›1 hello") || !strings.Contains(viewport, "◆ hi") {
+		t.Fatalf("viewport = %q, want numbered user and compact assistant icons", viewport)
 	}
 }
 
@@ -592,7 +593,7 @@ func TestInputHistoryDoesNotStartWhenComposerHasText(t *testing.T) {
 func TestSubmitInputPersistsInputHistory(t *testing.T) {
 	appRoot := t.TempDir()
 	rt, stdin := newTestRuntime(t)
-	rt.appRoot = appRoot
+	rt.qubitDir = appRoot
 	m := initialModel(rt)
 	m.ready = true
 	m.autoNewSessionOnChat = false
@@ -921,8 +922,8 @@ func TestForkCommandEnterStartsInlineSelectorAndEnterForksHere(t *testing.T) {
 	if got.status != "fork point" {
 		t.Fatalf("status = %q, want fork point", got.status)
 	}
-	if !strings.Contains(plainText(got.renderInputStatus()), "Press enter to fork here or up key to fork at a previous point") {
-		t.Fatalf("input status = %q, want fork selector hint", plainText(got.renderInputStatus()))
+	if !strings.Contains(plainText(got.renderInputStatus()), "enter forks here") || !strings.Contains(plainText(got.renderInputStatus()), "plan") {
+		t.Fatalf("input status = %q, want fork selector hint and mode", plainText(got.renderInputStatus()))
 	}
 
 	updated, cmd = got.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -962,20 +963,20 @@ func TestForkSelectorUpDownSelectsUserMessagesAndEnterStartsEdit(t *testing.T) {
 
 	updated, _ = got.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	got = updated.(model)
-	if got.composer.Value() != "/fork second question" {
-		t.Fatalf("composer after first up = %q, want /fork second question", got.composer.Value())
+	if got.composer.Value() != "/fork 3 second question" {
+		t.Fatalf("composer after first up = %q, want /fork 3 second question", got.composer.Value())
 	}
 
 	updated, _ = got.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	got = updated.(model)
-	if got.composer.Value() != "/fork first question" {
-		t.Fatalf("composer after second up = %q, want /fork first question", got.composer.Value())
+	if got.composer.Value() != "/fork 1 first question" {
+		t.Fatalf("composer after second up = %q, want /fork 1 first question", got.composer.Value())
 	}
 
 	updated, _ = got.updateKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	got = updated.(model)
-	if got.composer.Value() != "/fork second question" {
-		t.Fatalf("composer after down = %q, want /fork second question", got.composer.Value())
+	if got.composer.Value() != "/fork 3 second question" {
+		t.Fatalf("composer after down = %q, want /fork 3 second question", got.composer.Value())
 	}
 
 	updated, cmd := got.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -995,8 +996,8 @@ func TestForkSelectorUpDownSelectsUserMessagesAndEnterStartsEdit(t *testing.T) {
 	if got.composer.Value() != "second question" {
 		t.Fatalf("composer in edit mode = %q, want selected message", got.composer.Value())
 	}
-	if !strings.Contains(plainText(got.renderInputStatus()), "Edit message, then press enter to fork and reroll from here") {
-		t.Fatalf("input status = %q, want edit hint", plainText(got.renderInputStatus()))
+	if !strings.Contains(plainText(got.renderInputStatus()), "editing message") || !strings.Contains(plainText(got.renderInputStatus()), "plan") {
+		t.Fatalf("input status = %q, want edit hint and mode", plainText(got.renderInputStatus()))
 	}
 }
 
@@ -2055,5 +2056,122 @@ func TestSessionPickerUsesVisibleListWindow(t *testing.T) {
 	}
 	if strings.Contains(rendered, "Session 00") || strings.Contains(rendered, "Session 19") {
 		t.Fatalf("rendered session picker did not window long list:\n%s", rendered)
+	}
+}
+
+func TestForkCommandWithMessageNumberStartsEdit(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 24
+	m.messages = []chatMessage{
+		{Role: "user", Content: "first question"},
+		{Role: "assistant", Content: "first answer"},
+		{Role: "user", Content: "second question"},
+		{Role: "assistant", Content: "second answer"},
+	}
+	m.layout()
+
+	updated, cmd := m.handleSlashCommand("/fork 3")
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatalf("/fork 3 returned command = %T, want nil while editing", cmd)
+	}
+	if !got.messageEdit.Active {
+		t.Fatal("message edit inactive, want active")
+	}
+	if got.messageEdit.MessageIndex != 2 {
+		t.Fatalf("edit message index = %d, want 2", got.messageEdit.MessageIndex)
+	}
+	if got.composer.Value() != "second question" {
+		t.Fatalf("composer value = %q, want second question", got.composer.Value())
+	}
+}
+func TestConsecutiveToolGroupsWrapEveryFour(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 140
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "tools"}}
+	tools := []string{"ripgrep", "readFile", "readFiles", "glob", "editFile", "bash", "powershell", "todoMd", "deleteFile"}
+	for i, tool := range tools {
+		m.applyToolCallFinish(runtimeEvent{Type: "tool.call.finish", SessionID: "sess_1", Step: i + 1, ToolCallID: fmt.Sprintf("call_%d", i), ToolName: tool, Status: "completed"})
+	}
+
+	viewport := plainText(m.viewport.View())
+	if strings.Contains(viewport, "+") && strings.Contains(viewport, "more") {
+		t.Fatalf("viewport = %q, want wrapped tool groups without hidden overflow", viewport)
+	}
+	if strings.Count(viewport, "▸") != len(tools) {
+		t.Fatalf("viewport = %q, want all tool groups visible", viewport)
+	}
+	cleanViewport := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(viewport, "")
+	toolRows := regexp.MustCompile(`(?m)^▸`).FindAllStringIndex(cleanViewport, -1)
+	if len(toolRows) != 3 {
+		t.Fatalf("viewport = %q, want three tool rows after wrapping every four", viewport)
+	}
+}
+
+func TestAutoScrollStaysOffDuringNewContentUntilUserReachesBottom(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 8
+	m.layout()
+	m.messages = []chatMessage{{Role: "assistant", Content: strings.Join([]string{
+		"line 1", "line 2", "line 3", "line 4", "line 5",
+		"line 6", "line 7", "line 8", "line 9", "line 10",
+	}, "\n")}}
+	m.refreshViewport()
+	m.viewport.GotoBottom()
+	m.autoScroll = true
+
+	updated, _ := m.updateKey(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	m = updated.(model)
+	if m.autoScroll {
+		t.Fatal("autoScroll = true after PgUp, want false")
+	}
+	yOffset := m.viewport.YOffset()
+	m.messages[0].Content += "\nline 11\nline 12"
+	m.refreshViewport()
+	if m.autoScroll {
+		t.Fatal("autoScroll restarted before user reached bottom")
+	}
+	if got := m.viewport.YOffset(); got != yOffset {
+		t.Fatalf("YOffset after new content = %d, want preserved %d", got, yOffset)
+	}
+
+	for i := 0; i < 20 && !m.viewport.AtBottom(); i++ {
+		m = m.updateMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
+	}
+	if !m.viewport.AtBottom() {
+		t.Fatal("viewport did not reach bottom")
+	}
+	if !m.autoScroll {
+		t.Fatal("autoScroll = false at bottom, want true")
+	}
+}
+
+func TestPlanViewEventAddsUiOnlyMarkdownMessage(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "plan.view", Name: "launch", Path: "./.qubit/plans/launch.md", Content: "# Launch\n\n- step"})
+	got := updated.(model)
+
+	if len(got.messages) < 2 {
+		t.Fatalf("messages = %#v, want plan view appended", got.messages)
+	}
+	last := got.messages[len(got.messages)-1]
+	if last.Role != "view" || last.ViewType != "plan" || last.Content == "" {
+		t.Fatalf("last message = %#v, want plan view message", last)
+	}
+	viewport := plainText(got.viewport.View())
+	if !strings.Contains(viewport, "Plan: launch") || !strings.Contains(viewport, "Launch") || !strings.Contains(viewport, "step") {
+		t.Fatalf("viewport = %q, want rendered plan markdown", viewport)
 	}
 }

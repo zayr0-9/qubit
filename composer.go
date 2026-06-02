@@ -28,6 +28,9 @@ type composerModel struct {
 	scrollLine       int
 	placeholder      string
 	focused          bool
+
+	undoStack []composerEditSnapshot
+	redoStack []composerEditSnapshot
 }
 
 type composerLine struct {
@@ -46,6 +49,17 @@ type composerPasteMsg struct {
 	text string
 	err  error
 }
+
+type composerEditSnapshot struct {
+	value           []rune
+	cursor          int
+	preferredColumn int
+	selectionAnchor int
+	selecting       bool
+	scrollLine      int
+}
+
+const composerUndoLimit = 100
 
 func newComposer() composerModel {
 	return composerModel{
@@ -71,6 +85,8 @@ func (c *composerModel) SetValue(s string) {
 	c.cursor = len(c.value)
 	c.preferredColumn = -1
 	c.ClearSelection()
+	c.undoStack = nil
+	c.redoStack = nil
 	c.ensureCursorVisible()
 }
 
@@ -80,6 +96,8 @@ func (c *composerModel) Reset() {
 	c.preferredColumn = -1
 	c.ClearSelection()
 	c.scrollLine = 0
+	c.undoStack = nil
+	c.redoStack = nil
 }
 
 func (c *composerModel) SetWidth(width int) {
@@ -138,13 +156,79 @@ func (c *composerModel) ClearSelection() {
 	c.selectionAnchor = c.cursor
 }
 
-func (c *composerModel) ReplaceSelection(s string) {
-	if !c.HasSelection() {
-		c.InsertString(s)
+func (c composerModel) editSnapshot() composerEditSnapshot {
+	value := append([]rune(nil), c.value...)
+	return composerEditSnapshot{
+		value:           value,
+		cursor:          c.cursor,
+		preferredColumn: c.preferredColumn,
+		selectionAnchor: c.selectionAnchor,
+		selecting:       c.selecting,
+		scrollLine:      c.scrollLine,
+	}
+}
+
+func (c *composerModel) restoreEditSnapshot(snapshot composerEditSnapshot) {
+	c.value = append([]rune(nil), snapshot.value...)
+	c.cursor = clampInt(snapshot.cursor, 0, len(c.value))
+	c.preferredColumn = snapshot.preferredColumn
+	c.selectionAnchor = clampInt(snapshot.selectionAnchor, 0, len(c.value))
+	c.selecting = snapshot.selecting
+	c.scrollLine = snapshot.scrollLine
+	c.ensureCursorVisible()
+}
+
+func (c *composerModel) pushUndoSnapshot() {
+	snapshot := c.editSnapshot()
+	if len(c.undoStack) > 0 && sameComposerSnapshot(c.undoStack[len(c.undoStack)-1], snapshot) {
+		c.redoStack = nil
 		return
 	}
-	start, end := c.SelectionRange()
-	replacement := []rune(normalizeInputNewlines(s))
+	c.undoStack = append(c.undoStack, snapshot)
+	if len(c.undoStack) > composerUndoLimit {
+		copy(c.undoStack, c.undoStack[len(c.undoStack)-composerUndoLimit:])
+		c.undoStack = c.undoStack[:composerUndoLimit]
+	}
+	c.redoStack = nil
+}
+
+func sameComposerSnapshot(a composerEditSnapshot, b composerEditSnapshot) bool {
+	if a.cursor != b.cursor || a.preferredColumn != b.preferredColumn || a.selectionAnchor != b.selectionAnchor || a.selecting != b.selecting || a.scrollLine != b.scrollLine || len(a.value) != len(b.value) {
+		return false
+	}
+	for i := range a.value {
+		if a.value[i] != b.value[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *composerModel) Undo() bool {
+	if len(c.undoStack) == 0 {
+		return false
+	}
+	snapshot := c.undoStack[len(c.undoStack)-1]
+	c.undoStack = c.undoStack[:len(c.undoStack)-1]
+	c.redoStack = append(c.redoStack, c.editSnapshot())
+	c.restoreEditSnapshot(snapshot)
+	return true
+}
+
+func (c *composerModel) Redo() bool {
+	if len(c.redoStack) == 0 {
+		return false
+	}
+	snapshot := c.redoStack[len(c.redoStack)-1]
+	c.redoStack = c.redoStack[:len(c.redoStack)-1]
+	c.undoStack = append(c.undoStack, c.editSnapshot())
+	c.restoreEditSnapshot(snapshot)
+	return true
+}
+
+func (c *composerModel) replaceRange(start int, end int, replacement []rune) {
+	start = clampInt(start, 0, len(c.value))
+	end = clampInt(end, start, len(c.value))
 	if c.charLimit > 0 {
 		available := c.charLimit - (len(c.value) - (end - start))
 		if available < 0 {
@@ -154,6 +238,10 @@ func (c *composerModel) ReplaceSelection(s string) {
 			replacement = replacement[:available]
 		}
 	}
+	if start == end && len(replacement) == 0 {
+		return
+	}
+	c.pushUndoSnapshot()
 	next := make([]rune, 0, len(c.value)-(end-start)+len(replacement))
 	next = append(next, c.value[:start]...)
 	next = append(next, replacement...)
@@ -163,6 +251,15 @@ func (c *composerModel) ReplaceSelection(s string) {
 	c.preferredColumn = -1
 	c.ClearSelection()
 	c.ensureCursorVisible()
+}
+
+func (c *composerModel) ReplaceSelection(s string) {
+	if !c.HasSelection() {
+		c.InsertString(s)
+		return
+	}
+	start, end := c.SelectionRange()
+	c.replaceRange(start, end, []rune(normalizeInputNewlines(s)))
 }
 
 func (c *composerModel) InsertString(s string) {
@@ -184,15 +281,7 @@ func (c *composerModel) InsertString(s string) {
 		}
 	}
 	c.cursor = clampInt(c.cursor, 0, len(c.value))
-	next := make([]rune, 0, len(c.value)+len(runes))
-	next = append(next, c.value[:c.cursor]...)
-	next = append(next, runes...)
-	next = append(next, c.value[c.cursor:]...)
-	c.value = next
-	c.cursor += len(runes)
-	c.preferredColumn = -1
-	c.ClearSelection()
-	c.ensureCursorVisible()
+	c.replaceRange(c.cursor, c.cursor, runes)
 }
 
 func (c *composerModel) DeleteBackward() {
@@ -204,10 +293,7 @@ func (c *composerModel) DeleteBackward() {
 		return
 	}
 	c.cursor = clampInt(c.cursor, 0, len(c.value))
-	c.value = append(c.value[:c.cursor-1], c.value[c.cursor:]...)
-	c.cursor--
-	c.preferredColumn = -1
-	c.ensureCursorVisible()
+	c.replaceRange(c.cursor-1, c.cursor, nil)
 }
 
 func (c *composerModel) DeleteForward() {
@@ -219,9 +305,7 @@ func (c *composerModel) DeleteForward() {
 	if c.cursor >= len(c.value) {
 		return
 	}
-	c.value = append(c.value[:c.cursor], c.value[c.cursor+1:]...)
-	c.preferredColumn = -1
-	c.ensureCursorVisible()
+	c.replaceRange(c.cursor, c.cursor+1, nil)
 }
 
 func (c *composerModel) DeleteWordBackward() {
@@ -235,11 +319,9 @@ func (c *composerModel) DeleteWordBackward() {
 	if start == original {
 		return
 	}
-	c.value = append(c.value[:start], c.value[original:]...)
-	c.cursor = start
-	c.preferredColumn = -1
+	c.cursor = original
 	c.ClearSelection()
-	c.ensureCursorVisible()
+	c.replaceRange(start, original, nil)
 }
 
 func (c *composerModel) DeleteWordForward() {
@@ -253,11 +335,9 @@ func (c *composerModel) DeleteWordForward() {
 	if end == original {
 		return
 	}
-	c.value = append(c.value[:original], c.value[end:]...)
 	c.cursor = original
-	c.preferredColumn = -1
 	c.ClearSelection()
-	c.ensureCursorVisible()
+	c.replaceRange(original, end, nil)
 }
 
 func (c *composerModel) beginOrUpdateSelection(selecting bool) {
@@ -400,6 +480,12 @@ func (c *composerModel) UpdateKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	}
 
 	switch msg.String() {
+	case "ctrl+z":
+		c.Undo()
+		return true, nil
+	case "ctrl+shift+z":
+		c.Redo()
+		return true, nil
 	case "ctrl+a":
 		c.SelectAll()
 		return true, nil

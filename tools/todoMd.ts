@@ -1,8 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { defineTool } from '@hyper-labs/hyper-router'
-import { resolveRestrictedToolPath } from '../utils/pathSafety.js'
-import { cwdOrDefault } from '../utils/toolWorkspace.js'
+import { resolveProjectQubitSubdirectory } from '../utils/qubitProject.js'
 
 const TODO_DIR_NAME = 'todos'
 const TODO_FILE_EXTENSION = '.md'
@@ -70,12 +69,7 @@ function todoFilePath(todoDir: string, name: string): string {
 }
 
 export async function getTodoStorageDirectory(cwd?: string): Promise<string> {
-  const workspaceCwd = cwdOrDefault(cwd)
-  const resolved = await resolveRestrictedToolPath(path.join('.qubit', TODO_DIR_NAME), {
-    cwd: workspaceCwd,
-    mode: 'directory',
-  })
-  return resolved.fsPath
+  return resolveProjectQubitSubdirectory(TODO_DIR_NAME, cwd)
 }
 
 async function ensureStorageDirectory(cwd?: string): Promise<string> {

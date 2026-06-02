@@ -16,12 +16,16 @@ import { OpenAIProvider } from "@hyper-labs/hyper-router/providers/openai-vai";
 import { AmazonBedrockVAIProvider } from "@hyper-labs/hyper-router/providers/amazon-bedrock-vai";
 import { OpenRouterProvider } from "@hyper-labs/hyper-router/providers/openrouter";
 import { qubitTools } from "./tools/index.js";
+import { setPlanViewEmitter } from "./tools/planMd.js";
+import { setMultiCallPermissionRequester } from "./tools/multiCall.js";
 import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
 import { CodexResponsesProvider, QubitCodexTokenStore, cancelCodexLogin, startCodexLogin } from "./runtime/codex/index.js";
 
 const entryDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = basename(entryDir) === "dist" ? dirname(entryDir) : entryDir;
-const dataDir = join(rootDir, ".qubit");
+const initialWorkspaceCwd = process.env.QUBIT_WORKSPACE_CWD || process.cwd();
+setDefaultToolCwd(initialWorkspaceCwd);
+const dataDir = process.env.QUBIT_PROJECT_DIR || join(initialWorkspaceCwd, ".qubit");
 const storagePath = join(dataDir, "sessions.sqlite");
 const indexPath = join(dataDir, "session-index.json");
 const keyIndexPath = join(dataDir, "api-key-index.json");
@@ -125,16 +129,14 @@ const providerModelLists = {
     { id: "z-ai/glm-5.1", name: "Z.ai: GLM 5.1", description: "Latest GLM model through OpenRouter" },
   ],
   codex: [
-    { id: "gpt-5.5", name: "GPT-5.5", description: "ChatGPT/Codex backend frontier model" },
-    { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", description: "ChatGPT Codex Responses backend via local OAuth" },
-    { id: "gpt-5.2", name: "GPT-5.2", description: "ChatGPT/Codex backend model" },
+    { id: "gpt-5.5", name: "GPT-5.5", description: "ChatGPT/Codex backend frontier model", maxContext: 400000 },
+    { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", description: "ChatGPT Codex Responses backend via local OAuth", maxContext: 400000 },
+    { id: "gpt-5.2", name: "GPT-5.2", description: "ChatGPT/Codex backend model", maxContext: 400000 },
   ],
 };
 let openRouterModelsCache = null;
 let openRouterModelsCacheAt = 0;
 const keychainService = process.env.QUBIT_KEYCHAIN_SERVICE || "Qubit";
-const initialWorkspaceCwd = process.env.QUBIT_WORKSPACE_CWD || process.cwd();
-setDefaultToolCwd(initialWorkspaceCwd);
 
 if (process.argv.includes("--check")) {
   console.log("runtime check ok");
@@ -200,25 +202,33 @@ const storage = new QubitSqliteStorage({
 
 const pendingPermissions = new Map();
 const activeRuns = new Map();
-const hooks = {
-  async requestToolPermission(request) {
-    write({
-      type: "tool.permission.request",
-      id: request.id,
-      sessionId: request.sessionId,
-      step: request.step,
-      toolCallId: request.toolCallId,
-      toolName: request.toolName,
-      args: summarizeToolArgs(request.toolName, request.args),
-      description: request.description,
-      inputSchema: request.inputSchema,
-      metadata: request.metadata,
-    });
+async function requestToolPermission(request) {
+  write({
+    type: "tool.permission.request",
+    id: request.id,
+    sessionId: request.sessionId,
+    step: request.step,
+    toolCallId: request.toolCallId,
+    toolName: request.toolName,
+    args: summarizeToolArgs(request.toolName, request.args),
+    description: request.description,
+    inputSchema: request.inputSchema,
+    metadata: request.metadata,
+  });
 
-    return await new Promise((resolve) => {
-      pendingPermissions.set(request.id, resolve);
-    });
-  },
+  return await new Promise((resolve) => {
+    pendingPermissions.set(request.id, resolve);
+  });
+}
+
+setMultiCallPermissionRequester(requestToolPermission);
+setPlanViewEmitter((event) => {
+  write({ type: "plan.view", name: event.name, path: event.path, cwd: event.cwd, content: event.content });
+});
+
+const hooks = {
+  requestToolPermission,
+
   async onToolCallStart(event) {
     write({
       type: "tool.call.start",
@@ -266,6 +276,7 @@ write({
   activeProvider: runtimeState.providerName,
   activeKeyAlias: runtimeState.keyAlias,
   model,
+  maxContext: activeModelMaxContext(),
   reasoningLevel,
   storagePath,
   indexPath,
@@ -638,6 +649,12 @@ function defaultModelForProvider(provider) {
   return firstEnvValue(providerDefinitions[normalizedProvider].modelEnvKeys) || settings.defaultModels?.[normalizedProvider] || providerDefinitions[normalizedProvider].defaultModel;
 }
 
+function activeModelMaxContext() {
+  const models = providerModelLists[activeProviderName] || [];
+  const active = models.find((candidate) => candidate.id === model);
+  return Number.isFinite(active?.maxContext) ? active.maxContext : 0;
+}
+
 function handlePermissionResponse(request) {
   const resolve = pendingPermissions.get(request.id);
   if (!resolve) return;
@@ -996,6 +1013,7 @@ async function writeModelList(id) {
     activeProvider: runtimeState.providerName,
     activeKeyAlias: runtimeState.keyAlias,
     model,
+    maxContext: activeModelMaxContext(),
     reasoningLevel,
     models: await listModels(),
   });
@@ -1009,6 +1027,7 @@ async function writeModelUpdated(id, status) {
     activeProvider: runtimeState.providerName,
     activeKeyAlias: runtimeState.keyAlias,
     model,
+    maxContext: activeModelMaxContext(),
     reasoningLevel,
     status,
     models: await listModels(),
@@ -1300,10 +1319,17 @@ function summarizeToolArgs(toolName, args) {
     case "editFile":
       return { ...compactObject(source, ["path", "operation", "cwd", "approxStartLine", "approxEndLine", "createBackup", "operationMode", "validateContent"]), searchPreview: previewText(source.searchPattern, 400), replacementPreview: previewText(source.replacement, 400), contentPreview: previewText(source.content, 400) };
     case "multiEdit":
-      return { ...compactObject(source, ["cwd", "stopOnError", "createBackup", "operationMode", "validateContent"]), edits: Array.isArray(source.edits) ? source.edits.map((edit) => compactObject(edit, ["path", "operation", "approxStartLine", "approxEndLine"])).slice(0, 20) : undefined };
+      return { ...compactObject(source, ["cwd", "stopOnError", "createBackup", "operationMode", "validateContent"]), edits: Array.isArray(source.edits) ? source.edits.map((edit) => ({ ...compactObject(edit, ["path", "operation", "approxStartLine", "approxEndLine"]), searchPreview: previewText(edit?.searchPattern, 400), replacementPreview: previewText(edit?.replacement, 400), contentPreview: previewText(edit?.content, 400) })).slice(0, 20) : undefined };
+    case "multiCall":
+      return { ...compactObject(source, ["stopOnError"]), calls: Array.isArray(source.calls) ? source.calls.map((call) => {
+        const tool = typeof call?.tool === "string" ? call.tool : "";
+        return { tool, args: tool && tool !== "multiCall" ? summarizeToolArgs(tool, call.args || {}) : compactObject(call.args || {}, ["stopOnError"]) };
+      }).slice(0, 20) : undefined };
     case "deleteFile":
       return compactObject(source, ["path", "cwd", "allowedExtensions", "operationMode"]);
     case "todoMd":
+      return { ...compactObject(source, ["action", "name", "cwd", "search"]), contentPreview: previewText(source.content, 600), replacementPreview: previewText(source.replacement, 600) };
+    case "planMd":
       return { ...compactObject(source, ["action", "name", "cwd", "search"]), contentPreview: previewText(source.content, 600), replacementPreview: previewText(source.replacement, 600) };
     default:
       return JSON.parse(JSON.stringify(source, (_key, value) => typeof value === "string" ? previewText(value, 1000) : value));
@@ -1335,9 +1361,16 @@ function summarizeToolResult(toolName, result) {
     case "editFile":
       return { ...summary, ...compactObject(data, ["success", "sizeBytes", "replacements", "message", "backup", "matchStrategy", "lineInfo"]) };
     case "multiEdit":
-      return { ...summary, ...compactObject(data, ["success", "message", "applied", "failed", "stoppedEarly"]), results: Array.isArray(data.results) ? data.results.slice(0, 20).map((item) => compactObject(item, ["path", "operation", "success", "replacements", "message", "matchStrategy", "lineInfo"])) : undefined };
+      return { ...summary, ...compactObject(data, ["success", "message", "applied", "failed", "stoppedEarly"]), results: Array.isArray(data.results) ? data.results.slice(0, 20).map((item) => compactObject(item, ["path", "operation", "success", "replacements", "message", "matchStrategy", "lineInfo", "searchPreview", "replacementPreview", "contentPreview"])) : undefined };
+    case "multiCall":
+      return { ...summary, ...compactObject(data, ["success", "message", "completed", "failed", "stoppedEarly"]), results: Array.isArray(data.results) ? data.results.slice(0, 20).map((item) => {
+        const nestedPayload = item.data !== undefined ? item.data : item.output;
+        return { ...compactObject(item, ["index", "tool", "ok", "permission", "error"]), result: summarizeToolResult(item.tool, { ok: item.ok, data: nestedPayload, error: item.error }) };
+      }) : undefined };
     case "todoMd":
       return { ...summary, ...compactObject(data, ["id", "created", "exists", "success", "message", "modifiedAt"]), contentPreview: previewText(data.content, 1600) };
+    case "planMd":
+      return { ...summary, ...compactObject(data, ["name", "created", "exists", "success", "message", "modifiedAt", "viewed"]), planCount: Array.isArray(payload) ? payload.length : undefined, contentPreview: data.viewed ? undefined : previewText(data.content, 1600) };
     default:
       return { ...summary, payloadPreview: previewText(payload, 2400) };
   }
@@ -1880,6 +1913,7 @@ function rawMessageStartIndexForUiMessageIndex(messages, uiMessageIndex) {
 
     if (message.role === "assistant") {
       const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
+      if (message.reasoningContent) visibleStartIndexes.push(index);
       if (toolCalls.length > 0) visibleStartIndexes.push(index);
       for (const toolCall of toolCalls) {
         const toolCallId = toolCall.id || "";
@@ -1919,6 +1953,7 @@ function rawMessageIndexForUiMessageIndex(messages, uiMessageIndex) {
 
     if (message.role === "assistant") {
       const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
+      if (message.reasoningContent) visibleIndexes.push(index + 1);
       if (toolCalls.length > 0) {
         let groupEnd = index + 1;
         for (const toolCall of toolCalls) {
@@ -1970,13 +2005,15 @@ function transcriptMessagesForUi(messages) {
     }
 
     if (message.role === "assistant") {
+      const reasoningContent = typeof message.reasoningContent === "string" ? message.reasoningContent : String(message.reasoningContent ?? "");
+      if (reasoningContent.trim()) uiMessages.push({ role: "reasoning", content: reasoningContent });
       const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
       if (toolCalls.length > 0) {
         reconstructedStep += 1;
         uiMessages.push(...toolGroupsFromStoredToolCalls(toolCalls, toolResults, consumedToolResults, reconstructedStep));
       }
       const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
-      if (content.trim()) uiMessages.push({ role: "assistant", content });
+      if (content.trim()) uiMessages.push({ role: "assistant", content, ...(reasoningContent.trim() ? { reasoningContent } : {}) });
       continue;
     }
 

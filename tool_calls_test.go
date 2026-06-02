@@ -215,8 +215,11 @@ func TestToolGroupShowsDevDetailsWithFlag(t *testing.T) {
 	m.refreshViewport()
 
 	viewport := plainText(m.viewport.View())
-	if !strings.Contains(viewport, "duration: 9ms") || !strings.Contains(viewport, "size: 1234 bytes") || !strings.Contains(viewport, "completed · 9ms") {
+	if !strings.Contains(viewport, "duration: 9ms") || !strings.Contains(viewport, "size: 1234 bytes") || !strings.Contains(viewport, "· 9ms") {
 		t.Fatalf("viewport = %q, want duration/size with dev flag", viewport)
+	}
+	if strings.Contains(viewport, "completed · 9ms") {
+		t.Fatalf("viewport = %q, want status conveyed by color rather than completed text", viewport)
 	}
 }
 
@@ -287,5 +290,34 @@ func TestToolCallFinishCompletesActiveReveal(t *testing.T) {
 	viewport := plainText(m.viewport.View())
 	if !strings.Contains(viewport, "Searched 1 time") || !strings.Contains(viewport, "7 matches") {
 		t.Fatalf("viewport = %q, want completed full tool label", viewport)
+	}
+}
+
+func TestEditToolGroupRendersInlineDiff(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "edit"}}
+	m.applyToolCallFinish(runtimeEvent{
+		Type:       "tool.call.finish",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "edit_1",
+		ToolName:   "editFile",
+		Status:     "completed",
+		Args: map[string]any{
+			"path":               "main.go",
+			"operation":          "replace_first",
+			"searchPreview":      "old line",
+			"replacementPreview": "new line",
+		},
+		Result: map[string]any{"lineInfo": map[string]any{"oldStartLine": float64(12), "newStartLine": float64(12)}},
+	})
+
+	viewport := plainText(m.viewport.View())
+	if !strings.Contains(viewport, "Edited 1 file") || !strings.Contains(viewport, "-12") || !strings.Contains(viewport, "+12") || !strings.Contains(viewport, "old line") || !strings.Contains(viewport, "new line") {
+		t.Fatalf("viewport = %q, want inline edit diff with line numbers", viewport)
 	}
 }

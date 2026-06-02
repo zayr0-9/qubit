@@ -288,6 +288,9 @@ func (m *model) applyKeyUpdated(ev runtimeEvent) {
 }
 
 func (m *model) applyActiveKeyMetadata(ev runtimeEvent) {
+	if ev.MaxContext > 0 {
+		m.maxContext = ev.MaxContext
+	}
 	if ev.ActiveProvider != "" {
 		m.activeProvider = ev.ActiveProvider
 		m.provider = ev.ActiveProvider
@@ -468,6 +471,7 @@ func (m *model) applyModelUpdated(ev runtimeEvent) {
 	if ev.Model != "" {
 		m.model = ev.Model
 	}
+	m.maxContext = ev.MaxContext
 	if len(ev.Models) > 0 {
 		m.models = ev.Models
 	}

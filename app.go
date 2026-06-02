@@ -20,10 +20,10 @@ func initialModel(rt *runtimeClient) model {
 	inputHistory := []string(nil)
 	if rt != nil {
 		var err error
-		if loadedTheme, err := loadThemeConfig(rt.appRoot); err == nil && loadedTheme.Background != "" && loadedTheme.Text != "" {
+		if loadedTheme, err := loadThemeConfig(rt.qubitDir); err == nil && loadedTheme.Background != "" && loadedTheme.Text != "" {
 			theme = loadedTheme
 		}
-		inputHistory, err = loadInputHistory(rt.appRoot)
+		inputHistory, err = loadInputHistory(rt.qubitDir)
 		if err != nil {
 			inputHistory = nil
 		}
@@ -85,6 +85,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateFakeStreamTick()
 	case inputCursorPulseMsg:
 		m.inputCursorPulse++
+		if m.hasRunningToolGroup() {
+			m.refreshViewport()
+		}
 		return m, inputCursorPulseTick()
 	case toolCallRevealTickMsg:
 		return m.updateToolCallRevealTick()
@@ -133,6 +136,11 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.forkSelector.Active {
 		return m.updateForkSelector(msg)
+	}
+	if isOpenForkTreeShortcut(msg) {
+		m.composer.Reset()
+		m.layout()
+		return m.openForkTree()
 	}
 	if isNewlineKey(msg) {
 		return m.insertInputNewline()
@@ -279,7 +287,7 @@ func (m model) updateMouseClick(msg tea.MouseClickMsg) tea.Model {
 	}
 	contentY := m.viewport.YOffset() + mouse.Y - m.chatTopY
 	for _, hitbox := range m.toolHitboxes {
-		if contentY >= hitbox.StartY && contentY <= hitbox.EndY {
+		if contentY >= hitbox.StartY && contentY <= hitbox.EndY && mouse.X >= hitbox.StartX && mouse.X <= hitbox.EndX {
 			m.autoScroll = false
 			m.toggleToolGroup(hitbox.GroupID)
 			return m
@@ -302,6 +310,11 @@ func (m model) updateInputAndViewport(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.autoScroll = m.viewport.AtBottom()
 	}
 	return m, cmd
+}
+
+func isOpenForkTreeShortcut(msg tea.KeyPressMsg) bool {
+	keyEvent := msg.Key()
+	return keyEvent.Code == tea.KeySpace && keyEvent.Mod&tea.ModCtrl != 0
 }
 
 func isNewlineKey(msg tea.KeyPressMsg) bool {
@@ -381,6 +394,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		}
 		m.activeKeyAlias = ev.ActiveKeyAlias
 		m.model = ev.Model
+		m.maxContext = ev.MaxContext
 		m.reasoningLevel = normalizeReasoningLevel(ev.ReasoningLevel)
 		if ev.WorkspaceCwd != "" {
 			m.runtime.launchCwd = ev.WorkspaceCwd
@@ -437,6 +451,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		if ev.Model != "" {
 			m.model = ev.Model
 		}
+		m.maxContext = ev.MaxContext
 		m.reasoningLevel = normalizeReasoningLevel(ev.ReasoningLevel)
 		if len(ev.Models) > 0 {
 			m.models = ev.Models
@@ -462,6 +477,8 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), toolCallRevealTick())
 	case "tool.call.finish":
 		m.applyToolCallFinish(ev)
+	case "plan.view":
+		m.applyPlanView(ev)
 	case "session.created":
 		m.clearFakeStream()
 		m.activeRunID = ""
@@ -569,7 +586,10 @@ func (m *model) applyAssistantEvent(ev runtimeEvent) {
 	if content == "" {
 		content = "(empty response)"
 	}
-	m.messages = append(m.messages, chatMessage{Role: "assistant", Content: ""})
+	if reasoningContent := strings.TrimSpace(ev.ReasoningContent); reasoningContent != "" {
+		m.messages = append(m.messages, chatMessage{Role: "reasoning", Content: reasoningContent})
+	}
+	m.messages = append(m.messages, chatMessage{Role: "assistant", Content: "", ReasoningContent: ev.ReasoningContent})
 	m.streaming = true
 	m.streamingMessageIndex = len(m.messages) - 1
 	m.streamingFullContent = content
@@ -834,6 +854,12 @@ func (m *model) layout() {
 
 func (m *model) appendSystem(content string) {
 	m.messages = append(m.messages, chatMessage{Role: "assistant", Content: content})
+	m.refreshViewport()
+}
+
+func (m *model) applyPlanView(ev runtimeEvent) {
+	name := fallback(ev.Name, "plan")
+	m.messages = append(m.messages, chatMessage{Role: "view", ViewType: "plan", Title: "Plan: " + name, Path: ev.Path, Content: ev.Content})
 	m.refreshViewport()
 }
 

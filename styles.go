@@ -24,6 +24,11 @@ type themeConfig struct {
 	Cyan       string
 	Red        string
 	Green      string
+	ToolRead   string
+	ToolSearch string
+	ToolWrite  string
+	ToolShell  string
+	ToolOther  string
 }
 
 var builtinThemes = []themeConfig{
@@ -39,6 +44,11 @@ var builtinThemes = []themeConfig{
 		Cyan:       "#89cdd6",
 		Red:        "#ff6b6b",
 		Green:      "#9be28f",
+		ToolRead:   "#89cdd6",
+		ToolSearch: "#c7a0ff",
+		ToolWrite:  "#e8a15d",
+		ToolShell:  "#9be28f",
+		ToolOther:  "#b8aea2",
 	},
 	{
 		ID:         "light",
@@ -52,6 +62,11 @@ var builtinThemes = []themeConfig{
 		Cyan:       "#006d77",
 		Red:        "#b42318",
 		Green:      "#287a3e",
+		ToolRead:   "#006d77",
+		ToolSearch: "#7a3eb1",
+		ToolWrite:  "#9a5b00",
+		ToolShell:  "#287a3e",
+		ToolOther:  "#675f56",
 	},
 	{
 		ID:         "neon",
@@ -65,36 +80,55 @@ var builtinThemes = []themeConfig{
 		Cyan:       "#00f5ff",
 		Red:        "#ff3864",
 		Green:      "#39ff14",
+		ToolRead:   "#00f5ff",
+		ToolSearch: "#ff2bd6",
+		ToolWrite:  "#ffd166",
+		ToolShell:  "#39ff14",
+		ToolOther:  "#f8f7ff",
 	},
 }
 
 var (
-	bg        color.Color
-	surface   color.Color
-	surfaceHi color.Color
-	muted     color.Color
-	text      color.Color
-	accent    color.Color
-	cyan      color.Color
-	red       color.Color
-	green     color.Color
+	bg         color.Color
+	surface    color.Color
+	surfaceHi  color.Color
+	muted      color.Color
+	text       color.Color
+	accent     color.Color
+	cyan       color.Color
+	red        color.Color
+	green      color.Color
+	toolRead   color.Color
+	toolSearch color.Color
+	toolWrite  color.Color
+	toolShell  color.Color
+	toolOther  color.Color
 
-	appStyle             lipgloss.Style
-	headerStyle          lipgloss.Style
-	chatStyle            lipgloss.Style
-	inputStyle           lipgloss.Style
-	footerStyle          lipgloss.Style
-	userIcon             lipgloss.Style
-	aiIcon               lipgloss.Style
-	errorIcon            lipgloss.Style
-	mutedSt              lipgloss.Style
-	errSt                lipgloss.Style
-	okSt                 lipgloss.Style
-	selectSt             lipgloss.Style
-	inputSelectSt        lipgloss.Style
-	composerCursorSt     lipgloss.Style
-	composerCursorStyles []lipgloss.Style
-	spinnerStyle         lipgloss.Style
+	appStyle              lipgloss.Style
+	headerStyle           lipgloss.Style
+	chatStyle             lipgloss.Style
+	inputStyle            lipgloss.Style
+	footerStyle           lipgloss.Style
+	userIcon              lipgloss.Style
+	aiIcon                lipgloss.Style
+	errorIcon             lipgloss.Style
+	mutedSt               lipgloss.Style
+	errSt                 lipgloss.Style
+	okSt                  lipgloss.Style
+	selectSt              lipgloss.Style
+	inputSelectSt         lipgloss.Style
+	composerCursorSt      lipgloss.Style
+	composerCursorStyles  []lipgloss.Style
+	spinnerStyle          lipgloss.Style
+	toolReadSt            lipgloss.Style
+	toolSearchSt          lipgloss.Style
+	toolWriteSt           lipgloss.Style
+	toolShellSt           lipgloss.Style
+	toolOtherSt           lipgloss.Style
+	diffRemovedSt         lipgloss.Style
+	diffAddedSt           lipgloss.Style
+	diffGutterSt          lipgloss.Style
+	toolStatusPulseStyles []lipgloss.Style
 )
 
 var (
@@ -119,6 +153,11 @@ func applyTheme(theme themeConfig) {
 	cyan = lipgloss.Color(fallback(theme.Cyan, "#8bd3dd"))
 	red = lipgloss.Color(fallback(theme.Red, "#ff6b6b"))
 	green = lipgloss.Color(fallback(theme.Green, "#9be28f"))
+	toolRead = lipgloss.Color(fallback(theme.ToolRead, fallback(theme.Cyan, "#8bd3dd")))
+	toolSearch = lipgloss.Color(fallback(theme.ToolSearch, fallback(theme.Accent, "#f2a65a")))
+	toolWrite = lipgloss.Color(fallback(theme.ToolWrite, fallback(theme.Accent, "#f2a65a")))
+	toolShell = lipgloss.Color(fallback(theme.ToolShell, fallback(theme.Green, "#9be28f")))
+	toolOther = lipgloss.Color(fallback(theme.ToolOther, fallback(theme.Muted, "#7c838a")))
 
 	appStyle = lipgloss.NewStyle().Foreground(text)
 	headerStyle = lipgloss.NewStyle().Foreground(text).Padding(0, 2)
@@ -136,20 +175,47 @@ func applyTheme(theme themeConfig) {
 	composerCursorSt = lipgloss.NewStyle().Foreground(bg).Background(text)
 	composerCursorStyles = smoothCursorStyles(theme.Background, fallback(theme.Muted, "#7c838a"), theme.Text)
 	spinnerStyle = lipgloss.NewStyle().Foreground(accent)
+	toolReadSt = lipgloss.NewStyle().Foreground(toolRead)
+	toolSearchSt = lipgloss.NewStyle().Foreground(toolSearch)
+	toolWriteSt = lipgloss.NewStyle().Foreground(toolWrite)
+	toolShellSt = lipgloss.NewStyle().Foreground(toolShell)
+	toolOtherSt = lipgloss.NewStyle().Foreground(toolOther)
+	diffRemovedSt = lipgloss.NewStyle().Foreground(text).Background(red)
+	diffAddedSt = lipgloss.NewStyle().Foreground(bg).Background(green)
+	diffGutterSt = lipgloss.NewStyle().Foreground(muted)
+	toolStatusPulseStyles = smoothForegroundStyles(fallback(theme.Muted, "#7c838a"), fallback(theme.Accent, "#f2a65a"))
 }
 
 func smoothCursorStyles(backgroundHex, lowHex, highHex string) []lipgloss.Style {
+	foreground := lipgloss.Color(backgroundHex)
+	colors := smoothPulseColors(lowHex, highHex)
+	styles := make([]lipgloss.Style, 0, len(colors))
+	for _, colorHex := range colors {
+		styles = append(styles, lipgloss.NewStyle().Foreground(foreground).Background(lipgloss.Color(colorHex)))
+	}
+	return styles
+}
+
+func smoothForegroundStyles(lowHex, highHex string) []lipgloss.Style {
+	colors := smoothPulseColors(lowHex, highHex)
+	styles := make([]lipgloss.Style, 0, len(colors))
+	for _, colorHex := range colors {
+		styles = append(styles, lipgloss.NewStyle().Foreground(lipgloss.Color(colorHex)))
+	}
+	return styles
+}
+
+func smoothPulseColors(lowHex, highHex string) []string {
 	const frames = 24
-	styles := make([]lipgloss.Style, 0, frames)
+	colors := make([]string, 0, frames)
 	for frame := 0; frame < frames; frame++ {
 		phase := float64(frame) / float64(frames)
 		// Ease the pulse with a sine wave so brightness breathes in and out
 		// gradually instead of stepping linearly between colors.
 		amount := 0.34 + 0.52*(0.5-0.5*math.Cos(phase*2*math.Pi))
-		cursorColor := lipgloss.Color(blendHexColor(lowHex, highHex, amount))
-		styles = append(styles, lipgloss.NewStyle().Foreground(lipgloss.Color(backgroundHex)).Background(cursorColor))
+		colors = append(colors, blendHexColor(lowHex, highHex, amount))
 	}
-	return styles
+	return colors
 }
 
 func blendHexColor(fromHex, toHex string, amount float64) string {

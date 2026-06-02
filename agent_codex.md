@@ -89,6 +89,8 @@ When switching to Codex:
 
 ## Codex Responses Backend
 
+Codex model metadata is currently Qubit-local. For the MVP, Codex model entries expose `maxContext: 400000` so the Go UI can estimate consumed context with a rough 1 token = 4 characters heuristic. Other providers should get provider-specific context limits later.
+
 Default endpoint:
 
 ```txt

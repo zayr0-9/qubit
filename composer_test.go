@@ -142,3 +142,63 @@ func TestComposerCtrlShiftArrowKeySelectsByWordFromModifiers(t *testing.T) {
 		t.Fatalf("SelectedText() = %q, want world", got)
 	}
 }
+
+func TestComposerUndoRedo(t *testing.T) {
+	c := newComposer()
+	c.InsertString("hello")
+	c.InsertString(" world")
+
+	if !c.Undo() {
+		t.Fatal("Undo() = false, want true")
+	}
+	if got := c.Value(); got != "hello" {
+		t.Fatalf("Value() after undo = %q, want hello", got)
+	}
+	if !c.Redo() {
+		t.Fatal("Redo() = false, want true")
+	}
+	if got := c.Value(); got != "hello world" {
+		t.Fatalf("Value() after redo = %q, want hello world", got)
+	}
+}
+
+func TestComposerCtrlZCtrlShiftZKeysUndoRedo(t *testing.T) {
+	c := newComposer()
+	c.InsertString("one")
+	c.InsertString(" two")
+
+	handled, cmd := c.UpdateKey(tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl})
+	if !handled || cmd != nil {
+		t.Fatalf("ctrl+z handled/cmd = %v/%v, want true/nil", handled, cmd)
+	}
+	if got := c.Value(); got != "one" {
+		t.Fatalf("Value() after ctrl+z = %q, want one", got)
+	}
+
+	handled, cmd = c.UpdateKey(tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl | tea.ModShift})
+	if !handled || cmd != nil {
+		t.Fatalf("ctrl+shift+z handled/cmd = %v/%v, want true/nil", handled, cmd)
+	}
+	if got := c.Value(); got != "one two" {
+		t.Fatalf("Value() after ctrl+shift+z = %q, want one two", got)
+	}
+}
+
+func TestComposerUndoRestoresDeletedWord(t *testing.T) {
+	c := newComposer()
+	c.SetValue("hello world")
+	c.DeleteWordBackward()
+
+	if got := c.Value(); got != "hello " {
+		t.Fatalf("Value() after delete word = %q, want hello", got)
+	}
+	if !c.Undo() {
+		t.Fatal("Undo() = false, want true")
+	}
+	if got := c.Value(); got != "hello world" {
+		t.Fatalf("Value() after undo = %q, want hello world", got)
+	}
+	if c.cursor != len([]rune("hello world")) {
+		t.Fatalf("cursor after undo = %d, want end", c.cursor)
+	}
+}
