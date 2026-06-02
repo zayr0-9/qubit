@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -328,8 +329,9 @@ func (m *model) refreshViewport() {
 	contentLine := 0
 	for i, message := range m.messages {
 		if i > 0 {
-			b.WriteString("\n\n")
-			contentLine += 2
+			separator := messageSeparator(m.messages[i-1], message)
+			b.WriteString(separator)
+			contentLine += strings.Count(separator, "\n")
 		}
 		if message.Role == "tool" {
 			startLine := contentLine
@@ -361,10 +363,20 @@ func (m *model) restoreViewportPosition(yOffset int) {
 	m.viewport.SetYOffset(clampInt(yOffset, 0, max(0, m.viewport.TotalLineCount()-m.viewport.Height())))
 }
 
+func messageSeparator(prev chatMessage, next chatMessage) string {
+	if prev.Role == "tool" || next.Role == "tool" {
+		return "\n"
+	}
+	if prev.Role == next.Role {
+		return "\n"
+	}
+	return "\n\n"
+}
+
 func renderMessageWithIcon(message chatMessage, content string) string {
 	icon := aiIcon.Render("◆")
 	if message.Role == "user" {
-		icon = userIcon.Render("◆")
+		icon = userIcon.Render("›")
 	} else if message.Role == "error" {
 		icon = errorIcon.Render("!")
 	}
@@ -436,10 +448,37 @@ func renderMarkdown(markdown string, width int) (string, error) {
 	return rendered, nil
 }
 
+func stringPtr(value string) *string {
+	return &value
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func uintPtr(value uint) *uint {
+	return &value
+}
+
+func colorToHex(c color.Color) string {
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("#%02x%02x%02x", uint8(r>>8), uint8(g>>8), uint8(b>>8))
+}
+
 func noBackgroundMarkdownStyle() ansi.StyleConfig {
 	style := styles.DarkStyleConfig
+	style.Document.Margin = uintPtr(0)
 	style.H1.BackgroundColor = nil
+	style.H1.Color = stringPtr(colorToHex(accent))
+	style.H1.Bold = boolPtr(true)
+	style.H2.Color = stringPtr(colorToHex(accent))
+	style.H2.Bold = boolPtr(true)
+	style.H3.Color = stringPtr(colorToHex(cyan))
+	style.H3.Bold = boolPtr(true)
+	style.BlockQuote.Color = stringPtr(colorToHex(muted))
+	style.Code.Color = stringPtr(colorToHex(cyan))
 	style.Code.BackgroundColor = nil
+	style.CodeBlock.Margin = uintPtr(0)
 	if style.CodeBlock.Chroma != nil {
 		style.CodeBlock.Chroma.Error.BackgroundColor = nil
 		style.CodeBlock.Chroma.Background.BackgroundColor = nil

@@ -51,7 +51,7 @@ func newComposer() composerModel {
 	return composerModel{
 		width:            20,
 		minHeight:        1,
-		maxHeight:        8,
+		maxHeight:        6,
 		maxContentHeight: 80,
 		charLimit:        4000,
 		placeholder:      "message qubit...",

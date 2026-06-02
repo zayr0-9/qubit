@@ -69,8 +69,8 @@ func TestRefreshViewportRendersRoleIconsInline(t *testing.T) {
 	if strings.Contains(viewport, "You") || strings.Contains(viewport, "Qubit") {
 		t.Fatalf("viewport = %q, want role names removed", viewport)
 	}
-	if !strings.Contains(viewport, "◆   hello") || !strings.Contains(viewport, "◆   hi") {
-		t.Fatalf("viewport = %q, want inline user and assistant icons", viewport)
+	if !strings.Contains(viewport, "› hello") || !strings.Contains(viewport, "◆ hi") {
+		t.Fatalf("viewport = %q, want compact inline user and assistant icons", viewport)
 	}
 }
 
