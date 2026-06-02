@@ -616,6 +616,44 @@ func TestSubmitInputPersistsInputHistory(t *testing.T) {
 	}
 }
 
+func TestInputHistoryFiltersSlashCommandInputs(t *testing.T) {
+	got := sanitizeInputHistory([]string{"first", "/help", "  /rename title  ", "second"})
+	want := []string{"first", "second"}
+	if len(got) != len(want) {
+		t.Fatalf("sanitizeInputHistory = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sanitizeInputHistory = %#v, want %#v", got, want)
+		}
+	}
+}
+
+func TestSubmitSlashCommandDoesNotPersistInputHistory(t *testing.T) {
+	appRoot := t.TempDir()
+	rt, _ := newTestRuntime(t)
+	rt.qubitDir = appRoot
+	m := initialModel(rt)
+	m.ready = true
+	m.composer.SetValue("/help")
+
+	updated, cmd := m.submitInput()
+	got := updated.(model)
+	if cmd != nil {
+		t.Fatalf("submit /help command = %#v, want nil", cmd)
+	}
+	if len(got.inputHistory) != 0 {
+		t.Fatalf("inputHistory = %#v, want empty", got.inputHistory)
+	}
+	loaded, err := loadInputHistory(appRoot)
+	if err != nil {
+		t.Fatalf("load input history: %v", err)
+	}
+	if len(loaded) != 0 {
+		t.Fatalf("loaded input history = %#v, want empty", loaded)
+	}
+}
+
 func TestPageDownLeavesAutoScrollAtBottom(t *testing.T) {
 	m := initialModel(nil)
 	m.ready = true

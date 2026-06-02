@@ -60,7 +60,7 @@ func sanitizeInputHistory(entries []string) []string {
 	seen := make(map[string]bool, len(entries))
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := strings.TrimSpace(normalizeInputNewlines(entries[i]))
-		if entry == "" || seen[entry] {
+		if !shouldStoreInputHistory(entry) || seen[entry] {
 			continue
 		}
 		seen[entry] = true
@@ -75,9 +75,14 @@ func sanitizeInputHistory(entries []string) []string {
 	return out
 }
 
+func shouldStoreInputHistory(input string) bool {
+	input = strings.TrimSpace(normalizeInputNewlines(input))
+	return input != "" && !strings.HasPrefix(input, "/")
+}
+
 func (m *model) recordInputHistory(input string) {
 	input = strings.TrimSpace(normalizeInputNewlines(input))
-	if input == "" {
+	if !shouldStoreInputHistory(input) {
 		return
 	}
 	m.inputHistory = append(m.inputHistory, input)
