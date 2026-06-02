@@ -50,7 +50,7 @@ func initialModel(rt *runtimeClient) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(waitRuntimeEvent(m.runtime), m.spinner.Tick)
+	return tea.Batch(waitRuntimeEvent(m.runtime), m.spinner.Tick, inputCursorPulseTick())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -82,6 +82,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateTerminalSetupResult(terminalSetupResult(msg)), nil
 	case fakeStreamTickMsg:
 		return m.updateFakeStreamTick()
+	case inputCursorPulseMsg:
+		m.inputCursorPulse++
+		return m, inputCursorPulseTick()
 	case toolCallRevealTickMsg:
 		return m.updateToolCallRevealTick()
 	case spinner.TickMsg:
@@ -379,7 +382,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 			m.runtime.launchCwd = ev.WorkspaceCwd
 		}
 		m.session = ev.SessionID
-		m.title = ev.SessionTitle
+		m.title = ""
 		m.autoNewSessionOnChat = true
 		m.status = "ready"
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}))
@@ -637,6 +640,12 @@ func fakeStreamTick() tea.Cmd {
 	})
 }
 
+func inputCursorPulseTick() tea.Cmd {
+	return tea.Tick(90*time.Millisecond, func(time.Time) tea.Msg {
+		return inputCursorPulseMsg{}
+	})
+}
+
 func fakeStreamChunkSize(totalRunes int, visibleRunes int) int {
 	remaining := totalRunes - visibleRunes
 	if remaining <= 0 {
@@ -659,10 +668,12 @@ func (m *model) applySessionList(ev runtimeEvent) {
 	if ev.SessionID != "" && !(m.busy && m.lastRunStartedSession != "" && ev.SessionID != m.lastRunStartedSession) {
 		m.session = ev.SessionID
 	}
-	if ev.SessionTitle != "" && ev.SessionID == m.session {
-		m.title = ev.SessionTitle
-	} else if !m.busy {
-		m.title = m.currentSessionTitle()
+	if !m.autoNewSessionOnChat {
+		if ev.SessionTitle != "" && ev.SessionID == m.session {
+			m.title = ev.SessionTitle
+		} else if !m.busy {
+			m.title = m.currentSessionTitle()
+		}
 	}
 	if wasStreaming {
 		m.streaming = true

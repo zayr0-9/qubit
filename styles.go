@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"math"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -77,21 +79,22 @@ var (
 	red       color.Color
 	green     color.Color
 
-	appStyle         lipgloss.Style
-	headerStyle      lipgloss.Style
-	chatStyle        lipgloss.Style
-	inputStyle       lipgloss.Style
-	footerStyle      lipgloss.Style
-	userIcon         lipgloss.Style
-	aiIcon           lipgloss.Style
-	errorIcon        lipgloss.Style
-	mutedSt          lipgloss.Style
-	errSt            lipgloss.Style
-	okSt             lipgloss.Style
-	selectSt         lipgloss.Style
-	inputSelectSt    lipgloss.Style
-	composerCursorSt lipgloss.Style
-	spinnerStyle     lipgloss.Style
+	appStyle             lipgloss.Style
+	headerStyle          lipgloss.Style
+	chatStyle            lipgloss.Style
+	inputStyle           lipgloss.Style
+	footerStyle          lipgloss.Style
+	userIcon             lipgloss.Style
+	aiIcon               lipgloss.Style
+	errorIcon            lipgloss.Style
+	mutedSt              lipgloss.Style
+	errSt                lipgloss.Style
+	okSt                 lipgloss.Style
+	selectSt             lipgloss.Style
+	inputSelectSt        lipgloss.Style
+	composerCursorSt     lipgloss.Style
+	composerCursorStyles []lipgloss.Style
+	spinnerStyle         lipgloss.Style
 )
 
 var (
@@ -131,7 +134,70 @@ func applyTheme(theme themeConfig) {
 	selectSt = lipgloss.NewStyle().Foreground(accent).Bold(true)
 	inputSelectSt = lipgloss.NewStyle().Foreground(bg).Background(accent)
 	composerCursorSt = lipgloss.NewStyle().Foreground(bg).Background(text)
+	composerCursorStyles = smoothCursorStyles(theme.Background, fallback(theme.Muted, "#7c838a"), theme.Text)
 	spinnerStyle = lipgloss.NewStyle().Foreground(accent)
+}
+
+func smoothCursorStyles(backgroundHex, lowHex, highHex string) []lipgloss.Style {
+	const frames = 24
+	styles := make([]lipgloss.Style, 0, frames)
+	for frame := 0; frame < frames; frame++ {
+		phase := float64(frame) / float64(frames)
+		// Ease the pulse with a sine wave so brightness breathes in and out
+		// gradually instead of stepping linearly between colors.
+		amount := 0.34 + 0.52*(0.5-0.5*math.Cos(phase*2*math.Pi))
+		cursorColor := lipgloss.Color(blendHexColor(lowHex, highHex, amount))
+		styles = append(styles, lipgloss.NewStyle().Foreground(lipgloss.Color(backgroundHex)).Background(cursorColor))
+	}
+	return styles
+}
+
+func blendHexColor(fromHex, toHex string, amount float64) string {
+	from, err := parseHexRGB(fromHex)
+	if err != nil {
+		from = [3]int{124, 131, 138}
+	}
+	to, err := parseHexRGB(toHex)
+	if err != nil {
+		to = [3]int{230, 232, 235}
+	}
+	amount = maxFloat(0, minFloat(1, amount))
+	return fmt.Sprintf("#%02x%02x%02x",
+		int(float64(from[0])+float64(to[0]-from[0])*amount+0.5),
+		int(float64(from[1])+float64(to[1]-from[1])*amount+0.5),
+		int(float64(from[2])+float64(to[2]-from[2])*amount+0.5),
+	)
+}
+
+func parseHexRGB(value string) ([3]int, error) {
+	normalized, err := normalizeHexColor(value)
+	if err != nil {
+		return [3]int{}, err
+	}
+	var rgb [3]int
+	for i := 0; i < 3; i++ {
+		part := normalized[1+i*2 : 3+i*2]
+		v, err := strconv.ParseInt(part, 16, 0)
+		if err != nil {
+			return [3]int{}, err
+		}
+		rgb[i] = int(v)
+	}
+	return rgb, nil
+}
+
+func minFloat(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func customThemeFrom(background, textColor string, base themeConfig) (themeConfig, error) {

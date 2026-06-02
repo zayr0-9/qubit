@@ -42,12 +42,13 @@ func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.moveSessionCursor(1)
 		return m, nil
 	case "enter":
-		if len(m.sessions) == 0 {
+		sessions := m.sessionPickerSessions()
+		if len(sessions) == 0 {
 			m.mode = modeChat
 			return m, nil
 		}
 		m.ensureSessionCursorInBounds()
-		session := m.sessions[m.sessionCursor]
+		session := sessions[m.sessionCursor]
 		m.mode = modeChat
 		m.clearFakeStream()
 		m.autoScroll = true
@@ -64,9 +65,19 @@ func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) sessionPickerSessions() []sessionInfo {
+	visible := make([]sessionInfo, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		if session.ForkedFromSessionID == "" {
+			visible = append(visible, session)
+		}
+	}
+	return visible
+}
+
 func (m *model) ensureSessionCursor() {
 	m.ensureSessionCursorInBounds()
-	for i, session := range m.sessions {
+	for i, session := range m.sessionPickerSessions() {
 		if session.ID == m.session {
 			m.sessionCursor = i
 			return
@@ -75,21 +86,23 @@ func (m *model) ensureSessionCursor() {
 }
 
 func (m *model) ensureSessionCursorInBounds() {
-	if len(m.sessions) == 0 {
+	sessions := m.sessionPickerSessions()
+	if len(sessions) == 0 {
 		m.sessionCursor = 0
 		return
 	}
-	if m.sessionCursor < 0 || m.sessionCursor >= len(m.sessions) {
+	if m.sessionCursor < 0 || m.sessionCursor >= len(sessions) {
 		m.sessionCursor = 0
 	}
 }
 
 func (m *model) moveSessionCursor(delta int) {
-	if len(m.sessions) == 0 {
+	sessions := m.sessionPickerSessions()
+	if len(sessions) == 0 {
 		m.sessionCursor = 0
 		return
 	}
-	m.sessionCursor = (m.sessionCursor + delta + len(m.sessions)) % len(m.sessions)
+	m.sessionCursor = (m.sessionCursor + delta + len(sessions)) % len(sessions)
 }
 
 func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {

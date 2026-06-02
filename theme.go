@@ -251,9 +251,9 @@ func (m model) renderThemeEntry(height int) string {
 	b.WriteString(customLabel)
 	b.WriteString("\n\n")
 
-	b.WriteString(renderThemeEntryLine("Background", m.themeEntry.Background.View(""), m.themeEntry.Step == themeEntryBackground))
+	b.WriteString(renderThemeEntryLine("Background", m.themeEntry.Background.View("", 0), m.themeEntry.Step == themeEntryBackground))
 	b.WriteString("\n")
-	b.WriteString(renderThemeEntryLine("Text", m.themeEntry.Text.View(""), m.themeEntry.Step == themeEntryText))
+	b.WriteString(renderThemeEntryLine("Text", m.themeEntry.Text.View("", 0), m.themeEntry.Step == themeEntryText))
 	b.WriteString("\n")
 	preview := lipgloss.NewStyle().Background(lipgloss.Color(m.themeEntry.Background.Value())).Foreground(lipgloss.Color(m.themeEntry.Text.Value())).Render(" preview text ")
 	b.WriteString(mutedSt.Render("Preview: ") + preview)

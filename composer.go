@@ -454,7 +454,7 @@ func (c *composerModel) InsertNewline() {
 	c.InsertString("\n")
 }
 
-func (c composerModel) View(prompt string) string {
+func (c composerModel) View(prompt string, pulseFrame int) string {
 	lines := c.visualLines()
 	height := c.Height()
 	start := clampInt(c.scrollLine, 0, max(0, len(lines)-1))
@@ -473,7 +473,7 @@ func (c composerModel) View(prompt string) string {
 		if i == 0 {
 			linePrompt = prompt
 		}
-		out = append(out, linePrompt+c.renderLine(line))
+		out = append(out, linePrompt+c.renderLine(line, pulseFrame))
 	}
 	for len(out) < height {
 		linePrompt := continuationPrompt
@@ -485,10 +485,10 @@ func (c composerModel) View(prompt string) string {
 	return strings.Join(out, "\n")
 }
 
-func (c composerModel) renderLine(line composerLine) string {
+func (c composerModel) renderLine(line composerLine, pulseFrame int) string {
 	if len(c.value) == 0 && line.startIndex == 0 {
 		if c.focused && c.cursor == 0 {
-			return composerCursorSt.Render(" ") + mutedSt.Render(c.placeholder)
+			return renderComposerCursor(" ", pulseFrame) + mutedSt.Render(c.placeholder)
 		}
 		return mutedSt.Render(c.placeholder)
 	}
@@ -502,7 +502,7 @@ func (c composerModel) renderLine(line composerLine) string {
 		text := string(cell.r)
 		switch {
 		case cursorHere:
-			b.WriteString(composerCursorSt.Render(text))
+			b.WriteString(renderComposerCursor(text, pulseFrame))
 			cursorRendered = true
 		case selected:
 			b.WriteString(inputSelectSt.Render(text))
@@ -511,9 +511,13 @@ func (c composerModel) renderLine(line composerLine) string {
 		}
 	}
 	if c.focused && !c.HasSelection() && !cursorRendered && c.cursor == line.endIndex {
-		b.WriteString(composerCursorSt.Render(" "))
+		b.WriteString(renderComposerCursor(" ", pulseFrame))
 	}
 	return b.String()
+}
+
+func renderComposerCursor(s string, pulseFrame int) string {
+	return composerCursorStyles[pulseFrame%len(composerCursorStyles)].Render(s)
 }
 
 func (c composerModel) visualLines() []composerLine {

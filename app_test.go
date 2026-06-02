@@ -1162,8 +1162,8 @@ func TestReadyRequestsSessionList(t *testing.T) {
 	if got.session != "sess_1" {
 		t.Fatalf("session = %q, want sess_1", got.session)
 	}
-	if got.title != "First" {
-		t.Fatalf("title = %q, want First", got.title)
+	if got.title != "" {
+		t.Fatalf("title = %q, want empty title before first chat", got.title)
 	}
 	if !got.autoNewSessionOnChat {
 		t.Fatal("autoNewSessionOnChat = false, want true after fresh ready event")
@@ -1794,4 +1794,74 @@ func TestRenderSlashCommandsUsesModalListWindow(t *testing.T) {
 	if !strings.Contains(rendered, "more above") {
 		t.Fatalf("rendered slash modal missing list-window hint:\n%s", rendered)
 	}
+}
+
+func TestSessionListKeepsTitleEmptyBeforeFirstChat(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.session = "sess_last"
+	m.autoNewSessionOnChat = true
+
+	m.applySessionList(runtimeEvent{
+		Type:         "session.list",
+		SessionID:    "sess_last",
+		SessionTitle: "Last chat",
+		Sessions:     []sessionInfo{{ID: "sess_last", Title: "Last chat"}},
+	})
+
+	if m.title != "" {
+		t.Fatalf("title = %q, want empty title before first chat", m.title)
+	}
+}
+
+func TestSessionPickerHidesForks(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.session = "sess_root_2"
+	m.sessions = []sessionInfo{
+		{ID: "sess_root_1", Title: "Root 1"},
+		{ID: "sess_fork", Title: "Fork", ForkedFromSessionID: "sess_root_1"},
+		{ID: "sess_root_2", Title: "Root 2"},
+	}
+
+	m.ensureSessionCursor()
+	visible := m.sessionPickerSessions()
+	if len(visible) != 2 {
+		t.Fatalf("visible sessions = %d, want 2", len(visible))
+	}
+	for _, session := range visible {
+		if session.ID == "sess_fork" {
+			t.Fatalf("fork session should be hidden from picker: %#v", visible)
+		}
+	}
+	if m.sessionCursor != 1 {
+		t.Fatalf("sessionCursor = %d, want active root session index 1", m.sessionCursor)
+	}
+
+	rendered := m.renderSessionPicker()
+	if strings.Contains(rendered, "Fork") || strings.Contains(rendered, "sess_fork") || strings.Contains(rendered, "↳") {
+		t.Fatalf("rendered session picker includes fork:\n%s", rendered)
+	}
+}
+
+func TestSessionPickerActivateUsesVisibleNonForkSession(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.mode = modeSessionPicker
+	m.sessions = []sessionInfo{
+		{ID: "sess_root_1", Title: "Root 1"},
+		{ID: "sess_fork", Title: "Fork", ForkedFromSessionID: "sess_root_1"},
+		{ID: "sess_root_2", Title: "Root 2"},
+	}
+	m.sessionCursor = 1
+
+	updated, cmd := m.updateSessionPicker(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(model)
+
+	if got.session != "sess_root_2" {
+		t.Fatalf("session = %q, want second visible root session", got.session)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.activate", "sess_root_2")
 }

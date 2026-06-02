@@ -263,6 +263,8 @@ view.MouseMode = tea.MouseModeCellMotion
 - Go launches the compiled `dist\runtime.js`.
 - Keep provider setup, key resolution, storage setup, and tool registration in TypeScript runtime files.
 - Run `pnpm run build:runtime` after runtime/tool source changes.
+- Native runtime dependencies (`keytar`, `better-sqlite3`) must be allowed in `package.json` `pnpm.onlyBuiltDependencies`; after dependency changes run `pnpm rebuild better-sqlite3` if the native SQLite smoke test cannot locate `better_sqlite3.node`.
+- Validate native SQLite on the active Node/Windows environment with: `node -e "import Database from 'better-sqlite3'; const db = new Database(':memory:'); db.exec('select 1'); db.close(); console.log('ok')"`.
 - Support environment-driven provider configuration for automation and fallback:
 
 ```powershell

@@ -3,7 +3,6 @@
 import readline from "node:readline";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -11,7 +10,7 @@ import {
   defineAgent,
   StubProvider,
 } from "@hyper-labs/hyper-router";
-import { SqliteStorage } from "@hyper-labs/hyper-router/storage/sqlite";
+import { QubitSqliteStorage } from "./runtime/storage/qubitSqliteStorage.js";
 import { GLMProvider } from "@hyper-labs/hyper-router/providers/glm";
 import { OpenAIProvider } from "@hyper-labs/hyper-router/providers/openai-vai";
 import { AmazonBedrockVAIProvider } from "@hyper-labs/hyper-router/providers/amazon-bedrock-vai";
@@ -20,7 +19,6 @@ import { qubitTools } from "./tools/index.js";
 import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
 import { CodexResponsesProvider, QubitCodexTokenStore, cancelCodexLogin, startCodexLogin } from "./runtime/codex/index.js";
 
-const require = createRequire(import.meta.url);
 const entryDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = basename(entryDir) === "dist" ? dirname(entryDir) : entryDir;
 const dataDir = join(rootDir, ".qubit");
@@ -186,9 +184,8 @@ async function loadModePrompts() {
   return Object.fromEntries(entries);
 }
 
-const storage = new SqliteStorage({
+const storage = new QubitSqliteStorage({
   filePath: storagePath,
-  locateFile: (file) => require.resolve(`sql.js/dist/${file}`),
 });
 
 const pendingPermissions = new Map();

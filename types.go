@@ -296,6 +296,7 @@ type sendDoneMsg struct{ err error }
 type terminalSetupResultMsg terminalSetupResult
 type fakeStreamTickMsg struct{}
 type toolCallRevealTickMsg struct{}
+type inputCursorPulseMsg struct{}
 
 type runtimeClient struct {
 	cmd       *exec.Cmd
@@ -311,9 +312,10 @@ type model struct {
 	width  int
 	height int
 
-	viewport viewport.Model
-	composer composerModel
-	spinner  spinner.Model
+	viewport         viewport.Model
+	composer         composerModel
+	spinner          spinner.Model
+	inputCursorPulse int
 
 	renderCache map[renderCacheKey]string
 

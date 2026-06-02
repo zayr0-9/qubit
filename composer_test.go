@@ -55,7 +55,7 @@ func TestComposerViewDoesNotHighlightPrompt(t *testing.T) {
 	c := newComposer()
 	c.SetValue("hello")
 	c.SelectAll()
-	view := c.View("› ")
+	view := c.View("› ", 0)
 
 	if strings.HasPrefix(view, inputSelectSt.Render("›")) || strings.HasPrefix(view, inputSelectSt.Render("› ")) {
 		t.Fatalf("prompt appears highlighted in view: %q", view)
@@ -75,7 +75,7 @@ func TestComposerHeightRespectsMax(t *testing.T) {
 	if got := c.Height(); got != 3 {
 		t.Fatalf("Height() = %d, want 3", got)
 	}
-	if lines := strings.Count(c.View("› "), "\n") + 1; lines != 3 {
+	if lines := strings.Count(c.View("› ", 0), "\n") + 1; lines != 3 {
 		t.Fatalf("view lines = %d, want 3", lines)
 	}
 }
@@ -85,7 +85,7 @@ func TestComposerPromptOnlyAppearsOnFirstVisibleLine(t *testing.T) {
 	c.SetWidth(4)
 	c.SetValue("abcdefgh")
 
-	view := c.View("› ")
+	view := c.View("› ", 0)
 	lines := strings.Split(view, "\n")
 	if len(lines) < 2 {
 		t.Fatalf("view line count = %d, want at least 2", len(lines))

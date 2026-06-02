@@ -18,9 +18,10 @@
   "dependencies": {
     "@ai-sdk/amazon-bedrock": "^4.0.92",
     "@ai-sdk/openai": "^3.0.53",
-    "@hyper-labs/hyper-router": "file:hyper-labs-hyper-router-0.1.8.tgz",
+    "@hyper-labs/hyper-router": "file:hyper-labs-hyper-router-0.1.9.tgz",
     "@openrouter/agent": "^0.3.2",
     "ai": "^6.0.168",
+    "better-sqlite3": "^12.10.0",
     "glob": "^13.0.0",
     "keytar": "^7.9.0",
     "sql.js": "^1.14.1",
@@ -29,10 +30,12 @@
   "packageManager": "pnpm@10.33.0",
   "pnpm": {
     "onlyBuiltDependencies": [
-      "keytar"
+      "keytar",
+      "better-sqlite3"
     ]
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.1",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"

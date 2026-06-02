@@ -49,16 +49,10 @@ func (m model) renderHeader() string {
 	}
 	modelName := fallback(m.model, "...")
 	sessionTitle := fallback(m.title, m.currentSessionTitle())
-	sessionTitle = fallback(sessionTitle, "untitled")
-
-	activity := okSt.Render(m.status)
-	if strings.Contains(m.status, "error") || m.err != "" {
-		activity = errSt.Render(m.status)
-	}
 
 	appName := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("qubit")
-	meta := mutedSt.Render(fmt.Sprintf("%s · %s · %s", provider, modelName, short(m.session, 12)))
-	headerLeft := fmt.Sprintf("%s  %s", appName, activity)
+	meta := mutedSt.Render(fmt.Sprintf("%s · %s", provider, modelName))
+	headerLeft := appName
 	headerRight := oneLine(sessionTitle, max(12, m.width-lipgloss.Width(headerLeft)-lipgloss.Width(meta)-8))
 	headerText := fmt.Sprintf("%s  %s  %s", headerLeft, mutedSt.Render(headerRight), meta)
 	return headerStyle.Width(m.width).Render(headerText)
@@ -112,7 +106,7 @@ func (m model) renderMainArea(height int) string {
 }
 
 func (m model) renderInput() string {
-	view := m.composer.View(m.inputPrompt())
+	view := m.composer.View(m.inputPrompt(), m.inputCursorPulse)
 	return inputStyle.Width(m.width).Height(m.composer.Height()).Render(view)
 }
 
@@ -301,29 +295,26 @@ func descriptionSuffix(description string) string {
 }
 
 func (m model) renderSessionPicker() string {
-	if len(m.sessions) == 0 {
+	sessions := m.sessionPickerSessions()
+	if len(sessions) == 0 {
 		return mutedSt.Render("no sessions yet · esc then /new to create one")
 	}
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Foreground(accent).Bold(true).Render("sessions") + "\n")
 	b.WriteString(mutedSt.Render("↑/↓ select · enter activate · esc close") + "\n\n")
-	for i, session := range m.sessions {
+	for i, session := range sessions {
 		active := " "
 		if session.ID == m.session {
 			active = "•"
 		}
-		forkMarker := " "
-		if session.ForkedFromSessionID != "" {
-			forkMarker = "↳"
-		}
-		line := fmt.Sprintf("%s%s %-28s %3d msgs  %s", active, forkMarker, oneLine(session.Title, 28), session.MessageCount, mutedSt.Render(short(session.ID, 14)))
+		line := fmt.Sprintf("%s %-28s %3d msgs", active, oneLine(session.Title, 28), session.MessageCount)
 		if i == m.sessionCursor {
 			line = selectSt.Render("  " + line)
 		} else {
 			line = mutedSt.Render("  ") + line
 		}
 		b.WriteString(line)
-		if i < len(m.sessions)-1 {
+		if i < len(sessions)-1 {
 			b.WriteString("\n")
 		}
 	}

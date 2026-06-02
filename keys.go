@@ -380,7 +380,7 @@ func (m model) renderKeyEntry(height int) string {
 	b.WriteString(mutedSt.Render("Step: ") + stepName + "\n\n")
 	b.WriteString(renderKeyProviderList(m.keyEntry))
 	b.WriteString("\n")
-	b.WriteString(renderKeyEntryLine("Alias", m.keyEntry.Alias.View(""), m.keyEntry.Step == keyEntryAlias, false))
+	b.WriteString(renderKeyEntryLine("Alias", m.keyEntry.Alias.View("", 0), m.keyEntry.Step == keyEntryAlias, false))
 	b.WriteString("\n")
 	secretView := maskComposerView(m.keyEntry.Secret)
 	b.WriteString(renderKeyEntryLine("API key", secretView, m.keyEntry.Step == keyEntrySecret, true))
@@ -402,7 +402,7 @@ func renderKeyProviderList(entry *keyEntryState) string {
 	}
 	b.WriteString(label)
 	if entry.Step != keyEntryProvider {
-		b.WriteString(entry.Provider.View(""))
+		b.WriteString(entry.Provider.View("", 0))
 		return b.String()
 	}
 	b.WriteString("\n")
@@ -448,7 +448,7 @@ func maskComposerView(c composerModel) string {
 	if len(masked.value) > 0 {
 		masked.value = []rune(strings.Repeat("•", len(masked.value)))
 	}
-	return masked.View("")
+	return masked.View("", 0)
 }
 
 func looksLikeAPIKey(text string) bool {
