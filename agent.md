@@ -42,6 +42,9 @@ agent_tools.md
 
 agent_codex.md
   Mandatory when working on Qubit's local Codex provider, ChatGPT OAuth flow, Codex token storage/refresh, or Codex Responses API integration.
+
+agent_server.md
+  Mandatory when working on Qubit's singleton Node runtime server, multi-TUI attachment, runtime process lifetime, client routing, or JSON-lines transport.
 ```
 
 When adding a new major subsystem or extracting detailed guidance from this file, create a focused `agent_<category>.md` context file and list it here with when it is mandatory to read.
@@ -60,7 +63,7 @@ D:\qubit
   view.go                   TUI rendering, including Glow/Glamour Markdown message rendering
   commands.go               Slash commands and session picker interactions
   keys.go                   API key picker and masked key-entry UI
-  runtime_client.go         Go <-> Node JSON-lines client
+  runtime_client.go         Go <-> singleton Node runtime server JSON-lines client
   types.go                  Shared Go structs and message types
   styles.go                 Lip Gloss styling
   util.go                   Shared helpers
@@ -95,8 +98,9 @@ D:\qubit
    - Do not push terminal-specific behavior into the Node runtime unless it is part of the JSON protocol.
 
 4. Communicate across the process boundary with JSON lines only.
-   - Go sends one JSON object per line to Node stdin.
-   - Node sends one JSON object per line to Go stdout.
+   - Go TUIs attach to one singleton Node runtime server per terminal launch cwd/project `.qubit` directory when possible.
+   - The first TUI starts `dist\\runtime.js` with `QUBIT_RUNTIME_ADDR`; later TUIs connect to the same localhost JSON-lines server instead of starting independent runtimes against the same DB.
+   - In direct/stdin check mode, Go sends one JSON object per line to Node stdin and Node sends one JSON object per line to Go stdout.
    - Runtime stderr is reserved for diagnostics and is copied to `.qubit/runtime.log`.
 
 5. Prefer small, explicit protocol additions.
@@ -217,10 +221,11 @@ view.MouseMode = tea.MouseModeCellMotion
 
 ### Runtime Client Standards
 
-- Keep the Go runtime client responsible only for process management, logging, JSON encoding/decoding, and Tea commands.
+- Keep the Go runtime client responsible only for process management, singleton server attach/start, logging, JSON encoding/decoding, and Tea commands.
 - Do not put business logic in `runtime_client.go`.
-- Keep stdout parsing strict JSON-lines.
-- Log stdout/stderr lines to `.qubit/runtime.log` for copyable diagnostics.
+- Prefer attaching to an existing runtime server for the same project `.qubit` directory; only start a new Node process when no server is reachable.
+- Keep runtime socket/stdout parsing strict JSON-lines.
+- Log runtime event/stderr lines to `.qubit/runtime.log` for copyable diagnostics.
 - Avoid swallowing send/decode/runtime errors silently.
 
 ### UI/UX Standards

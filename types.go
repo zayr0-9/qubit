@@ -325,6 +325,7 @@ type notificationResultMsg struct {
 
 type runtimeClient struct {
 	cmd       *exec.Cmd
+	conn      io.ReadWriteCloser
 	stdin     io.WriteCloser
 	events    chan runtimeEvent
 	errs      chan error
@@ -332,6 +333,8 @@ type runtimeClient struct {
 	launchCwd string
 	qubitDir  string
 	logPath   string
+	lockPath  string
+	attached  bool
 }
 
 type model struct {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // @ts-nocheck
 import readline from "node:readline";
+import net from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -292,39 +293,113 @@ let runtimeState = await createRuntimeState("plan");
 let sessionIndex = await loadSessionIndex();
 let activeSessionId = sessionIndex.activeSessionId;
 
-function write(message) {
-  process.stdout.write(`${JSON.stringify(redactMessage(message))}\n`);
+const clients = new Set();
+
+function readyMessage(id) {
+  return {
+    type: "ready",
+    id,
+    sessionId: activeSessionId,
+    sessionTitle: activeSession()?.title,
+    provider: runtimeState.providerName,
+    activeProvider: runtimeState.providerName,
+    activeKeyAlias: runtimeState.keyAlias,
+    model,
+    maxContext: activeModelMaxContext(),
+    reasoningLevel,
+    storagePath,
+    indexPath,
+    workspaceCwd: getDefaultToolCwd(),
+  };
 }
 
-write({
-  type: "ready",
-  sessionId: activeSessionId,
-  sessionTitle: activeSession()?.title,
-  provider: runtimeState.providerName,
-  activeProvider: runtimeState.providerName,
-  activeKeyAlias: runtimeState.keyAlias,
-  model,
-  maxContext: activeModelMaxContext(),
-  reasoningLevel,
-  storagePath,
-  indexPath,
-  workspaceCwd: getDefaultToolCwd(),
-});
+let currentResponseTarget = null;
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  crlfDelay: Infinity,
-});
+function write(message, target = null) {
+  const line = `${JSON.stringify(redactMessage(message))}\n`;
+  const destination = target || currentResponseTarget;
+  if (destination) {
+    destination.write(line);
+    return;
+  }
+  if (clients.size > 0) {
+    for (const client of clients) {
+      client.write(line);
+    }
+    return;
+  }
+  process.stdout.write(line);
+}
+
+const serverAddress = process.env.QUBIT_RUNTIME_ADDR || "";
+if (serverAddress) {
+  await startRuntimeServer(serverAddress);
+} else {
+  startStdioClient();
+  write(readyMessage());
+}
+
+function startStdioClient() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    crlfDelay: Infinity,
+  });
+  attachLineHandler(rl, null);
+  rl.on("close", () => {
+    queue.finally(() => process.exit(0));
+  });
+}
+
+async function startRuntimeServer(address) {
+  const server = net.createServer((socket) => {
+    clients.add(socket);
+    socket.setEncoding("utf8");
+    const rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
+    attachLineHandler(rl, socket);
+    write(readyMessage(), socket);
+    socket.on("close", () => {
+      clients.delete(socket);
+      rl.close();
+    });
+    socket.on("error", () => {
+      clients.delete(socket);
+    });
+  });
+  server.on("error", (error) => {
+    console.error(`[runtime-server] ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+  const [host, portText] = String(address).split(":");
+  const port = Number(portText);
+  await new Promise((resolve) => server.listen(port, host || "127.0.0.1", resolve));
+  console.error(`[runtime-server] listening ${address}`);
+}
 
 let queue = Promise.resolve();
 
-rl.on("line", (line) => {
-  if (handleImmediateLine(line)) return;
+function attachLineHandler(rl, target) {
+  rl.on("line", (line) => {
+    const previousTarget = currentResponseTarget;
+    currentResponseTarget = target;
+    try {
+      if (handleImmediateLine(line)) return;
+    } finally {
+      currentResponseTarget = previousTarget;
+    }
 
-  queue = queue.then(() => handleLine(line)).catch((error) => {
-    write({ type: "error", error: redactSecrets(error instanceof Error ? error.message : String(error)) });
+    queue = queue.then(async () => {
+      const previousTarget = currentResponseTarget;
+      currentResponseTarget = target;
+      try {
+        await handleLine(line);
+      } finally {
+        currentResponseTarget = previousTarget;
+      }
+    }).catch((error) => {
+      write({ type: "error", error: redactSecrets(error instanceof Error ? error.message : String(error)) }, target);
+    });
   });
-});
+}
 
 function handleImmediateLine(line) {
   if (!line.trim()) return true;
@@ -362,7 +437,10 @@ async function handleLine(line) {
 
   if (request.type === "shutdown") {
     write({ type: "shutdown" });
-    process.exit(0);
+    if (!serverAddress) {
+      process.exit(0);
+    }
+    return;
   }
 
   if (request.type === "tool.permission.response") {
@@ -2185,6 +2263,3 @@ function titleFromInput(input) {
   return cleaned.length > 48 ? `${cleaned.slice(0, 45)}...` : cleaned;
 }
 
-rl.on("close", () => {
-  queue.finally(() => process.exit(0));
-});
