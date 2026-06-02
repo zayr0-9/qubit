@@ -3,6 +3,7 @@ import { CODEX_BASE_URL, CODEX_CLIENT_ID, CODEX_ORIGINATOR, type CodexGenerateIn
 import { getCodexBearerToken } from "./auth.js";
 import { toCodexRequestParts } from "./responsesItems.js";
 import { parseCodexSseResponse } from "./responsesSse.js";
+import { codexErrorMessage, withCodexRetry } from "./responsesRetry.js";
 
 export class CodexResponsesProvider implements ModelProvider {
   private readonly options: CodexResponsesProviderOptions;
@@ -40,13 +41,20 @@ export class CodexResponsesProvider implements ModelProvider {
     }
     headers.set("x-client-request-id", requestId);
 
-    const response = await this.fetchImpl(this.responsesUrl(), {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      ...(input.signal ? { signal: input.signal } : {}),
+    const parsed = await withCodexRetry(async () => {
+      input.signal?.throwIfAborted();
+      const response = await this.fetchImpl(this.responsesUrl(), {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+      return await parseCodexSseResponse(response);
+    }, {
+      onRetry: (event) => {
+        this.logRetry(input, event.nextAttempt, event.maxAttempts, event.delayMs, event.reason);
+      },
     });
-    const parsed = await parseCodexSseResponse(response);
     input.signal?.throwIfAborted();
     const modelResponse: ModelResponse = {
       toolCalls: parsed.toolCalls,
@@ -68,5 +76,10 @@ export class CodexResponsesProvider implements ModelProvider {
 
   private responsesUrl(): string {
     return `${(this.options.baseURL || CODEX_BASE_URL).replace(/\/$/, "")}/responses`;
+  }
+
+  private logRetry(input: CodexGenerateInput, attempt: number, maxAttempts: number, delayMs: number, reason: string): void {
+    const safeReason = codexErrorMessage(reason).replace(/\s+/g, " ").slice(0, 300);
+    console.error(`[codex-retry] retrying request attempt=${attempt}/${maxAttempts} delayMs=${delayMs} model=${input.model || "unknown"} runId=${input.runId || ""} sessionId=${input.sessionId || ""} reason=${safeReason}`);
   }
 }

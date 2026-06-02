@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestComposerSelectAllAndReplace(t *testing.T) {
@@ -100,5 +102,43 @@ func TestComposerPromptOnlyAppearsOnFirstVisibleLine(t *testing.T) {
 		if !strings.HasPrefix(line, "  ") {
 			t.Fatalf("line %d = %q, want prompt-width indentation", i+2, line)
 		}
+	}
+}
+
+func TestComposerCtrlArrowKeyMovesByWordFromModifiers(t *testing.T) {
+	c := newComposer()
+	c.SetValue("hello world")
+	c.MoveToBegin(false)
+
+	handled, cmd := c.UpdateKey(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModCtrl})
+	if !handled || cmd != nil {
+		t.Fatalf("UpdateKey handled/cmd = %v/%v, want true/nil", handled, cmd)
+	}
+	if c.cursor != len([]rune("hello ")) {
+		t.Fatalf("cursor after ctrl+right = %d, want after first word", c.cursor)
+	}
+	if c.HasSelection() {
+		t.Fatal("ctrl+right selected text, want plain word movement")
+	}
+
+	handled, cmd = c.UpdateKey(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl})
+	if !handled || cmd != nil {
+		t.Fatalf("UpdateKey handled/cmd = %v/%v, want true/nil", handled, cmd)
+	}
+	if c.cursor != 0 {
+		t.Fatalf("cursor after ctrl+left = %d, want beginning", c.cursor)
+	}
+}
+
+func TestComposerCtrlShiftArrowKeySelectsByWordFromModifiers(t *testing.T) {
+	c := newComposer()
+	c.SetValue("hello world")
+
+	handled, cmd := c.UpdateKey(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl | tea.ModShift})
+	if !handled || cmd != nil {
+		t.Fatalf("UpdateKey handled/cmd = %v/%v, want true/nil", handled, cmd)
+	}
+	if got := c.SelectedText(); got != "world" {
+		t.Fatalf("SelectedText() = %q, want world", got)
 	}
 }

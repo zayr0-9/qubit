@@ -1,9 +1,10 @@
 import type { CodexSseParseResult } from "./types.js";
+import { createRetryableCodexHttpError } from "./responsesRetry.js";
 
 export async function parseCodexSseResponse(response: Response): Promise<CodexSseParseResult> {
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(`Codex Responses request failed: HTTP ${response.status}${text ? ` ${safeErrorText(text)}` : ""}`);
+    throw createRetryableCodexHttpError(response.status, text);
   }
   return parseCodexSseText(text);
 }
@@ -117,8 +118,4 @@ function dedupeToolCalls(toolCalls: NonNullable<CodexSseParseResult["toolCalls"]
     result.push(call);
   }
   return result;
-}
-
-function safeErrorText(text: string): string {
-  return text.slice(0, 1200);
 }

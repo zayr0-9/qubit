@@ -67,7 +67,7 @@ func (m model) renderMainArea(height int) string {
 	bodyHeight := max(0, height-lipgloss.Height(header))
 	chatContent := m.viewport.View()
 	if m.mode == modeSessionPicker {
-		chatContent = m.renderSessionPicker()
+		chatContent = m.renderSessionPicker(bodyHeight)
 	} else if m.mode == modeKeyPicker {
 		chatContent = m.renderKeyPicker()
 	} else if m.mode == modeKeyEntry {
@@ -294,32 +294,52 @@ func descriptionSuffix(description string) string {
 	}
 	return "  " + description
 }
-
-func (m model) renderSessionPicker() string {
+func (m model) renderSessionPicker(height int) string {
 	sessions := m.sessionPickerSessions()
 	if len(sessions) == 0 {
 		return mutedSt.Render("no sessions yet · esc then /new to create one")
 	}
+	panelWidth := max(20, m.width-4)
+	contentWidth := max(20, panelWidth-4)
+
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Foreground(accent).Bold(true).Render("sessions") + "\n")
 	b.WriteString(mutedSt.Render("↑/↓ select · enter activate · esc close") + "\n\n")
-	for i, session := range sessions {
-		active := " "
-		if session.ID == m.session {
-			active = "•"
-		}
-		line := fmt.Sprintf("%s %-28s %3d msgs", active, oneLine(session.Title, 28), session.MessageCount)
+
+	maxRows := max(1, height-5)
+	window := visibleListWindow(len(sessions), m.sessionCursor, maxRows)
+	if window.HasAbove {
+		b.WriteString(mutedSt.Render(fmt.Sprintf("  more above (%d)", window.Start)))
+		b.WriteString("\n")
+	}
+	for i := window.Start; i < window.End; i++ {
+		session := sessions[i]
+		line := renderSessionPickerRow(session, session.ID == m.session, contentWidth)
 		if i == m.sessionCursor {
 			line = selectSt.Render("  " + line)
 		} else {
 			line = mutedSt.Render("  ") + line
 		}
 		b.WriteString(line)
-		if i < len(sessions)-1 {
+		if i < window.End-1 || window.HasBelow {
 			b.WriteString("\n")
 		}
 	}
-	return lipgloss.NewStyle().Padding(1, 2).Width(max(20, m.width-4)).Render(b.String())
+	if window.HasBelow {
+		b.WriteString(mutedSt.Render(fmt.Sprintf("  more below (%d)", len(sessions)-window.End)))
+	}
+	return lipgloss.NewStyle().Padding(1, 2).Width(panelWidth).Render(b.String())
+}
+
+func renderSessionPickerRow(session sessionInfo, active bool, width int) string {
+	activeMarker := " "
+	if active {
+		activeMarker = "•"
+	}
+	suffix := fmt.Sprintf(" %3d msgs", session.MessageCount)
+	titleWidth := max(8, width-lipgloss.Width(activeMarker)-lipgloss.Width(suffix)-1)
+	title := oneLine(session.Title, titleWidth)
+	return fmt.Sprintf("%s %-*s%s", activeMarker, titleWidth, title, suffix)
 }
 
 func (m *model) refreshViewport() {

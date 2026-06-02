@@ -21,7 +21,7 @@ var slashCommands = []slashCommand{
 	{Name: "codex-logout", Usage: "/codex-logout", Description: "Sign out of ChatGPT Codex", NeedsArg: false},
 	{Name: "theme", Usage: "/theme", Description: "Customize terminal colors", NeedsArg: false, OpensOnSelect: true},
 	{Name: "rename", Usage: "/rename <title>", Description: "Rename current session", NeedsArg: true},
-	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal Shift+Enter newline setup", NeedsArg: false},
+	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal keyboard and appearance setup", NeedsArg: false},
 	{Name: "permission", Usage: "/permission <plan|edit>", Description: "Set plan/edit mode", NeedsArg: true},
 	{Name: "permission-test", Usage: "/permission-test", Description: "Open a demo permission modal", NeedsArg: false},
 	{Name: "help", Usage: "/help", Description: "Show command help", NeedsArg: false},
@@ -170,16 +170,13 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.status = "renaming session"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.rename", "sessionId": m.session, "title": arg})
 	case "terminal-setup", "terminal", "setup":
-		m.busy = true
-		m.status = "updating terminal settings"
-		m.appendSystem("Updating Windows Terminal settings for Shift+Enter newline support...")
-		return m, runTerminalSetup()
+		return m.openTerminalSetupConfirm(), nil
 	case "permission", "permissions", "perm":
 		return m.setPermissionMode(arg)
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title] - fork current chat from here or a previous user message\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal Shift+Enter newline setup\n/permission <plan|edit> - switch between plan and edit mode\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title] - fork current chat from here or a previous user message\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal keyboard and appearance setup\n/permission <plan|edit> - switch between plan and edit mode\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
@@ -414,6 +411,7 @@ func slashCommandModalOptions(commands []slashCommand) []modalOption {
 }
 
 func terminalSetupResultMessage(result terminalSetupResult) string {
+	appearance := "Appearance defaults: JetBrains Mono, size 11, line height 1.05, padding 8."
 	if result.Err != nil {
 		return strings.TrimSpace(fmt.Sprintf(`Windows Terminal setup failed
 
@@ -421,7 +419,24 @@ func terminalSetupResultMessage(result terminalSetupResult) string {
 
 Qubit still supports Ctrl+J for a reliable newline.
 
-Manual settings snippet:
+%s
+
+Manual settings snippets:
+
+profiles.defaults:
+
+`+"```json"+`
+{
+  "font": {
+    "face": "JetBrains Mono",
+    "size": 11,
+    "lineHeight": 1.05
+  },
+  "padding": "8"
+}
+`+"```"+`
+
+Shift+Enter action:
 
 `+"```json"+`
 {
@@ -431,12 +446,12 @@ Manual settings snippet:
   },
   "keys": "shift+enter"
 }
-`+"```", result.Err))
+`+"```", result.Err, appearance))
 	}
 
 	if !result.Changed {
-		return fmt.Sprintf("Windows Terminal Shift+Enter setup is already installed.\n\nSettings: %s\n\nRestart Qubit/Windows Terminal if Shift+Enter still does not work. Ctrl+J remains available as a reliable newline.", result.SettingsPath)
+		return fmt.Sprintf("Windows Terminal keyboard and appearance setup is already installed.\n\n%s\nSettings: %s\n\nRestart Qubit/Windows Terminal if Shift+Enter or font changes do not appear. Ctrl+J remains available as a reliable newline.", appearance, result.SettingsPath)
 	}
 
-	return fmt.Sprintf("Windows Terminal Shift+Enter setup installed.\n\nSettings: %s\nBackup: %s\n\nFully close and reopen Windows Terminal, then restart Qubit. Shift+Enter should insert a newline. Ctrl+J remains available as a reliable fallback.", result.SettingsPath, result.BackupPath)
+	return fmt.Sprintf("Windows Terminal keyboard and appearance setup installed.\n\n%s\nSettings: %s\nBackup: %s\n\nFully close and reopen Windows Terminal, then restart Qubit. Shift+Enter should insert a newline; font changes require the font to be installed on Windows. Ctrl+J remains available as a reliable fallback.", appearance, result.SettingsPath, result.BackupPath)
 }

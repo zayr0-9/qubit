@@ -13,6 +13,20 @@ import (
 
 const windowsTerminalShiftEnterInput = "\x1b[13;2u"
 
+const (
+	defaultTerminalFontFace   = "JetBrains Mono"
+	defaultTerminalFontSize   = 11.0
+	defaultTerminalLineHeight = 1.05
+	defaultTerminalPadding    = "8"
+)
+
+type terminalSetupOptions struct {
+	FontFace   string
+	FontSize   float64
+	LineHeight float64
+	Padding    string
+}
+
 type terminalSetupResult struct {
 	SettingsPath string
 	BackupPath   string
@@ -22,11 +36,20 @@ type terminalSetupResult struct {
 
 func runTerminalSetup() tea.Cmd {
 	return func() tea.Msg {
-		return terminalSetupResultMsg(patchWindowsTerminalSettings())
+		return terminalSetupResultMsg(patchWindowsTerminalSettings(defaultTerminalSetupOptions()))
 	}
 }
 
-func patchWindowsTerminalSettings() terminalSetupResult {
+func defaultTerminalSetupOptions() terminalSetupOptions {
+	return terminalSetupOptions{
+		FontFace:   defaultTerminalFontFace,
+		FontSize:   defaultTerminalFontSize,
+		LineHeight: defaultTerminalLineHeight,
+		Padding:    defaultTerminalPadding,
+	}
+}
+
+func patchWindowsTerminalSettings(options terminalSetupOptions) terminalSetupResult {
 	settingsPath, err := findWindowsTerminalSettingsPath()
 	if err != nil {
 		return terminalSetupResult{Err: err}
@@ -46,6 +69,9 @@ func patchWindowsTerminalSettings() terminalSetupResult {
 	updatedActions, actionsChanged := upsertShiftEnterBinding(settings["actions"])
 	if actionsChanged {
 		settings["actions"] = updatedActions
+		changed = true
+	}
+	if upsertWindowsTerminalAppearance(settings, options) {
 		changed = true
 	}
 
@@ -147,4 +173,114 @@ func isShiftEnterSendInputBinding(binding map[string]any) bool {
 	action, _ := command["action"].(string)
 	input, _ := command["input"].(string)
 	return action == "sendInput" && input == windowsTerminalShiftEnterInput
+}
+
+func upsertWindowsTerminalAppearance(settings map[string]any, options terminalSetupOptions) bool {
+	options = normalizeTerminalSetupOptions(options)
+	profiles, ok := settings["profiles"].(map[string]any)
+	if !ok {
+		profiles = map[string]any{}
+		settings["profiles"] = profiles
+	}
+
+	defaults, ok := profiles["defaults"].(map[string]any)
+	if !ok {
+		defaults = map[string]any{}
+		profiles["defaults"] = defaults
+	}
+
+	changed := false
+	font, ok := defaults["font"].(map[string]any)
+	if !ok {
+		font = map[string]any{}
+		defaults["font"] = font
+		changed = true
+	}
+	if setStringValue(font, "face", options.FontFace) {
+		changed = true
+	}
+	if setNumberValue(font, "size", options.FontSize) {
+		changed = true
+	}
+	if setNumberValue(font, "lineHeight", options.LineHeight) {
+		changed = true
+	}
+	if setStringValue(defaults, "padding", options.Padding) {
+		changed = true
+	}
+	return changed
+}
+
+func normalizeTerminalSetupOptions(options terminalSetupOptions) terminalSetupOptions {
+	if strings.TrimSpace(options.FontFace) == "" {
+		options.FontFace = defaultTerminalFontFace
+	} else {
+		options.FontFace = strings.TrimSpace(options.FontFace)
+	}
+	if options.FontSize <= 0 {
+		options.FontSize = defaultTerminalFontSize
+	}
+	if options.LineHeight <= 0 {
+		options.LineHeight = defaultTerminalLineHeight
+	}
+	if strings.TrimSpace(options.Padding) == "" {
+		options.Padding = defaultTerminalPadding
+	} else {
+		options.Padding = strings.TrimSpace(options.Padding)
+	}
+	return options
+}
+
+func setStringValue(target map[string]any, key string, value string) bool {
+	if current, ok := target[key].(string); ok && current == value {
+		return false
+	}
+	target[key] = value
+	return true
+}
+
+func setNumberValue(target map[string]any, key string, value float64) bool {
+	if current, ok := terminalNumberValue(target[key]); ok && current == value {
+		return false
+	}
+	target[key] = value
+	return true
+}
+
+func terminalNumberValue(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case int:
+		return float64(v), true
+	case json.Number:
+		parsed, err := v.Float64()
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func (m model) openTerminalSetupConfirm() model {
+	m.previousMode = m.mode
+	m.mode = modeModal
+	m.modal = &modalState{
+		ID:          "terminal_setup",
+		Kind:        modalKindConfirm,
+		Title:       "Update Windows Terminal settings?",
+		Description: "Qubit will edit Windows Terminal settings.json after creating a timestamped backup. This installs Shift+Enter newline support and appearance defaults.",
+		Fields: []modalField{
+			{Label: "Font", Value: "JetBrains Mono, size 11"},
+			{Label: "Line height", Value: "1.05"},
+			{Label: "Padding", Value: "8"},
+			{Label: "Keyboard", Value: "Shift+Enter sends newline input"},
+		},
+		Actions: []modalAction{
+			{ID: "cancel", Label: "Cancel", Default: true},
+			{ID: "run", Label: "Apply", Style: "primary"},
+		},
+		Payload: map[string]any{"action": "terminal.setup"},
+	}
+	m.status = "confirm terminal setup"
+	return m
 }

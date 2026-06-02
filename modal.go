@@ -269,6 +269,16 @@ func (m model) resolveModalAction(actionID string) (tea.Model, tea.Cmd) {
 			m.status = "deleting api key"
 			return m, sendRuntime(m.runtime, map[string]any{"type": "key.delete", "provider": provider, "alias": alias})
 		}
+		if modal.Payload["action"] == "terminal.setup" {
+			if actionID != "run" {
+				m.status = "terminal setup cancelled"
+				return m, nil
+			}
+			m.busy = true
+			m.status = "updating terminal settings"
+			m.appendSystem("Updating Windows Terminal settings for Shift+Enter newline support and Qubit appearance defaults...")
+			return m, runTerminalSetup()
+		}
 	}
 
 	if modal.Payload["action"] == "model.select" {

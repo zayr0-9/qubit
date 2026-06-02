@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1838,9 +1839,40 @@ func TestSessionPickerHidesForks(t *testing.T) {
 		t.Fatalf("sessionCursor = %d, want active root session index 1", m.sessionCursor)
 	}
 
-	rendered := m.renderSessionPicker()
+	rendered := m.renderSessionPicker(20)
 	if strings.Contains(rendered, "Fork") || strings.Contains(rendered, "sess_fork") || strings.Contains(rendered, "↳") {
 		t.Fatalf("rendered session picker includes fork:\n%s", rendered)
+	}
+}
+
+func TestSessionPickerUsesAvailableTerminalWidth(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 120
+	m.session = "sess_long"
+	title := "A very long planning session title that should use the available terminal width"
+	m.sessions = []sessionInfo{{ID: "sess_long", Title: title, MessageCount: 12}}
+
+	rendered := plainText(m.renderSessionPicker(20))
+
+	if !strings.Contains(rendered, "available terminal width") {
+		t.Fatalf("session picker did not use wide terminal title space:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "A very long planning sessio…") {
+		t.Fatalf("session picker appears truncated at old fixed width:\n%s", rendered)
+	}
+}
+
+func TestSessionPickerRowTruncatesForNarrowWidth(t *testing.T) {
+	row := renderSessionPickerRow(sessionInfo{ID: "sess", Title: "A very long session title", MessageCount: 123}, false, 24)
+
+	if !strings.Contains(row, "…") {
+		t.Fatalf("row = %q, want truncated title", row)
+	}
+	if got := len([]rune(row)); got > 24 {
+		t.Fatalf("row width = %d, want <= 24; row=%q", got, row)
+	}
+	if !strings.Contains(row, "123 msgs") {
+		t.Fatalf("row = %q, want message count suffix", row)
 	}
 }
 
@@ -1864,4 +1896,164 @@ func TestSessionPickerActivateUsesVisibleNonForkSession(t *testing.T) {
 	}
 	payload := runSendCommand(t, cmd, stdin)
 	assertPayload(t, payload, "session.activate", "sess_root_2")
+}
+
+type recordingNotifier struct {
+	payloads []notificationPayload
+}
+
+func (n *recordingNotifier) Notify(payload notificationPayload) error {
+	n.payloads = append(n.payloads, payload)
+	return nil
+}
+
+func runNotificationCommand(t *testing.T, cmd tea.Cmd) notificationResultMsg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("notification command is nil")
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		results := make(chan tea.Msg, len(batch))
+		for _, child := range batch {
+			if child == nil {
+				continue
+			}
+			go func(child tea.Cmd) {
+				results <- child()
+			}(child)
+		}
+		deadline := time.After(250 * time.Millisecond)
+		for range batch {
+			select {
+			case childMsg := <-results:
+				if result, ok := childMsg.(notificationResultMsg); ok {
+					return result
+				}
+			case <-deadline:
+				t.Fatal("timed out waiting for notification command")
+			}
+		}
+		t.Fatal("batch did not include notification command")
+	}
+	result, ok := msg.(notificationResultMsg)
+	if !ok {
+		t.Fatalf("message = %#v, want notificationResultMsg", msg)
+	}
+	return result
+}
+
+func TestFakeStreamCompletionNotifiesAfterRunFinished(t *testing.T) {
+	n := &recordingNotifier{}
+	m := model{
+		notifier:              n,
+		busy:                  true,
+		activeRunID:           "run_1",
+		title:                 "Demo chat",
+		streaming:             true,
+		streamingMessageIndex: 0,
+		streamingFullContent:  "ok",
+		streamingFinished:     true,
+		streamingFinishStatus: "completed",
+		messages:              []chatMessage{{Role: "assistant", Content: ""}},
+	}
+
+	updated, cmd := m.updateFakeStreamTick()
+	got := updated.(model)
+	runNotificationCommand(t, cmd)
+
+	if got.streaming || got.busy || got.activeRunID != "" {
+		t.Fatalf("run state = streaming:%v busy:%v activeRunID:%q, want complete", got.streaming, got.busy, got.activeRunID)
+	}
+	if len(n.payloads) != 1 {
+		t.Fatalf("notifications = %#v, want one", n.payloads)
+	}
+	if n.payloads[0].Kind != notificationKindRunComplete || n.payloads[0].Title != "Qubit" {
+		t.Fatalf("notification = %#v, want run-complete Qubit notification", n.payloads[0])
+	}
+	if !strings.Contains(n.payloads[0].Body, "Demo chat") {
+		t.Fatalf("notification body = %q, want session title", n.payloads[0].Body)
+	}
+}
+
+func TestRunFinishedDuringStreamDoesNotNotifyBeforeStreamDrains(t *testing.T) {
+	n := &recordingNotifier{}
+	m := model{
+		notifier:              n,
+		busy:                  true,
+		activeRunID:           "run_1",
+		streaming:             true,
+		streamingMessageIndex: 0,
+		streamingFullContent:  "hello",
+		messages:              []chatMessage{{Role: "assistant", Content: ""}},
+	}
+
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_1", Status: "completed"})
+	got := updated.(model)
+
+	if !got.streaming || !got.streamingFinished {
+		t.Fatalf("streaming state = streaming:%v finished:%v, want run_finished recorded while stream continues", got.streaming, got.streamingFinished)
+	}
+	if len(n.payloads) != 0 {
+		t.Fatalf("notifications = %#v, want none before stream drains", n.payloads)
+	}
+}
+
+func TestRunFinishedWithoutStreamingNotifiesImmediately(t *testing.T) {
+	rt, _ := newTestRuntime(t)
+	n := &recordingNotifier{}
+	m := model{
+		notifier:    n,
+		runtime:     rt,
+		busy:        true,
+		activeRunID: "run_1",
+		title:       "Direct finish",
+		messages:    []chatMessage{{Role: "user", Content: "hello"}},
+	}
+
+	updated, cmd := m.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_1", Status: "completed"})
+	got := updated.(model)
+	runNotificationCommand(t, cmd)
+
+	if got.busy || got.activeRunID != "" {
+		t.Fatalf("run state = busy:%v activeRunID:%q, want complete", got.busy, got.activeRunID)
+	}
+	if len(n.payloads) != 1 || n.payloads[0].Kind != notificationKindRunComplete {
+		t.Fatalf("notifications = %#v, want one run-complete notification", n.payloads)
+	}
+}
+
+func TestRunFinishedStaleRunDoesNotNotify(t *testing.T) {
+	n := &recordingNotifier{}
+	m := model{notifier: n, busy: true, activeRunID: "run_current"}
+
+	_, cmd := m.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_old", Status: "completed"})
+
+	if cmd == nil {
+		t.Fatal("stale run_finished returned nil command, want waitRuntimeEvent command")
+	}
+	if len(n.payloads) != 0 {
+		t.Fatalf("notifications = %#v, want none for stale run_finished", n.payloads)
+	}
+}
+
+func TestSessionPickerUsesVisibleListWindow(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.sessionCursor = 10
+	for i := 0; i < 20; i++ {
+		m.sessions = append(m.sessions, sessionInfo{ID: fmt.Sprintf("sess_%02d", i), Title: fmt.Sprintf("Session %02d", i), MessageCount: i})
+	}
+
+	rendered := plainText(m.renderSessionPicker(10))
+
+	if !strings.Contains(rendered, "Session 10") {
+		t.Fatalf("rendered session picker does not include cursor row:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "more above") || !strings.Contains(rendered, "more below") {
+		t.Fatalf("rendered session picker missing scroll hints:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Session 00") || strings.Contains(rendered, "Session 19") {
+		t.Fatalf("rendered session picker did not window long list:\n%s", rendered)
+	}
 }

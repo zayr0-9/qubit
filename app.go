@@ -45,6 +45,7 @@ func initialModel(rt *runtimeClient) model {
 		autoScroll:           true,
 		inputHistory:         inputHistory,
 		inputHistoryIndex:    len(inputHistory),
+		notifier:             newPlatformNotifier(),
 		runtime:              rt,
 	}
 }
@@ -87,6 +88,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, inputCursorPulseTick()
 	case toolCallRevealTickMsg:
 		return m.updateToolCallRevealTick()
+	case notificationResultMsg:
+		return m.updateNotificationResult(msg), nil
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -410,6 +413,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		if finishStatus == "" {
 			finishStatus = "ready"
 		}
+		var notifyCmd tea.Cmd
 		if m.streaming {
 			m.streamingFinished = true
 			m.streamingFinishStatus = finishStatus
@@ -419,8 +423,9 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 			m.status = finishStatus
 			m.lastRunStartedSession = ""
 			m.activeRunID = ""
+			notifyCmd = m.runCompleteNotificationCmd(finishStatus)
 		}
-		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}))
+		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}), notifyCmd)
 	case "session.list":
 		m.applySessionList(ev)
 	case "session.tree":
@@ -601,15 +606,33 @@ func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {
 	finishStatus := m.streamingFinishStatus
 	finished := m.streamingFinished
 	m.clearFakeStream()
+	var notifyCmd tea.Cmd
 	if finished {
 		m.busy = false
 		m.status = fallback(finishStatus, "ready")
 		m.lastRunStartedSession = ""
 		m.activeRunID = ""
+		notifyCmd = m.runCompleteNotificationCmd(finishStatus)
 	} else {
 		m.status = "responding"
 	}
-	return m, nil
+	return m, notifyCmd
+}
+
+func (m model) runCompleteNotificationCmd(status string) tea.Cmd {
+	if !shouldNotifyRunComplete(status) {
+		return nil
+	}
+	return notifyRunCompleteCmd(m.notifier, fallback(m.title, m.currentSessionTitle()))
+}
+
+func (m model) updateNotificationResult(msg notificationResultMsg) model {
+	if msg.err == nil {
+		return m
+	}
+	m.err = msg.err.Error()
+	m.status = "notification failed"
+	return m
 }
 
 func (m *model) abortActiveRun() {

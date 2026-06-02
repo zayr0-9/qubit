@@ -297,6 +297,10 @@ type terminalSetupResultMsg terminalSetupResult
 type fakeStreamTickMsg struct{}
 type toolCallRevealTickMsg struct{}
 type inputCursorPulseMsg struct{}
+type notificationResultMsg struct {
+	kind notificationKind
+	err  error
+}
 
 type runtimeClient struct {
 	cmd       *exec.Cmd
@@ -370,5 +374,6 @@ type model struct {
 	streamingFinished     bool
 	streamingFinishStatus string
 
-	runtime *runtimeClient
+	notifier notifier
+	runtime  *runtimeClient
 }

@@ -359,6 +359,10 @@ func (c *composerModel) MoveToEnd(selecting bool) {
 }
 
 func (c *composerModel) UpdateKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+	if handled, cmd := c.updateModifiedNavigationKey(msg); handled {
+		return true, cmd
+	}
+
 	switch msg.String() {
 	case "ctrl+a":
 		c.SelectAll()
@@ -448,6 +452,39 @@ func (c *composerModel) UpdateKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return true, nil
 	}
 	return false, nil
+}
+
+func (c *composerModel) updateModifiedNavigationKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+	key := msg.Key()
+	switch key.Code {
+	case tea.KeyLeft:
+		if hasCtrlShift(key.Mod) {
+			c.MoveWordLeft(true)
+			return true, nil
+		}
+		if hasCtrl(key.Mod) {
+			c.MoveWordLeft(false)
+			return true, nil
+		}
+	case tea.KeyRight:
+		if hasCtrlShift(key.Mod) {
+			c.MoveWordRight(true)
+			return true, nil
+		}
+		if hasCtrl(key.Mod) {
+			c.MoveWordRight(false)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func hasCtrl(mod tea.KeyMod) bool {
+	return mod&tea.ModCtrl != 0
+}
+
+func hasCtrlShift(mod tea.KeyMod) bool {
+	return mod&tea.ModCtrl != 0 && mod&tea.ModShift != 0
 }
 
 func (c *composerModel) InsertNewline() {
