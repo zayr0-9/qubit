@@ -30,7 +30,7 @@ func (m *model) applyForkTree(ev runtimeEvent) {
 	state.Preview = viewport.New()
 	state.PreviewWidth = 0
 	state.PreviewHeight = 0
-	state.buildForkTreeLayout(m.session)
+	state.buildForkTreeLayout(fallback(ev.SessionID, m.session))
 	m.forkTree = state
 	m.busy = false
 	m.status = "fork tree"
@@ -192,7 +192,12 @@ func (m model) updateForkTree(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
-		m.mode = modeChat
+		if m.previousMode == modeSessionPicker {
+			m.mode = modeSessionPicker
+		} else {
+			m.mode = modeChat
+		}
+		m.previousMode = modeChat
 		m.status = "ready"
 		return m, nil
 	case "up":

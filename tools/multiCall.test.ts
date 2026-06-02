@@ -2,7 +2,7 @@ import * as assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import { type AnyToolDefinition } from '@hyper-labs/hyper-router'
 import { editFileTool } from './editFile.js'
-import { createMultiCallTool, multiCall, setMultiCallPermissionRequester } from './multiCall.js'
+import { createMultiCallTool, multiCall, setMultiCallLifecycleEmitter, setMultiCallPermissionRequester } from './multiCall.js'
 import { readFileTool } from './readFile.js'
 import { cleanupTempDir, createTempDir, readFileInDir, writeFileInDir } from './testHelpers.js'
 
@@ -17,6 +17,7 @@ describe('multiCall', () => {
 
   after(async () => {
     setMultiCallPermissionRequester(undefined)
+    setMultiCallLifecycleEmitter(undefined)
     await cleanupTempDir(tmpDir)
   })
 
@@ -63,6 +64,37 @@ describe('multiCall', () => {
     assert.equal(result.results[0].permission, 'allowed')
     assert.equal(await readFileInDir(tmpDir, 'edit.txt'), 'new')
     assert.equal((result.results[1].data as any).content, 'new')
+  })
+
+  it('emits synthetic lifecycle events for nested tools', async () => {
+    await writeFileInDir(tmpDir, 'lifecycle.txt', 'old')
+    setMultiCallPermissionRequester(async () => ({ type: 'allow' }))
+    const events: any[] = []
+    setMultiCallLifecycleEmitter(event => { events.push(event) })
+
+    const result = await multiCall(
+      [
+        { tool: 'editFile', args: { path: 'lifecycle.txt', cwd: tmpDir, operation: 'replace_first', searchPattern: 'old', replacement: 'new' } },
+        { tool: 'readFile', args: { path: 'lifecycle.txt', cwd: tmpDir } },
+      ],
+      {},
+      tools,
+      { sessionId: 'sess', step: 3, runId: 'run_1' }
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(events.length, 4)
+    assert.equal(events[0].type, 'start')
+    assert.equal(events[0].toolName, 'editFile')
+    assert.equal(events[0].step, 4)
+    assert.equal(events[1].type, 'finish')
+    assert.equal(events[1].toolName, 'editFile')
+    assert.equal(events[1].status, 'completed')
+    assert.equal(events[1].result.data.success, true)
+    assert.equal(events[2].toolName, 'readFile')
+    assert.equal(events[2].step, 5)
+    assert.equal(events[3].status, 'completed')
+    setMultiCallLifecycleEmitter(undefined)
   })
 
   it('stops when permission is denied by default', async () => {

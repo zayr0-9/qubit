@@ -426,3 +426,62 @@ func TestForkTreeUpDownJumpsBetweenForksFromDescendants(t *testing.T) {
 		t.Fatalf("up selected %q, want nearest node on original branch row", got)
 	}
 }
+
+func TestSessionPickerTOpensForkTreeForSelectedSession(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.mode = modeSessionPicker
+	m.session = "sess_current"
+	m.sessionCursor = 1
+	m.sessions = []sessionInfo{
+		{ID: "sess_one", Title: "One"},
+		{ID: "sess_two", Title: "Two"},
+	}
+
+	updated, cmd := m.updateSessionPicker(tea.KeyPressMsg{Text: "t", Code: 't'})
+	got := updated.(model)
+
+	if got.mode != modeForkTree {
+		t.Fatalf("mode = %v, want modeForkTree", got.mode)
+	}
+	if got.previousMode != modeSessionPicker {
+		t.Fatalf("previousMode = %v, want modeSessionPicker", got.previousMode)
+	}
+	if !got.busy {
+		t.Fatal("busy = false, want true while loading fork tree")
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.tree", "sess_two")
+
+	got.applyForkTree(runtimeEvent{Type: "session.tree", SessionID: "sess_two", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_one", SessionID: "sess_one", SessionTitle: "One", MessageRole: "user", MessageContent: "one"},
+		{ID: "sess_two", SessionID: "sess_two", SessionTitle: "Two", MessageRole: "user", MessageContent: "two"},
+	}})
+	if selected := got.forkTree.Nodes[got.forkTree.Selected].SessionID; selected != "sess_two" {
+		t.Fatalf("selected tree session = %q, want sess_two", selected)
+	}
+}
+
+func TestForkTreeEscapeReturnsToSessionPickerWhenOpenedFromSessions(t *testing.T) {
+	m := initialModel(nil)
+	m.mode = modeForkTree
+	m.previousMode = modeSessionPicker
+	m.status = "fork tree"
+
+	updated, cmd := m.updateForkTree(tea.KeyPressMsg{Code: tea.KeyEsc})
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatal("esc returned command, want nil")
+	}
+	if got.mode != modeSessionPicker {
+		t.Fatalf("mode = %v, want modeSessionPicker", got.mode)
+	}
+	if got.previousMode != modeChat {
+		t.Fatalf("previousMode = %v, want reset to modeChat", got.previousMode)
+	}
+	if got.status != "ready" {
+		t.Fatalf("status = %q, want ready", got.status)
+	}
+}

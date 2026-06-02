@@ -1886,7 +1886,7 @@ func TestSessionPickerHidesForks(t *testing.T) {
 
 func TestSessionPickerUsesAvailableTerminalWidth(t *testing.T) {
 	m := initialModel(nil)
-	m.width = 120
+	m.width = 160
 	m.session = "sess_long"
 	title := "A very long planning session title that should use the available terminal width"
 	m.sessions = []sessionInfo{{ID: "sess_long", Title: title, MessageCount: 12}}
@@ -1902,16 +1902,37 @@ func TestSessionPickerUsesAvailableTerminalWidth(t *testing.T) {
 }
 
 func TestSessionPickerRowTruncatesForNarrowWidth(t *testing.T) {
-	row := renderSessionPickerRow(sessionInfo{ID: "sess", Title: "A very long session title", MessageCount: 123}, false, 24)
+	row := renderSessionPickerRow(sessionInfo{ID: "sess", Title: "A very long session title", CreatedAt: "2026-06-02T13:45:00Z", MessageCount: 123}, false, 24, 20, 2)
 
 	if !strings.Contains(row, "…") {
-		t.Fatalf("row = %q, want truncated title", row)
+		t.Fatalf("row = %q, want truncated title or stats", row)
 	}
 	if got := len([]rune(row)); got > 24 {
 		t.Fatalf("row width = %d, want <= 24; row=%q", got, row)
 	}
-	if !strings.Contains(row, "123 msgs") {
-		t.Fatalf("row = %q, want message count suffix", row)
+}
+
+func TestSessionPickerShowsMessageAndForkStats(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.session = "sess_root"
+	m.sessions = []sessionInfo{
+		{ID: "sess_root", Title: "Root session", CreatedAt: "2026-06-02T13:45:00Z", MessageCount: 12345},
+		{ID: "sess_fork", Title: "Fork", ForkedFromSessionID: "sess_root"},
+		{ID: "sess_grandfork", Title: "Grandfork", ForkedFromSessionID: "sess_fork"},
+	}
+
+	rendered := plainText(m.renderSessionPicker(20))
+
+	if !regexp.MustCompile(`02-06 [0-9]{2}:45`).MatchString(rendered) || !strings.Contains(rendered, "12345 msgs · 2 forks") {
+		t.Fatalf("rendered session picker missing date/message/fork stats:\n%s", rendered)
+	}
+
+	for _, line := range strings.Split(rendered, "\n") {
+		line = regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(line, "")
+		if strings.Contains(line, "Root session") && strings.Contains(line, "msgs") && strings.Contains(line, "forks") && len([]rune(line)) > m.width {
+			t.Fatalf("session row width = %d, want <= %d; row=%q", len([]rune(line)), m.width, line)
+		}
 	}
 }
 
@@ -2211,5 +2232,28 @@ func TestPlanViewEventAddsUiOnlyMarkdownMessage(t *testing.T) {
 	viewport := plainText(got.viewport.View())
 	if !strings.Contains(viewport, "Plan: launch") || !strings.Contains(viewport, "Launch") || !strings.Contains(viewport, "step") {
 		t.Fatalf("viewport = %q, want rendered plan markdown", viewport)
+	}
+}
+
+func TestSessionPickerSortsByMostRecentActivity(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_old"
+	m.sessions = []sessionInfo{
+		{ID: "sess_new_created", Title: "New created", CreatedAt: "2026-01-03T00:00:00Z", UpdatedAt: "2026-01-03T00:00:00Z"},
+		{ID: "sess_recent_activity", Title: "Recent activity", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-04T00:00:00Z"},
+		{ID: "sess_fallback", Title: "Fallback created", CreatedAt: "2026-01-02T00:00:00Z"},
+		{ID: "sess_fork", Title: "Fork", CreatedAt: "2026-01-05T00:00:00Z", UpdatedAt: "2026-01-05T00:00:00Z", ForkedFromSessionID: "sess_recent_activity"},
+	}
+
+	visible := m.sessionPickerSessions()
+
+	if len(visible) != 3 {
+		t.Fatalf("visible sessions = %d, want 3", len(visible))
+	}
+	want := []string{"sess_recent_activity", "sess_new_created", "sess_fallback"}
+	for i, id := range want {
+		if visible[i].ID != id {
+			t.Fatalf("visible[%d] = %q, want %q; visible=%#v", i, visible[i].ID, id, visible)
+		}
 	}
 }

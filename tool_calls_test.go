@@ -107,6 +107,47 @@ func TestToolGroupExpandedRenderingAndMouseToggle(t *testing.T) {
 	}
 }
 
+func TestToolGroupHitboxAlignsWithRenderedRow(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "read"}}
+	m.applyToolCallFinish(runtimeEvent{
+		Type:       "tool.call.finish",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "read_1",
+		ToolName:   "readFile",
+		Status:     "completed",
+		Args:       map[string]any{"path": "agent.md"},
+		Result:     map[string]any{"totalLines": float64(42), "contentPreview": "# Qubit Agent Guide"},
+	})
+
+	if len(m.toolHitboxes) == 0 {
+		t.Fatal("tool hitbox missing")
+	}
+	visibleToolLine := -1
+	for i, line := range strings.Split(plainText(m.viewport.View()), "\n") {
+		if strings.Contains(line, "Read 1 file") {
+			visibleToolLine = i + m.viewport.YOffset()
+			break
+		}
+	}
+	if visibleToolLine < 0 {
+		t.Fatalf("viewport = %q, want rendered tool row", plainText(m.viewport.View()))
+	}
+	if got := m.toolHitboxes[0].StartY; got != visibleToolLine {
+		t.Fatalf("hitbox startY = %d, rendered row = %d", got, visibleToolLine)
+	}
+
+	updated := m.updateMouseClick(tea.MouseClickMsg{X: 2, Y: m.chatTopY + visibleToolLine - m.viewport.YOffset(), Button: tea.MouseLeft}).(model)
+	if !updated.messages[1].ToolGroup.Expanded {
+		t.Fatal("click on visible tool row did not expand group")
+	}
+}
+
 func TestApplySessionMessagesCanLoadPersistedToolGroups(t *testing.T) {
 	m := initialModel(nil)
 	m.session = "sess_1"
@@ -319,5 +360,24 @@ func TestEditToolGroupRendersInlineDiff(t *testing.T) {
 	viewport := plainText(m.viewport.View())
 	if !strings.Contains(viewport, "Edited 1 file") || !strings.Contains(viewport, "-12") || !strings.Contains(viewport, "+12") || !strings.Contains(viewport, "old line") || !strings.Contains(viewport, "new line") {
 		t.Fatalf("viewport = %q, want inline edit diff with line numbers", viewport)
+	}
+}
+
+func TestMultiCallSyntheticEditEventsRenderAsInlineDiff(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "multi edit"}}
+
+	m.applyToolCallStart(runtimeEvent{Type: "tool.call.start", SessionID: "sess_1", Step: 2, ToolCallID: "multi-edit-1", ToolName: "editFile", Status: "running", Args: map[string]any{"path": "a.go", "operation": "replace_first", "searchPreview": "old a", "replacementPreview": "new a"}})
+	m.applyToolCallFinish(runtimeEvent{Type: "tool.call.finish", SessionID: "sess_1", Step: 2, ToolCallID: "multi-edit-1", ToolName: "editFile", Status: "completed", Args: map[string]any{"path": "a.go", "operation": "replace_first", "searchPreview": "old a", "replacementPreview": "new a"}, Result: map[string]any{"lineInfo": map[string]any{"oldStartLine": float64(3), "newStartLine": float64(3)}}})
+	m.applyToolCallStart(runtimeEvent{Type: "tool.call.start", SessionID: "sess_1", Step: 3, ToolCallID: "multi-edit-2", ToolName: "editFile", Status: "running", Args: map[string]any{"path": "b.go", "operation": "replace_first", "searchPreview": "old b", "replacementPreview": "new b"}})
+	m.applyToolCallFinish(runtimeEvent{Type: "tool.call.finish", SessionID: "sess_1", Step: 3, ToolCallID: "multi-edit-2", ToolName: "editFile", Status: "completed", Args: map[string]any{"path": "b.go", "operation": "replace_first", "searchPreview": "old b", "replacementPreview": "new b"}, Result: map[string]any{"lineInfo": map[string]any{"oldStartLine": float64(7), "newStartLine": float64(7)}}})
+
+	viewport := plainText(m.viewport.View())
+	if !strings.Contains(viewport, "old a") || !strings.Contains(viewport, "new a") || !strings.Contains(viewport, "old b") || !strings.Contains(viewport, "new b") {
+		t.Fatalf("viewport = %q, want synthetic nested edit events rendered as inline diffs", viewport)
 	}
 }

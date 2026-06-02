@@ -40,12 +40,43 @@ export interface MultiCallPermissionRequest {
   metadata?: Record<string, unknown>
 }
 
+export interface MultiCallLifecycleEventBase {
+  sessionId: string
+  step: number
+  toolCallId: string
+  toolName: string
+  args: unknown
+  metadata?: Record<string, unknown>
+}
+
+export interface MultiCallLifecycleStartEvent extends MultiCallLifecycleEventBase {
+  type: 'start'
+  status: 'running'
+  startedAt: string
+}
+
+export interface MultiCallLifecycleFinishEvent extends MultiCallLifecycleEventBase {
+  type: 'finish'
+  status: 'completed' | 'failed' | 'denied' | 'unknown_tool'
+  result: { ok: boolean; data?: unknown; output?: unknown; error?: string }
+  startedAt?: string
+  finishedAt: string
+  durationMs?: number
+}
+
+export type MultiCallLifecycleEvent = MultiCallLifecycleStartEvent | MultiCallLifecycleFinishEvent
 export type MultiCallPermissionRequester = (request: MultiCallPermissionRequest) => Promise<ToolPermissionDecision>
+export type MultiCallLifecycleEmitter = (event: MultiCallLifecycleEvent) => Promise<void> | void
 
 let permissionRequester: MultiCallPermissionRequester | undefined
+let lifecycleEmitter: MultiCallLifecycleEmitter | undefined
 
 export function setMultiCallPermissionRequester(requester: MultiCallPermissionRequester | undefined): void {
   permissionRequester = requester
+}
+
+export function setMultiCallLifecycleEmitter(emitter: MultiCallLifecycleEmitter | undefined): void {
+  lifecycleEmitter = emitter
 }
 
 function defaultContext(): AgentContext {
@@ -72,6 +103,24 @@ function toolResultData(result: { data?: unknown; output?: unknown }): unknown {
 
 function failureResult(index: number, tool: string, error: string, permission?: MultiCallItemResult['permission']): MultiCallItemResult {
   return { index, tool, ok: false, error, ...(permission ? { permission } : {}) }
+}
+
+function lifecycleStatusForResult(result: { ok: boolean; data?: unknown; output?: unknown; error?: string }): MultiCallLifecycleFinishEvent['status'] {
+  if (!result.ok) {
+    const error = String(result.error || '').toLowerCase()
+    if (error.includes('permission denied')) return 'denied'
+    if (error.includes('unknown tool')) return 'unknown_tool'
+    return 'failed'
+  }
+  const payload = result.data !== undefined ? result.data : result.output
+  if (payload && typeof payload === 'object' && !Array.isArray(payload) && (payload as Record<string, unknown>).success === false) {
+    return 'failed'
+  }
+  return 'completed'
+}
+
+async function emitLifecycle(event: MultiCallLifecycleEvent): Promise<void> {
+  await lifecycleEmitter?.(event)
 }
 
 async function ensureNestedToolPermission(
@@ -122,6 +171,11 @@ export async function multiCall(
     context.signal?.throwIfAborted()
 
     const toolName = typeof call?.tool === 'string' ? call.tool : ''
+    const nestedToolCallId = toolName ? makeNestedToolCallId(context, index, toolName) : makeNestedToolCallId(context, index, 'tool')
+    const nestedStep = context.step + index + 1
+    const nestedMetadata = { parentTool: 'multiCall', parentStep: context.step, callIndex: index }
+    let startedAt = ''
+
     if (!toolName) {
       results.push(failureResult(index, '', 'tool is required for each multiCall item'))
     } else if (toolName === 'multiCall') {
@@ -139,10 +193,24 @@ export async function multiCall(
           results.push(failureResult(index, toolName, permission.error, permission.permission))
         } else {
           try {
-            const result = await tool.execute(args, context)
+            startedAt = new Date().toISOString()
+            await emitLifecycle({
+              type: 'start',
+              sessionId: context.sessionId,
+              step: nestedStep,
+              toolCallId: nestedToolCallId,
+              toolName,
+              status: 'running',
+              args,
+              startedAt,
+              metadata: nestedMetadata,
+            })
+
+            const startMs = Date.now()
+            const result = await tool.execute(args, { ...context, step: nestedStep })
             const resultAny = result as { ok: boolean; data?: unknown; output?: unknown; error?: string }
             context.signal?.throwIfAborted()
-            results.push({
+            const itemResult: MultiCallItemResult = {
               index,
               tool: toolName,
               ok: Boolean(resultAny.ok),
@@ -150,9 +218,40 @@ export async function multiCall(
               ...(resultAny.data !== undefined ? { data: resultAny.data } : {}),
               ...(resultAny.output !== undefined ? { output: resultAny.output } : {}),
               ...(resultAny.error ? { error: resultAny.error } : {}),
+            }
+            results.push(itemResult)
+            await emitLifecycle({
+              type: 'finish',
+              sessionId: context.sessionId,
+              step: nestedStep,
+              toolCallId: nestedToolCallId,
+              toolName,
+              status: lifecycleStatusForResult(resultAny),
+              args,
+              result: resultAny,
+              startedAt,
+              finishedAt: new Date().toISOString(),
+              durationMs: Math.max(0, Date.now() - startMs),
+              metadata: nestedMetadata,
             })
           } catch (error) {
-            results.push(failureResult(index, toolName, error instanceof Error ? error.message : String(error), permission.permission))
+            const errorResult = { ok: false, error: error instanceof Error ? error.message : String(error) }
+            results.push(failureResult(index, toolName, errorResult.error, permission.permission))
+            if (startedAt) {
+              await emitLifecycle({
+                type: 'finish',
+                sessionId: context.sessionId,
+                step: nestedStep,
+                toolCallId: nestedToolCallId,
+                toolName,
+                status: 'failed',
+                args,
+                result: errorResult,
+                startedAt,
+                finishedAt: new Date().toISOString(),
+                metadata: nestedMetadata,
+              })
+            }
           }
         }
       }

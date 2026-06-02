@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -45,6 +46,8 @@ func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "d", "delete":
 		return m.openSessionDeleteConfirm()
+	case "t", "T":
+		return m.openSelectedSessionForkTree()
 	case "enter":
 		sessions := m.sessionPickerSessions()
 		if len(sessions) == 0 {
@@ -67,6 +70,15 @@ func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.activate", "sessionId": session.ID})
 	}
 	return m, nil
+}
+
+func (m model) openSelectedSessionForkTree() (tea.Model, tea.Cmd) {
+	sessions := m.sessionPickerSessions()
+	if len(sessions) == 0 {
+		return m, nil
+	}
+	m.ensureSessionCursorInBounds()
+	return m.openForkTreeForSession(sessions[m.sessionCursor].ID)
 }
 
 func (m model) openSessionDeleteConfirm() (tea.Model, tea.Cmd) {
@@ -104,7 +116,22 @@ func (m model) sessionPickerSessions() []sessionInfo {
 			visible = append(visible, session)
 		}
 	}
+	sort.SliceStable(visible, func(i, j int) bool {
+		left := sessionRecentTimestamp(visible[i])
+		right := sessionRecentTimestamp(visible[j])
+		if left == right {
+			return false
+		}
+		return left > right
+	})
 	return visible
+}
+
+func sessionRecentTimestamp(session sessionInfo) string {
+	if strings.TrimSpace(session.UpdatedAt) != "" {
+		return session.UpdatedAt
+	}
+	return session.CreatedAt
 }
 
 func (m *model) ensureSessionCursor() {
@@ -425,11 +452,20 @@ func (m model) systemPromptMode() string {
 }
 
 func (m model) openForkTree() (tea.Model, tea.Cmd) {
+	return m.openForkTreeForSession(m.session)
+}
+
+func (m model) openForkTreeForSession(sessionID string) (tea.Model, tea.Cmd) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = m.session
+	}
+	m.previousMode = m.mode
 	m.mode = modeForkTree
 	m.forkTree = newForkTreeState()
 	m.busy = true
 	m.status = "loading fork tree"
-	return m, sendRuntime(m.runtime, map[string]any{"type": "session.tree", "sessionId": m.session})
+	return m, sendRuntime(m.runtime, map[string]any{"type": "session.tree", "sessionId": sessionID})
 }
 
 func (m model) showSlashPalette() bool {

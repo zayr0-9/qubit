@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -176,7 +177,7 @@ func (m model) renderFooter() string {
 	} else if m.mode == modeKeyPicker {
 		footer = "up/down choose key | enter activate | a add | d delete | esc close"
 	} else if m.mode == modeSessionPicker {
-		footer = "up/down choose session | enter switch | d delete | esc close"
+		footer = "up/down choose session | enter switch | t tree | d delete | esc close"
 	} else if m.showSlashPalette() {
 		footer = "up/down choose command | enter/tab complete"
 	} else if m.showFileMentionPalette() {
@@ -312,10 +313,12 @@ func (m model) renderSessionPicker(height int) string {
 	}
 	panelWidth := max(20, m.width-4)
 	contentWidth := max(20, panelWidth-4)
+	rowWidth := max(20, contentWidth-2)
+	statsWidth := m.sessionPickerStatsWidth(sessions)
 
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Foreground(accent).Bold(true).Render("sessions") + "\n")
-	b.WriteString(mutedSt.Render("↑/↓ select · enter activate · d delete · esc close") + "\n\n")
+	b.WriteString(mutedSt.Render("↑/↓ select · enter activate · t tree · d delete · esc close") + "\n\n")
 
 	maxRows := max(1, height-5)
 	window := visibleListWindow(len(sessions), m.sessionCursor, maxRows)
@@ -325,7 +328,7 @@ func (m model) renderSessionPicker(height int) string {
 	}
 	for i := window.Start; i < window.End; i++ {
 		session := sessions[i]
-		line := renderSessionPickerRow(session, session.ID == m.session, contentWidth)
+		line := renderSessionPickerRow(session, session.ID == m.session, rowWidth, statsWidth, m.sessionForkCount(session.ID))
 		if i == m.sessionCursor {
 			line = selectSt.Render("  " + line)
 		} else {
@@ -342,15 +345,90 @@ func (m model) renderSessionPicker(height int) string {
 	return lipgloss.NewStyle().Padding(1, 2).Width(panelWidth).Render(b.String())
 }
 
-func renderSessionPickerRow(session sessionInfo, active bool, width int) string {
+func (m model) sessionPickerStatsWidth(sessions []sessionInfo) int {
+	statsWidth := lipgloss.Width(formatSessionPickerStats(sessionInfo{}, 0))
+	for _, session := range sessions {
+		statsWidth = max(statsWidth, lipgloss.Width(formatSessionPickerStats(session, m.sessionForkCount(session.ID))))
+	}
+	return statsWidth
+}
+
+func (m model) sessionForkCount(sessionID string) int {
+	if sessionID == "" {
+		return 0
+	}
+	count := 0
+	for _, session := range m.sessions {
+		if session.ForkedFromSessionID == "" || session.ID == sessionID {
+			continue
+		}
+		seen := map[string]bool{session.ID: true}
+		for parentID := session.ForkedFromSessionID; parentID != ""; parentID = m.parentSessionID(parentID) {
+			if parentID == sessionID {
+				count++
+				break
+			}
+			if seen[parentID] {
+				break
+			}
+			seen[parentID] = true
+		}
+	}
+	return count
+}
+
+func (m model) parentSessionID(sessionID string) string {
+	for _, session := range m.sessions {
+		if session.ID == sessionID {
+			return session.ForkedFromSessionID
+		}
+	}
+	return ""
+}
+
+func renderSessionPickerRow(session sessionInfo, active bool, width int, statsWidth int, forkCount int) string {
 	activeMarker := " "
 	if active {
 		activeMarker = "•"
 	}
-	suffix := fmt.Sprintf(" %3d msgs", session.MessageCount)
-	titleWidth := max(8, width-lipgloss.Width(activeMarker)-lipgloss.Width(suffix)-1)
+	stats := formatSessionPickerStats(session, forkCount)
+	statsWidth = max(statsWidth, lipgloss.Width(stats))
+	titleWidth := max(1, width-lipgloss.Width(activeMarker)-statsWidth-3)
+	if titleWidth+lipgloss.Width(activeMarker)+statsWidth+3 > width {
+		stats = oneLine(stats, max(1, width-lipgloss.Width(activeMarker)-4))
+		statsWidth = lipgloss.Width(stats)
+		titleWidth = max(1, width-lipgloss.Width(activeMarker)-statsWidth-3)
+	}
 	title := oneLine(session.Title, titleWidth)
-	return fmt.Sprintf("%s %-*s%s", activeMarker, titleWidth, title, suffix)
+	return fmt.Sprintf("%s %-*s %*s", activeMarker, titleWidth, title, statsWidth, stats)
+}
+
+func formatSessionPickerStats(session sessionInfo, forkCount int) string {
+	parts := []string{formatSessionCreatedAt(session.CreatedAt)}
+	parts = append(parts, fmt.Sprintf("%d %s", session.MessageCount, pluralLabel(session.MessageCount, "msg", "msgs")))
+	parts = append(parts, fmt.Sprintf("%d %s", forkCount, pluralLabel(forkCount, "fork", "forks")))
+	return strings.Join(parts, " · ")
+}
+
+func formatSessionCreatedAt(createdAt string) string {
+	createdAt = strings.TrimSpace(createdAt)
+	if createdAt == "" {
+		return "-- -- --:--"
+	}
+	if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+		return t.Local().Format("02-01 15:04")
+	}
+	if t, err := time.Parse("2006-01-02T15:04:05", createdAt); err == nil {
+		return t.Local().Format("02-01 15:04")
+	}
+	return oneLine(createdAt, len("02-01 15:04"))
+}
+
+func pluralLabel(count int, singular string, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }
 func (m *model) refreshViewport() {
 	previousYOffset := m.viewport.YOffset()
@@ -362,7 +440,7 @@ func (m *model) refreshViewport() {
 		if i > 0 {
 			separator := messageSeparator(m.messages[i-1], message)
 			b.WriteString(separator)
-			contentLine += strings.Count(separator, "\n")
+			contentLine += separatorBlankLineCount(separator)
 		}
 		if message.Role == "view" {
 			rendered := m.renderViewMessage(message)
@@ -419,6 +497,15 @@ func messageSeparator(prev chatMessage, next chatMessage) string {
 	}
 	return "\n\n"
 }
+
+func separatorBlankLineCount(separator string) int {
+	newlines := strings.Count(separator, "\n")
+	if newlines == 0 {
+		return 0
+	}
+	return newlines - 1
+}
+
 func (m *model) renderViewMessage(message chatMessage) string {
 	title := fallback(message.Title, "View")
 	if message.ViewType == "plan" && !strings.HasPrefix(title, "Plan:") {

@@ -17,7 +17,7 @@ import { AmazonBedrockVAIProvider } from "@hyper-labs/hyper-router/providers/ama
 import { OpenRouterProvider } from "@hyper-labs/hyper-router/providers/openrouter";
 import { qubitTools } from "./tools/index.js";
 import { setPlanViewEmitter } from "./tools/planMd.js";
-import { setMultiCallPermissionRequester } from "./tools/multiCall.js";
+import { setMultiCallLifecycleEmitter, setMultiCallPermissionRequester } from "./tools/multiCall.js";
 import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
 import { CodexResponsesProvider, QubitCodexTokenStore, cancelCodexLogin, startCodexLogin } from "./runtime/codex/index.js";
 
@@ -222,6 +222,34 @@ async function requestToolPermission(request) {
 }
 
 setMultiCallPermissionRequester(requestToolPermission);
+setMultiCallLifecycleEmitter((event) => {
+  if (event.type === "start") {
+    write({
+      type: "tool.call.start",
+      sessionId: event.sessionId,
+      step: event.step,
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      status: event.status,
+      args: summarizeToolArgs(event.toolName, event.args),
+      startedAt: event.startedAt,
+    });
+    return;
+  }
+  write({
+    type: "tool.call.finish",
+    sessionId: event.sessionId,
+    step: event.step,
+    toolCallId: event.toolCallId,
+    toolName: event.toolName,
+    status: event.status,
+    args: summarizeToolArgs(event.toolName, event.args),
+    result: summarizeToolResult(event.toolName, event.result),
+    startedAt: event.startedAt,
+    finishedAt: event.finishedAt,
+    durationMs: event.durationMs,
+  });
+});
 setPlanViewEmitter((event) => {
   write({ type: "plan.view", name: event.name, path: event.path, cwd: event.cwd, content: event.content });
 });
@@ -578,6 +606,8 @@ async function handleLine(line) {
   if (runtimeState.promptMode !== promptMode) {
     runtimeState = await createRuntimeState(promptMode);
   }
+
+  await touchSession(runSessionId, { title: titleFromInput(request.input) });
 
   activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, controller, runtime: runtimeState.runtime });
   write({ type: "run_started", id: request.id, runId, sessionId: runSessionId });
@@ -1515,7 +1545,6 @@ async function activateSession(sessionId) {
   if (!session) return null;
   sessionIndex.activeSessionId = session.id;
   activeSessionId = session.id;
-  session.updatedAt = new Date().toISOString();
   await saveSessionIndex();
   return session;
 }
@@ -1571,8 +1600,21 @@ function writeSessionList(id) {
     id,
     sessionId: activeSessionId,
     sessionTitle: activeSession()?.title,
-    sessions: sessionIndex.sessions,
+    sessions: sessionsByRecentActivity(sessionIndex.sessions),
   });
+}
+
+function sessionsByRecentActivity(sessions = []) {
+  return [...sessions].sort((a, b) => {
+    const left = sessionRecentTimestamp(a);
+    const right = sessionRecentTimestamp(b);
+    if (left !== right) return right.localeCompare(left);
+    return String(a?.id || "").localeCompare(String(b?.id || ""));
+  });
+}
+
+function sessionRecentTimestamp(session) {
+  return session?.updatedAt || session?.createdAt || "";
 }
 
 async function loadSessionMessages(sessionId) {

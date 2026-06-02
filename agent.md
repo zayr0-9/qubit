@@ -237,6 +237,7 @@ view.MouseMode = tea.MouseModeCellMotion
 - Reusable modal selector lists use `modalState.Options` plus `OptionCursor`: Up/down moves the option cursor, left/right or tab/shift+tab moves actions, Enter resolves the selected action, and Esc cancels selector-style modals.
 - `/models` should open the model selector modal backed by runtime `model.list`/`model.use` protocol data, not a hardcoded demo list. The model selector offers Use now and Set default actions; Set default sends `model.use` with `persistDefault: true` so the runtime stores a non-secret per-provider default model in `.qubit/settings.json`.
 - `/sessions` should open an interactive picker, not print repeated lists into chat.
+- Session picker results should be sorted by most recent activity (`updatedAt`, falling back to `createdAt`) so chats with new messages surface above merely newer-created sessions.
 - Session switching should happen through the interactive picker. Do not add a `/use` slash command unless explicitly requested.
 - `/terminal-setup` should patch Windows Terminal `settings.json` to map Shift+Enter to an enhanced keyboard escape sequence. It must be idempotent, create a timestamped backup before writing, remove the common misplaced top-level `command`/`keys` mistake, and report the settings/backup paths. It must not change non-Windows Terminal files.
 - Session picker should support:
