@@ -3,18 +3,32 @@ import { isJwtExpiringSoon, metadataFromAuth } from "./jwt.js";
 
 const refreshLocks = new WeakMap<object, Promise<CodexAuthJson>>();
 
+export interface CodexAuthContext {
+  accessToken: string;
+  accountId?: string;
+}
+
 export async function getCodexBearerToken(options: CodexAuthOptions): Promise<string> {
+  return (await getCodexAuthContext(options)).accessToken;
+}
+
+export async function getCodexAuthContext(options: CodexAuthOptions): Promise<CodexAuthContext> {
   const direct = process.env.CODEX_ACCESS_TOKEN;
-  if (direct?.trim()) return direct.trim();
+  if (direct?.trim()) {
+    return {
+      accessToken: direct.trim(),
+      ...(process.env.CODEX_ACCOUNT_ID?.trim() ? { accountId: process.env.CODEX_ACCOUNT_ID.trim() } : {}),
+    };
+  }
 
   const auth = await options.tokenStore.load();
   if (!auth?.tokens?.access_token) {
     throw new Error("Codex is not signed in. Run /codex-login to sign in with ChatGPT Codex.");
   }
-  if (!isJwtExpiringSoon(auth.tokens.access_token)) return auth.tokens.access_token;
+  if (!isJwtExpiringSoon(auth.tokens.access_token)) return authContextFromAuth(auth);
   const refreshed = await refreshCodexAuth(options, auth);
   if (!refreshed.tokens?.access_token) throw new Error("Codex token refresh did not return an access token. Run /codex-login again.");
-  return refreshed.tokens.access_token;
+  return authContextFromAuth(refreshed);
 }
 
 export async function refreshCodexAuth(options: CodexAuthOptions, currentAuth?: CodexAuthJson): Promise<CodexAuthJson> {
@@ -55,4 +69,13 @@ async function doRefreshCodexAuth(options: CodexAuthOptions, currentAuth?: Codex
   };
   await options.tokenStore.save(refreshed, metadataFromAuth(refreshed));
   return refreshed;
+}
+
+function authContextFromAuth(auth: CodexAuthJson): CodexAuthContext {
+  const accessToken = auth.tokens?.access_token;
+  if (!accessToken) throw new Error("Codex auth is missing an access token. Run /codex-login again.");
+  return {
+    accessToken,
+    ...(auth.tokens?.account_id ? { accountId: auth.tokens.account_id } : {}),
+  };
 }

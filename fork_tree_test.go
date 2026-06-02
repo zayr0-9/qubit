@@ -365,8 +365,8 @@ func TestRenderForkTreeModalSelectedNodeUsesThemeColor(t *testing.T) {
 	}})
 
 	rendered := m.renderForkTreeModal(20)
-	if !strings.Contains(rendered, "38;2;57;255;20") {
-		t.Fatalf("rendered tree = %q, want selected node to use neon theme green", rendered)
+	if !strings.Contains(rendered, "38;2;184;247;177") {
+		t.Fatalf("rendered tree = %q, want selected node to use neon theme pastel green", rendered)
 	}
 }
 

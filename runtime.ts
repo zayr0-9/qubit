@@ -131,6 +131,7 @@ const providerModelLists = {
   ],
   codex: [
     { id: "gpt-5.5", name: "GPT-5.5", description: "ChatGPT/Codex backend frontier model", maxContext: 400000 },
+    { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", description: "Current ChatGPT Codex coding model", maxContext: 400000 },
     { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", description: "ChatGPT Codex Responses backend via local OAuth", maxContext: 400000 },
     { id: "gpt-5.2", name: "GPT-5.2", description: "ChatGPT/Codex backend model", maxContext: 400000 },
   ],
@@ -203,11 +204,22 @@ const storage = new QubitSqliteStorage({
 
 const pendingPermissions = new Map();
 const activeRuns = new Map();
+function targetForRunEvent(event) {
+  if (event?.runId && activeRuns.has(event.runId)) return activeRuns.get(event.runId).target || null;
+  if (event?.sessionId) {
+    const active = [...activeRuns.values()].find((run) => run.sessionId === event.sessionId);
+    if (active?.target) return active.target;
+  }
+  return null;
+}
+
 async function requestToolPermission(request) {
+  const target = targetForRunEvent(request);
   write({
     type: "tool.permission.request",
     id: request.id,
     sessionId: request.sessionId,
+    runId: request.runId,
     step: request.step,
     toolCallId: request.toolCallId,
     toolName: request.toolName,
@@ -215,7 +227,7 @@ async function requestToolPermission(request) {
     description: request.description,
     inputSchema: request.inputSchema,
     metadata: request.metadata,
-  });
+  }, target);
 
   return await new Promise((resolve) => {
     pendingPermissions.set(request.id, resolve);
@@ -224,22 +236,25 @@ async function requestToolPermission(request) {
 
 setMultiCallPermissionRequester(requestToolPermission);
 setMultiCallLifecycleEmitter((event) => {
+  const target = targetForRunEvent(event);
   if (event.type === "start") {
     write({
       type: "tool.call.start",
       sessionId: event.sessionId,
+      runId: event.runId,
       step: event.step,
       toolCallId: event.toolCallId,
       toolName: event.toolName,
       status: event.status,
       args: summarizeToolArgs(event.toolName, event.args),
       startedAt: event.startedAt,
-    });
+    }, target);
     return;
   }
   write({
     type: "tool.call.finish",
     sessionId: event.sessionId,
+    runId: event.runId,
     step: event.step,
     toolCallId: event.toolCallId,
     toolName: event.toolName,
@@ -249,7 +264,7 @@ setMultiCallLifecycleEmitter((event) => {
     startedAt: event.startedAt,
     finishedAt: event.finishedAt,
     durationMs: event.durationMs,
-  });
+  }, target);
 });
 setPlanViewEmitter((event) => {
   write({ type: "plan.view", name: event.name, path: event.path, cwd: event.cwd, content: event.content });
@@ -259,21 +274,25 @@ const hooks = {
   requestToolPermission,
 
   async onToolCallStart(event) {
+    const target = targetForRunEvent(event);
     write({
       type: "tool.call.start",
       sessionId: event.sessionId,
+      runId: event.runId,
       step: event.step,
       toolCallId: event.toolCallId,
       toolName: event.toolName,
       status: event.status,
       args: summarizeToolArgs(event.toolName, event.args),
       startedAt: event.startedAt,
-    });
+    }, target);
   },
   async onToolCallFinish(event) {
+    const target = targetForRunEvent(event);
     write({
       type: "tool.call.finish",
       sessionId: event.sessionId,
+      runId: event.runId,
       step: event.step,
       toolCallId: event.toolCallId,
       toolName: event.toolName,
@@ -283,7 +302,7 @@ const hooks = {
       startedAt: event.startedAt,
       finishedAt: event.finishedAt,
       durationMs: event.durationMs,
-    });
+    }, target);
   },
 };
 
@@ -687,7 +706,8 @@ async function handleLine(line) {
 
   await touchSession(runSessionId, { title: titleFromInput(request.input) });
 
-  activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, controller, runtime: runtimeState.runtime });
+  const responseTarget = currentResponseTarget;
+  activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, controller, runtime: runtimeState.runtime, target: responseTarget });
   write({ type: "run_started", id: request.id, runId, sessionId: runSessionId });
 
   try {
@@ -1478,7 +1498,7 @@ function summarizeToolResult(toolName, result) {
     case "todoMd":
       return { ...summary, ...compactObject(data, ["id", "created", "exists", "success", "message", "modifiedAt"]), contentPreview: previewText(data.content, 1600) };
     case "planMd":
-      return { ...summary, ...compactObject(data, ["name", "created", "exists", "success", "message", "modifiedAt", "viewed"]), planCount: Array.isArray(payload) ? payload.length : undefined, contentPreview: data.viewed ? undefined : previewText(data.content, 1600) };
+      return { ...summary, ...compactObject(data, ["name", "created", "exists", "success", "message", "modifiedAt", "viewed", "path"]), planCount: Array.isArray(payload) ? payload.length : undefined, contentPreview: data.viewed ? undefined : previewText(data.content, 1600) };
     default:
       return { ...summary, payloadPreview: previewText(payload, 2400) };
   }
@@ -1665,6 +1685,7 @@ async function touchSession(sessionId, patch = {}) {
   session.model = model;
   session.updatedAt = new Date().toISOString();
   sessionIndex.activeSessionId = session.id;
+  activeSessionId = session.id;
   await saveSessionIndex();
 }
 
@@ -1697,7 +1718,40 @@ function sessionRecentTimestamp(session) {
 
 async function loadSessionMessages(sessionId) {
   const messages = await storage.loadMessages(sessionId);
-  return transcriptMessagesForUi(messages);
+  const uiMessages = transcriptMessagesForUi(messages);
+  return await hydratePlanViewMessages(uiMessages);
+}
+
+async function hydratePlanViewMessages(uiMessages) {
+  const hydrated = [];
+  for (const message of uiMessages) {
+    hydrated.push(message);
+    const planViews = await planViewMessagesForToolGroup(message?.toolGroup);
+    for (const planView of planViews) {
+      hydrated.push(planView);
+    }
+  }
+  return hydrated;
+}
+
+async function planViewMessagesForToolGroup(group) {
+  if (!group || group.name !== "planMd" || !Array.isArray(group.calls)) return [];
+  const views = [];
+  for (const call of group.calls) {
+    const args = plainObject(call.args);
+    const result = plainObject(call.result);
+    if (args.action !== "view" || result.viewed !== true) continue;
+    const name = String(result.name || args.name || "plan");
+    const planPath = String(result.path || join(dataDir, "plans", `${name}.md`));
+    let content = "";
+    try {
+      content = await readFile(planPath, "utf8");
+    } catch {
+      content = `Plan \"${name}\" was viewed, but ${planPath} could not be loaded.`;
+    }
+    views.push({ role: "view", viewType: "plan", title: `Plan: ${name}`, path: planPath, content });
+  }
+  return views;
 }
 
 async function buildSessionTreeNodes(focalSessionId = activeSessionId) {
@@ -2262,4 +2316,3 @@ function titleFromInput(input) {
   if (!cleaned) return "New chat";
   return cleaned.length > 48 ? `${cleaned.slice(0, 45)}...` : cleaned;
 }
-

@@ -17,12 +17,18 @@ const ID_DICTIONARY = [
 
 export type TodoAction = 'create' | 'list' | 'read' | 'edit'
 
+export interface TodoEdit {
+  search: string
+  replacement: string
+}
+
 export interface TodoToolArgs {
   action: TodoAction
   name?: string
   content?: string
   search?: string
   replacement?: string
+  edits?: TodoEdit[]
   cwd?: string
 }
 
@@ -42,10 +48,19 @@ export interface CreateTodoResult {
   content: string
 }
 
+export interface TodoEditResultItem {
+  search: string
+  replacement: string
+  matched: number
+  success: boolean
+  message: string
+}
+
 export interface EditTodoResult {
   success: boolean
   message: string
   content: string | null
+  results?: TodoEditResultItem[]
 }
 
 function normalizeId(rawId: string): string {
@@ -148,31 +163,67 @@ export async function createTodoList(content: string, cwd?: string): Promise<Cre
 
 export async function editTodoList(
   name: string,
-  search: string,
-  replacement: string,
+  edits: TodoEdit[],
   cwd?: string
 ): Promise<EditTodoResult> {
   const sanitized = normalizeId(name)
   const dir = await getTodoStorageDirectory(cwd)
   const filePath = path.join(dir, `${sanitized}${TODO_FILE_EXTENSION}`)
 
+  if (!Array.isArray(edits) || edits.length === 0) {
+    throw new Error('edits must be a non-empty array for edit action')
+  }
+
+  for (const [index, edit] of edits.entries()) {
+    if (!edit || edit.search === undefined || edit.search === '') {
+      throw new Error(`edits[${index}].search is required for edit action`)
+    }
+    if (edit.replacement === undefined) {
+      throw new Error(`edits[${index}].replacement is required for edit action`)
+    }
+  }
+
   try {
     const content = await fs.promises.readFile(filePath, 'utf8')
-    const lines = content.split('\n')
-    let matchCount = 0
-    const newLines = lines.map(line => {
-      if (!line.includes(search)) return line
-      matchCount += 1
-      return replacement
-    })
+    let lines = content.split('\n')
+    const results: TodoEditResultItem[] = []
 
-    if (matchCount === 0) {
-      return { success: false, message: `No lines found containing "${search}"`, content }
+    for (const edit of edits) {
+      let matchCount = 0
+      const nextLines = lines.map(line => {
+        if (!line.includes(edit.search)) return line
+        matchCount += 1
+        return edit.replacement
+      })
+      results.push({
+        search: edit.search,
+        replacement: edit.replacement,
+        matched: matchCount,
+        success: matchCount > 0,
+        message: matchCount > 0 ? `Updated ${matchCount} line(s)` : `No lines found containing "${edit.search}"`,
+      })
+      lines = nextLines
     }
 
-    const newContent = newLines.join('\n')
+    const failed = results.filter(result => !result.success)
+    if (failed.length > 0) {
+      return {
+        success: false,
+        message: `Failed ${failed.length} edit(s); no changes written`,
+        content,
+        results,
+      }
+    }
+
+    const totalMatches = results.reduce((sum, result) => sum + result.matched, 0)
+    const newContent = lines.join('\n')
     await fs.promises.writeFile(filePath, newContent, 'utf8')
-    return { success: true, message: 'Updated', content: newContent }
+    return {
+      success: true,
+      message: `Updated ${totalMatches} line(s) across ${results.length} edit(s)`,
+      content: newContent,
+      results,
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return { success: false, message: `Todo list "${sanitized}" does not exist`, content: null }
@@ -190,11 +241,16 @@ export async function runTodoTool(args: TodoToolArgs) {
     case 'read':
       if (!args.name) throw new Error('name is required for read action')
       return await readTodoList(args.name, args.cwd)
-    case 'edit':
+    case 'edit': {
       if (!args.name) throw new Error('name is required for edit action')
-      if (args.search === undefined || args.search === '') throw new Error('search is required for edit action')
-      if (args.replacement === undefined) throw new Error('replacement is required for edit action')
-      return await editTodoList(args.name, args.search, args.replacement, args.cwd)
+      const edits = args.edits ?? (
+        args.search !== undefined || args.replacement !== undefined
+          ? [{ search: args.search ?? '', replacement: args.replacement ?? '' }]
+          : undefined
+      )
+      if (!edits) throw new Error('edits or search/replacement is required for edit action')
+      return await editTodoList(args.name, edits, args.cwd)
+    }
     default: {
       const exhaustive: never = args.action
       throw new Error(`Unsupported todo action: ${String(exhaustive)}`)
@@ -211,8 +267,21 @@ export const todoMdTool = defineTool({
       action: { type: 'string', enum: ['create', 'list', 'read', 'edit'] },
       name: { type: 'string', description: 'Todo list name. Required for read/edit.' },
       content: { type: 'string', description: 'Markdown content for create action.' },
-      search: { type: 'string', description: 'Line substring to find for edit action.' },
-      replacement: { type: 'string', description: 'Full replacement line for edit action.' },
+      search: { type: 'string', description: 'Line substring to find for single edit action. Prefer edits for multiple changes.' },
+      replacement: { type: 'string', description: 'Full replacement line for single edit action. Prefer edits for multiple changes.' },
+      edits: {
+        type: 'array',
+        description: 'Multiple line replacement edits to apply in one call. Each edit finds lines containing search and replaces the full line with replacement. All edits must match or no changes are written.',
+        items: {
+          type: 'object',
+          properties: {
+            search: { type: 'string', description: 'Line substring to find.' },
+            replacement: { type: 'string', description: 'Full replacement line.' },
+          },
+          required: ['search', 'replacement'],
+          additionalProperties: false,
+        },
+      },
       cwd: { type: 'string', description: 'Workspace directory whose .qubit/todos directory stores todo files.' },
     },
     required: ['action'],

@@ -75,11 +75,11 @@ deleteFile
 
 todoMd
   Manages Markdown todo lists stored in the project .qubit/todos directory under the default/supplied workspace.
-  Supports create/list/read/edit actions, auto-generated lowercase dash names, line replacement edits, and permission mode is ask.
+  Supports create/list/read/edit actions, auto-generated lowercase dash names, single or batched line replacement edits, and permission mode is ask.
 
 planMd
   Manages Markdown plans stored in the project .qubit/plans directory under the default/supplied workspace.
-  Supports create/list/read/edit/view actions. The view action emits a UI-only plan.view event so Go can render the selected Markdown plan in chat without sending that content as a model message.
+  Supports create/list/read/edit/view actions. The view action emits a UI-only plan.view event so Go can render the selected Markdown plan in chat without sending that content as a model message. On transcript reload, stored planMd view tool calls are hydrated back into UI-only plan preview messages from the current plan file so viewed plans remain visible after restarting Qubit.
 ```
 
 ## Important Files
@@ -306,6 +306,7 @@ todoMd
   Store under .qubit/todos in cwdOrDefault(cwd).
   Use resolveRestrictedToolPath for the storage directory so native Windows and WSL workspaces stay scoped correctly.
   Keep generated names lowercase dash-separated and avoid adding old Electron/Ygg storage assumptions.
+  Edit action accepts legacy search/replacement for one line replacement, or an edits array for multiple replacements in one tool call. Batched edits are all-or-nothing: if any search misses, no changes are written.
 ```
 
 Defer these until separate decisions are made:

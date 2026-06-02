@@ -31,6 +31,7 @@ export interface MultiCallResult {
 export interface MultiCallPermissionRequest {
   id: string
   sessionId: string
+  runId?: string
   step: number
   toolCallId: string
   toolName: string
@@ -42,6 +43,7 @@ export interface MultiCallPermissionRequest {
 
 export interface MultiCallLifecycleEventBase {
   sessionId: string
+  runId?: string
   step: number
   toolCallId: string
   toolName: string
@@ -140,6 +142,7 @@ async function ensureNestedToolPermission(
   const decision = await permissionRequester({
     id: makePermissionId(context, index, tool.name),
     sessionId: context.sessionId,
+    runId: context.runId,
     step: context.step,
     toolCallId: makeNestedToolCallId(context, index, tool.name),
     toolName: tool.name,
@@ -197,6 +200,7 @@ export async function multiCall(
             await emitLifecycle({
               type: 'start',
               sessionId: context.sessionId,
+              runId: context.runId,
               step: nestedStep,
               toolCallId: nestedToolCallId,
               toolName,
@@ -223,6 +227,7 @@ export async function multiCall(
             await emitLifecycle({
               type: 'finish',
               sessionId: context.sessionId,
+              runId: context.runId,
               step: nestedStep,
               toolCallId: nestedToolCallId,
               toolName,
@@ -241,6 +246,7 @@ export async function multiCall(
               await emitLifecycle({
                 type: 'finish',
                 sessionId: context.sessionId,
+                runId: context.runId,
                 step: nestedStep,
                 toolCallId: nestedToolCallId,
                 toolName,

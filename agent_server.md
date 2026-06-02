@@ -94,7 +94,7 @@ tool.permission.request
 session.updated
 ```
 
-Broadcast events must include enough identifiers for clients to decide whether to show, badge, or ignore them:
+Broadcast/run-scoped request events must include enough identifiers for the runtime server and clients to route, show, badge, or ignore them:
 
 ```txt
 runId
@@ -102,6 +102,8 @@ sessionId
 branchId/nodeId when same-session branch streams exist
 request id where relevant
 ```
+
+Tool lifecycle and permission events are run-scoped. Hyper-router hook payloads (`requestToolPermission`, `onToolCallStart`, and `onToolCallFinish`) are run-aware and should include `runId` whenever emitted from an active agent run. Qubit routes these events by `runId` first, using `sessionId` only as a defensive fallback for older payloads.
 
 Do not broadcast local navigation responses such as `session.activated` and `session.messages`; that causes every TUI to mirror one TUI's selected session.
 
@@ -186,5 +188,5 @@ Automated tests should prefer focused Go tests for `runtime_client.go` address/a
 - Add protocol-level `clientId` only if needed for diagnostics; do not expose it in normal UI.
 - Make runtime server lifetime independent from the owner TUI.
 - Add active run snapshots so newly attached TUIs can discover in-flight runs.
-- Add per-run/per-stream routing with `runId`, `sessionId`, and branch IDs.
+- Continue hardening per-run/per-stream routing with `runId`, `sessionId`, and branch IDs.
 - Add robust broadcast policy for background stream events after single-TUI parallel stream state is implemented.

@@ -2257,3 +2257,68 @@ func TestSessionPickerSortsByMostRecentActivity(t *testing.T) {
 		}
 	}
 }
+
+func TestSubmitExistingSessionUpdatesLocalSessionRecency(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.autoNewSessionOnChat = false
+	m.session = "sess_old"
+	m.sessions = []sessionInfo{
+		{ID: "sess_newer", Title: "Newer", CreatedAt: "2026-01-03T00:00:00Z", UpdatedAt: "2026-01-03T00:00:00Z"},
+		{ID: "sess_old", Title: "Older", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z"},
+	}
+	m.composer.SetValue("new activity")
+
+	updated, cmd := m.submitInput()
+	got := updated.(model)
+	payload := runBatchSendCommand(t, cmd, stdin, "chat")
+	assertPayload(t, payload, "chat", "sess_old")
+
+	visible := got.sessionPickerSessions()
+	if len(visible) < 1 || visible[0].ID != "sess_old" {
+		t.Fatalf("visible sessions after submit = %#v, want sess_old first", visible)
+	}
+}
+
+func TestApplySessionListKeepsLocalNewerActivity(t *testing.T) {
+	m := initialModel(nil)
+	m.sessions = []sessionInfo{
+		{ID: "sess_active", Title: "Active", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-05T00:00:00Z"},
+		{ID: "sess_other", Title: "Other", CreatedAt: "2026-01-04T00:00:00Z", UpdatedAt: "2026-01-04T00:00:00Z"},
+	}
+
+	m.applySessionList(runtimeEvent{Type: "session.list", SessionID: "sess_active", Sessions: []sessionInfo{
+		{ID: "sess_other", Title: "Other", CreatedAt: "2026-01-04T00:00:00Z", UpdatedAt: "2026-01-04T00:00:00Z"},
+		{ID: "sess_active", Title: "Active", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z"},
+	}})
+
+	visible := m.sessionPickerSessions()
+	if len(visible) < 1 || visible[0].ID != "sess_active" {
+		t.Fatalf("visible sessions after stale list = %#v, want sess_active first", visible)
+	}
+}
+
+func TestApplySessionMessagesPreservesPersistedPlanViewMessages(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	m.applySessionMessages(runtimeEvent{Type: "session.messages", Messages: []chatMessage{
+		{Role: "tool", ToolGroup: &toolGroup{ID: "stored-tool-1-planMd-0", Name: "planMd", Step: 1, Calls: []toolCallUI{{ID: "plan-1", Name: "planMd", Step: 1, Status: "completed", Args: map[string]any{"action": "view", "name": "distribution-plan"}, Result: map[string]any{"viewed": true, "name": "distribution-plan", "path": "./.qubit/plans/distribution-plan.md"}}}}},
+		{Role: "view", ViewType: "plan", Title: "Plan: distribution-plan", Path: "./.qubit/plans/distribution-plan.md", Content: "# Distribution Plan\n\n- package"},
+	}})
+
+	if len(m.messages) != 2 {
+		t.Fatalf("messages = %#v, want tool row plus plan view", m.messages)
+	}
+	last := m.messages[1]
+	if last.Role != "view" || last.ViewType != "plan" || !strings.Contains(last.Content, "Distribution Plan") {
+		t.Fatalf("last message = %#v, want persisted plan view", last)
+	}
+	viewport := plainText(m.viewport.View())
+	if !strings.Contains(viewport, "Plan: distribution-plan") || !strings.Contains(viewport, "Distribution") || !strings.Contains(viewport, "package") {
+		t.Fatalf("viewport = %q, want persisted plan rendered", viewport)
+	}
+}

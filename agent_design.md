@@ -10,7 +10,7 @@ Qubit's terminal interface should stay clean, minimal, and calm. Prefer readable
 
 - Keep the terminal UI minimal by default.
 - Do not add boxes, panels, heavy borders, cards, framed sections, or decorative containers unless explicitly requested.
-- Do not add background colors unless explicitly requested for a specific UI element or state. The inline edit diff UI is an explicit exception: removed rows use red background and added rows use green background.
+- Do not add background colors unless explicitly requested for a specific UI element or state. Inline edit diffs should use red/green foreground text for removed/added lines, not colored row backgrounds.
 - Prefer foreground text color, bold text, dim text, symbols, and spacing for visual hierarchy.
 - Use color sparingly and consistently:
   - Accent color for active markers, prompts, titles, and important actions.

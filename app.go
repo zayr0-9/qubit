@@ -361,6 +361,7 @@ func (m model) submitInput() (tea.Model, tea.Cmd) {
 		m.autoNewSessionOnChat = false
 	} else {
 		payload["sessionId"] = m.session
+		m.touchLocalSessionActivity(m.session, titleFromInput(input))
 	}
 	return m, tea.Batch(sendRuntime(m.runtime, payload), m.spinner.Tick)
 }
@@ -413,6 +414,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		if ev.SessionID != "" {
 			m.session = ev.SessionID
 			m.lastRunStartedSession = ev.SessionID
+			m.touchLocalSessionActivity(ev.SessionID, m.latestUserMessageTitle())
 		}
 	case "assistant":
 		m.applyAssistantEvent(ev)
@@ -713,7 +715,7 @@ func fakeStreamChunkSize(totalRunes int, visibleRunes int) int {
 
 func (m *model) applySessionList(ev runtimeEvent) {
 	wasStreaming := m.streaming
-	m.sessions = ev.Sessions
+	m.sessions = mergeSessionActivity(m.sessions, ev.Sessions)
 	if ev.SessionID != "" && !(m.busy && m.lastRunStartedSession != "" && ev.SessionID != m.lastRunStartedSession) {
 		m.session = ev.SessionID
 	}
@@ -734,6 +736,80 @@ func (m *model) applySessionList(ev runtimeEvent) {
 		m.activeRunID = ""
 	}
 	m.ensureSessionCursor()
+}
+
+func (m *model) touchLocalSessionActivity(sessionID string, title string) {
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	for i := range m.sessions {
+		if m.sessions[i].ID != sessionID {
+			continue
+		}
+		if shouldReplaceSessionTitle(m.sessions[i].Title) && strings.TrimSpace(title) != "" {
+			m.sessions[i].Title = title
+		}
+		if m.sessions[i].CreatedAt == "" {
+			m.sessions[i].CreatedAt = now
+		}
+		m.sessions[i].UpdatedAt = now
+		return
+	}
+	m.sessions = append(m.sessions, sessionInfo{ID: sessionID, Title: fallback(title, "New chat"), CreatedAt: now, UpdatedAt: now})
+}
+
+func (m model) latestUserMessageTitle() string {
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		if m.messages[i].Role == "user" && strings.TrimSpace(m.messages[i].Content) != "" {
+			return titleFromInput(m.messages[i].Content)
+		}
+	}
+	return fallback(m.title, m.currentSessionTitle())
+}
+
+func mergeSessionActivity(local []sessionInfo, incoming []sessionInfo) []sessionInfo {
+	if len(local) == 0 {
+		return incoming
+	}
+	localByID := make(map[string]sessionInfo, len(local))
+	for _, session := range local {
+		if session.ID != "" {
+			localByID[session.ID] = session
+		}
+	}
+	merged := make([]sessionInfo, 0, max(len(local), len(incoming)))
+	seen := make(map[string]bool, len(incoming))
+	for _, session := range incoming {
+		seen[session.ID] = true
+		if localSession, ok := localByID[session.ID]; ok && sessionRecentTimestamp(localSession) > sessionRecentTimestamp(session) {
+			if localSession.UpdatedAt != "" {
+				session.UpdatedAt = localSession.UpdatedAt
+			}
+			if session.CreatedAt == "" {
+				session.CreatedAt = localSession.CreatedAt
+			}
+			if shouldReplaceSessionTitle(session.Title) && localSession.Title != "" {
+				session.Title = localSession.Title
+			}
+		}
+		merged = append(merged, session)
+	}
+	for _, session := range local {
+		if session.ID != "" && !seen[session.ID] {
+			merged = append(merged, session)
+		}
+	}
+	return merged
+}
+
+func shouldReplaceSessionTitle(title string) bool {
+	switch strings.TrimSpace(title) {
+	case "", "New chat", "Default chat", "Untitled chat":
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *model) applySessionDeleted(ev runtimeEvent) {

@@ -381,3 +381,23 @@ func TestMultiCallSyntheticEditEventsRenderAsInlineDiff(t *testing.T) {
 		t.Fatalf("viewport = %q, want synthetic nested edit events rendered as inline diffs", viewport)
 	}
 }
+
+func TestEditDiffUsesForegroundColorsWithoutRowBackground(t *testing.T) {
+	applyTheme(defaultTheme())
+	defer applyTheme(defaultTheme())
+
+	rendered := renderEditDiffBlock(editDiffItem{
+		Path:        "main.go",
+		Operation:   "replace_first",
+		Search:      "old line",
+		Replacement: "new line",
+		LineInfo:    map[string]any{"oldStartLine": float64(12), "newStartLine": float64(12)},
+	}, 80)
+
+	if strings.Contains(rendered, "\x1b[48;") {
+		t.Fatalf("edit diff used row background color: %q", rendered)
+	}
+	if !strings.Contains(rendered, "38;2;255;107;107") || !strings.Contains(rendered, "38;2;155;226;143") {
+		t.Fatalf("edit diff missing red/green foreground ANSI: %q", rendered)
+	}
+}

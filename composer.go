@@ -59,7 +59,10 @@ type composerEditSnapshot struct {
 	scrollLine      int
 }
 
-const composerUndoLimit = 100
+const (
+	composerUndoLimit = 100
+	composerCharLimit = 40000
+)
 
 func newComposer() composerModel {
 	return composerModel{
@@ -67,7 +70,7 @@ func newComposer() composerModel {
 		minHeight:        1,
 		maxHeight:        6,
 		maxContentHeight: 80,
-		charLimit:        4000,
+		charLimit:        composerCharLimit,
 		placeholder:      "message qubit...",
 		focused:          true,
 	}

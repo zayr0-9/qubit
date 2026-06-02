@@ -85,7 +85,7 @@ func TestThemePresetSelectionAppliesNeon(t *testing.T) {
 	if got.mode != modeChat || got.themeEntry != nil {
 		t.Fatalf("theme editor not closed: mode=%v themeEntry=%#v", got.mode, got.themeEntry)
 	}
-	if got.theme.ID != "neon" || got.theme.Accent != "#ff2bd6" || got.theme.Cyan != "#00f5ff" {
+	if got.theme.ID != "neon" || got.theme.Accent != "#ff2bd6" || got.theme.Cyan != "#00f5ff" || got.theme.Red != "#ff9aa2" || got.theme.Green != "#b8f7b1" {
 		t.Fatalf("theme = %#v, want neon preset", got.theme)
 	}
 	if !strings.Contains(got.status, "Neon") {

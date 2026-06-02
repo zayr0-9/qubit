@@ -78,12 +78,12 @@ var builtinThemes = []themeConfig{
 		Muted:      "#a39bff",
 		Accent:     "#ff2bd6",
 		Cyan:       "#00f5ff",
-		Red:        "#ff3864",
-		Green:      "#39ff14",
+		Red:        "#ff9aa2",
+		Green:      "#b8f7b1",
 		ToolRead:   "#00f5ff",
 		ToolSearch: "#ff2bd6",
 		ToolWrite:  "#ffd166",
-		ToolShell:  "#39ff14",
+		ToolShell:  "#b8f7b1",
 		ToolOther:  "#f8f7ff",
 	},
 }
@@ -184,8 +184,8 @@ func applyTheme(theme themeConfig) {
 	toolWriteSt = lipgloss.NewStyle().Foreground(toolWrite)
 	toolShellSt = lipgloss.NewStyle().Foreground(toolShell)
 	toolOtherSt = lipgloss.NewStyle().Foreground(toolOther)
-	diffRemovedSt = lipgloss.NewStyle().Foreground(text).Background(red)
-	diffAddedSt = lipgloss.NewStyle().Foreground(bg).Background(green)
+	diffRemovedSt = lipgloss.NewStyle().Foreground(red)
+	diffAddedSt = lipgloss.NewStyle().Foreground(green)
 	diffGutterSt = lipgloss.NewStyle().Foreground(muted)
 	toolStatusPulseStyles = smoothForegroundStyles(fallback(theme.Muted, "#7c838a"), fallback(theme.Accent, "#f2a65a"))
 }

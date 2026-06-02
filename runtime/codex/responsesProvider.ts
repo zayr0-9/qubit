@@ -1,6 +1,6 @@
 import type { ModelProvider, ModelResponse } from "@hyper-labs/hyper-router";
-import { CODEX_BASE_URL, CODEX_CLIENT_ID, CODEX_ORIGINATOR, type CodexGenerateInput, type CodexResponsesProviderOptions } from "./types.js";
-import { getCodexBearerToken } from "./auth.js";
+import { CODEX_BASE_URL, CODEX_ORIGINATOR, type CodexGenerateInput, type CodexResponsesProviderOptions } from "./types.js";
+import { getCodexAuthContext } from "./auth.js";
 import { toCodexRequestParts } from "./responsesItems.js";
 import { parseCodexSseResponse } from "./responsesSse.js";
 import { codexErrorMessage, withCodexRetry } from "./responsesRetry.js";
@@ -16,8 +16,10 @@ export class CodexResponsesProvider implements ModelProvider {
 
   async generate(input: CodexGenerateInput): Promise<ModelResponse> {
     input.signal?.throwIfAborted();
-    const bearer = await getCodexBearerToken(this.options);
+    const auth = await getCodexAuthContext(this.options);
     const parts = toCodexRequestParts(input.messages, input.tools);
+    const requestId = input.runId || input.sessionId || `qubit-${Date.now()}`;
+    const promptCacheKey = input.sessionId || requestId;
     const body = {
       model: input.model,
       ...(parts.instructions ? { instructions: parts.instructions } : {}),
@@ -27,15 +29,19 @@ export class CodexResponsesProvider implements ModelProvider {
       store: false,
       stream: true,
       include: [],
+      prompt_cache_key: promptCacheKey,
+      client_metadata: {
+        "x-codex-installation-id": promptCacheKey,
+      },
     };
     const headers = new Headers({
       accept: "text/event-stream",
       "content-type": "application/json",
-      authorization: `Bearer ${bearer}`,
+      authorization: `Bearer ${auth.accessToken}`,
       originator: this.options.originator || CODEX_ORIGINATOR,
       "user-agent": this.options.userAgent || "Qubit/0.1 Codex",
     });
-    const requestId = input.runId || input.sessionId || `qubit-${Date.now()}`;
+    if (auth.accountId) headers.set("ChatGPT-Account-ID", auth.accountId);
     if (input.sessionId) {
       headers.set("session-id", input.sessionId);
       headers.set("thread-id", input.sessionId);

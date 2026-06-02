@@ -202,3 +202,19 @@ func TestComposerUndoRestoresDeletedWord(t *testing.T) {
 		t.Fatalf("cursor after undo = %d, want end", c.cursor)
 	}
 }
+
+func TestComposerCharLimitAllowsLargePrompts(t *testing.T) {
+	c := newComposer()
+	input := strings.Repeat("x", composerCharLimit+1)
+
+	c.SetValue(input)
+	if got := len([]rune(c.Value())); got != composerCharLimit {
+		t.Fatalf("SetValue length = %d, want %d", got, composerCharLimit)
+	}
+
+	c.Reset()
+	c.InsertString(input)
+	if got := len([]rune(c.Value())); got != composerCharLimit {
+		t.Fatalf("InsertString length = %d, want %d", got, composerCharLimit)
+	}
+}

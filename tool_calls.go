@@ -815,12 +815,11 @@ func renderDiffLine(sign rune, lineNumber int, content string, width int) string
 	if lineNumber > 0 {
 		number = fmt.Sprintf("%d", lineNumber)
 	}
-	gutter := diffGutterSt.Render(fmt.Sprintf("  %c%-4s ", sign, number))
-	body := oneLine(content, width)
+	line := fmt.Sprintf("  %c%-4s  %s", sign, number, oneLine(content, width))
 	if sign == '-' {
-		return gutter + diffRemovedSt.Render(" "+body+strings.Repeat(" ", max(0, width-lipgloss.Width(body))))
+		return diffRemovedSt.Render(line)
 	}
-	return gutter + diffAddedSt.Render(" "+body+strings.Repeat(" ", max(0, width-lipgloss.Width(body))))
+	return diffAddedSt.Render(line)
 }
 
 func editDiffCandidateCount(group *toolGroup) int {
