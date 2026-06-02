@@ -91,6 +91,7 @@ export interface CodexResponsesProviderOptions extends CodexAuthOptions {
   baseURL?: string;
   originator?: string;
   userAgent?: string;
+  reasoningEffort?: "minimal" | "low" | "medium" | "high";
 }
 
 export interface CodexRequestParts {

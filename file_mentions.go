@@ -39,22 +39,22 @@ func (m model) showFileMentionPalette() bool {
 
 func (m model) activeFileMentionToken() (fileMentionToken, bool) {
 	value := []rune(m.composer.Value())
-	end := len(value)
-	if end == 0 {
+	cursor := clampInt(m.composer.cursor, 0, len(value))
+	if cursor == 0 {
 		return fileMentionToken{}, false
 	}
-	start := end
+	start := cursor
 	for start > 0 && !unicode.IsSpace(value[start-1]) {
 		start--
 	}
-	if start >= end || value[start] != '@' {
+	if start >= cursor || value[start] != '@' {
 		return fileMentionToken{}, false
 	}
-	query := string(value[start+1 : end])
+	query := string(value[start+1 : cursor])
 	if strings.HasPrefix(query, "\"") {
 		query = strings.TrimPrefix(query, "\"")
 	}
-	return fileMentionToken{Start: start, End: end, Query: query}, true
+	return fileMentionToken{Start: start, End: cursor, Query: query}, true
 }
 
 func (m *model) ensureFileMentionIndex() {
@@ -183,9 +183,12 @@ func (m model) acceptFileMentionSelection() (model, bool) {
 	entry := matches[m.fileMention.Cursor]
 	display := "@" + quoteFileMentionPath(entry.Name)
 	value := []rune(m.composer.Value())
+	nextCursor := token.Start + len([]rune(display)) + 1
 	next := string(value[:token.Start]) + display + " " + string(value[token.End:])
 	m.composer.SetValue(next)
-	m.composer.MoveToEnd(false)
+	m.composer.cursor = clampInt(nextCursor, 0, len(m.composer.value))
+	m.composer.ClearSelection()
+	m.composer.ensureCursorVisible()
 	m.fileMention.Cursor = 0
 	m.rememberFileMentionSelection(display, "@"+quoteFileMentionPath(entry.Path))
 	return m, true
@@ -208,6 +211,7 @@ func (m model) expandFileMentionsForSend(input string) string {
 		}
 		input = replaceMentionToken(input, selection.Display, selection.Path)
 	}
+	m.fileMention.Selections = nil
 	return input
 }
 

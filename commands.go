@@ -23,6 +23,7 @@ var slashCommands = []slashCommand{
 	{Name: "rename", Usage: "/rename <title>", Description: "Rename current session", NeedsArg: true},
 	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal keyboard and appearance setup", NeedsArg: false},
 	{Name: "permission", Usage: "/permission <plan|edit>", Description: "Set plan/edit mode", NeedsArg: true},
+	{Name: "reasoning", Usage: "/reasoning <none|low|medium|high>", Description: "Set model reasoning effort", NeedsArg: true},
 	{Name: "permission-test", Usage: "/permission-test", Description: "Open a demo permission modal", NeedsArg: false},
 	{Name: "help", Usage: "/help", Description: "Show command help", NeedsArg: false},
 }
@@ -41,6 +42,8 @@ func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "down", "j", "ctrl+n":
 		m.moveSessionCursor(1)
 		return m, nil
+	case "d", "delete":
+		return m.openSessionDeleteConfirm()
 	case "enter":
 		sessions := m.sessionPickerSessions()
 		if len(sessions) == 0 {
@@ -62,6 +65,34 @@ func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.activate", "sessionId": session.ID})
 	}
+	return m, nil
+}
+
+func (m model) openSessionDeleteConfirm() (tea.Model, tea.Cmd) {
+	sessions := m.sessionPickerSessions()
+	if len(sessions) == 0 || len(m.sessions) <= 1 {
+		m.status = "cannot delete only session"
+		return m, nil
+	}
+	m.ensureSessionCursorInBounds()
+	session := sessions[m.sessionCursor]
+	m.previousMode = modeSessionPicker
+	m.mode = modeModal
+	m.pendingDeleteSession = session
+	m.modal = &modalState{
+		ID:          "session_delete_confirm",
+		Kind:        modalKindConfirm,
+		Title:       "Delete session?",
+		Description: "This removes the session from Qubit and deletes its stored transcript.",
+		Fields:      []modalField{{Label: "Session", Value: session.Title}},
+		Actions: []modalAction{
+			{ID: "delete", Label: "Delete", Style: "danger"},
+			{ID: "cancel", Label: "Cancel", Default: true},
+		},
+		Cursor:  1,
+		Payload: map[string]any{"action": "session.delete", "sessionId": session.ID},
+	}
+	m.status = "confirm session delete"
 	return m, nil
 }
 
@@ -173,10 +204,12 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		return m.openTerminalSetupConfirm(), nil
 	case "permission", "permissions", "perm":
 		return m.setPermissionMode(arg)
+	case "reasoning", "reason", "effort":
+		return m.setReasoningLevel(arg)
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title] - fork current chat from here or a previous user message\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal keyboard and appearance setup\n/permission <plan|edit> - switch between plan and edit mode\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title] - fork current chat from here or a previous user message\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal keyboard and appearance setup\n/permission <plan|edit> - switch between plan and edit mode\n/reasoning <none|low|medium|high> - set model reasoning effort\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
@@ -299,6 +332,44 @@ func (m model) setPermissionMode(arg string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) setReasoningLevel(arg string) (tea.Model, tea.Cmd) {
+	level := normalizeReasoningLevel(arg)
+	if strings.TrimSpace(arg) == "" {
+		m.appendSystem(fmt.Sprintf("Current reasoning: %s. Usage: /reasoning <none|low|medium|high>", m.reasoningLevelValue()))
+		return m, nil
+	}
+	if level == "" {
+		m.appendSystem("Usage: /reasoning <none|low|medium|high>")
+		return m, nil
+	}
+	m.busy = true
+	m.status = "setting reasoning"
+	return m, sendRuntime(m.runtime, map[string]any{"type": "reasoning.set", "level": string(level)})
+}
+
+func normalizeReasoningLevel(value string) reasoningLevel {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "none", "off", "disable", "disabled", "0":
+		return reasoningLevelNone
+	case "low", "l":
+		return reasoningLevelLow
+	case "medium", "med", "m", "":
+		return reasoningLevelMedium
+	case "high", "h":
+		return reasoningLevelHigh
+	default:
+		return ""
+	}
+}
+
+func (m model) reasoningLevelValue() string {
+	level := normalizeReasoningLevel(string(m.reasoningLevel))
+	if level == "" {
+		level = reasoningLevelMedium
+	}
+	return string(level)
+}
+
 func (m model) cyclePermissionMode() (tea.Model, tea.Cmd) {
 	if m.permissionMode == permissionModeAlwaysAllow {
 		m.permissionMode = permissionModeAsk
@@ -313,6 +384,15 @@ func (m model) permissionModeLabel() string {
 		return "edit"
 	}
 	return "plan"
+}
+
+func (m *model) applyReasoningUpdated(ev runtimeEvent) {
+	m.busy = false
+	m.status = "ready"
+	if ev.ReasoningLevel != "" {
+		m.reasoningLevel = normalizeReasoningLevel(ev.ReasoningLevel)
+	}
+	m.appendSystem(fallback(ev.Status, "Reasoning: "+m.reasoningLevelValue()))
 }
 
 func (m model) systemPromptMode() string {

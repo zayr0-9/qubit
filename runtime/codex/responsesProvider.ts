@@ -23,6 +23,7 @@ export class CodexResponsesProvider implements ModelProvider {
       ...(parts.instructions ? { instructions: parts.instructions } : {}),
       input: parts.input,
       ...(parts.tools.length ? { tools: parts.tools, tool_choice: "auto", parallel_tool_calls: true } : {}),
+      reasoning: { effort: this.options.reasoningEffort || "medium" },
       store: false,
       stream: true,
       include: [],

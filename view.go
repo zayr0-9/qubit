@@ -137,8 +137,9 @@ func (m model) renderInputStatus() string {
 	} else {
 		style = style.Foreground(accent)
 	}
+	reasoning := mutedSt.Render(" reasoning " + m.reasoningLevelValue())
 
-	return footerStyle.Width(m.width).Render(style.Render(mode))
+	return footerStyle.Width(m.width).Render(style.Render(mode) + reasoning)
 }
 
 func (m model) renderFooter() string {
@@ -168,7 +169,7 @@ func (m model) renderFooter() string {
 	} else if m.mode == modeKeyPicker {
 		footer = "up/down choose key | enter activate | a add | d delete | esc close"
 	} else if m.mode == modeSessionPicker {
-		footer = "up/down choose session | enter switch | esc close"
+		footer = "up/down choose session | enter switch | d delete | esc close"
 	} else if m.showSlashPalette() {
 		footer = "up/down choose command | enter/tab complete"
 	} else if m.showFileMentionPalette() {
@@ -193,6 +194,9 @@ func (m model) renderModal(height int) string {
 }
 
 func (m model) renderModalState(modal modalState, height int) string {
+	if modal.ID == "model_selector" {
+		return m.renderModalStateAligned(modal, height, lipgloss.Left, lipgloss.Bottom)
+	}
 	return m.renderModalStateAligned(modal, height, lipgloss.Center, lipgloss.Bottom)
 }
 func (m model) renderModalStateAligned(modal modalState, height int, horizontal lipgloss.Position, vertical lipgloss.Position) string {
@@ -304,7 +308,7 @@ func (m model) renderSessionPicker(height int) string {
 
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Foreground(accent).Bold(true).Render("sessions") + "\n")
-	b.WriteString(mutedSt.Render("↑/↓ select · enter activate · esc close") + "\n\n")
+	b.WriteString(mutedSt.Render("↑/↓ select · enter activate · d delete · esc close") + "\n\n")
 
 	maxRows := max(1, height-5)
 	window := visibleListWindow(len(sessions), m.sessionCursor, maxRows)

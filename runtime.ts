@@ -77,6 +77,7 @@ const modePrompts = await loadModePrompts();
 const defaultProviderName = normalizeProvider(process.env.QUBIT_PROVIDER || settings.defaultProvider || "glm");
 let activeProviderName = defaultProviderName;
 let model = defaultModelForProvider(activeProviderName);
+let reasoningLevel = normalizeReasoningLevel(process.env.QUBIT_REASONING || settings.reasoningLevel || "medium");
 const providerModelLists = {
   glm: [
     { id: "glm-5.1", name: "glm-5.1", description: "Latest flagship GLM model for coding and long-horizon agent tasks" },
@@ -172,6 +173,15 @@ function normalizePromptMode(mode) {
   return "plan";
 }
 
+function normalizeReasoningLevel(value) {
+  const normalized = String(value || "medium").trim().toLowerCase();
+  if (["none", "off", "disabled", "disable", "0"].includes(normalized)) return "none";
+  if (["low", "l"].includes(normalized)) return "low";
+  if (["medium", "med", "m", ""].includes(normalized)) return "medium";
+  if (["high", "h"].includes(normalized)) return "high";
+  throw new Error("Reasoning level must be none, low, medium, or high.");
+}
+
 async function loadModePrompts() {
   const entries = await Promise.all(Object.keys(defaultModePrompts).map(async (mode) => {
     try {
@@ -256,6 +266,7 @@ write({
   activeProvider: runtimeState.providerName,
   activeKeyAlias: runtimeState.keyAlias,
   model,
+  reasoningLevel,
   storagePath,
   indexPath,
   workspaceCwd: getDefaultToolCwd(),
@@ -360,6 +371,19 @@ async function handleLine(line) {
     return;
   }
 
+  if (request.type === "reasoning.set") {
+    try {
+      reasoningLevel = normalizeReasoningLevel(request.level);
+      settings.reasoningLevel = reasoningLevel;
+      await saveSettings();
+      runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
+      write({ type: "reasoning.updated", id: request.id, reasoningLevel, status: `Reasoning: ${reasoningLevel}.` });
+    } catch (error) {
+      write({ type: "error", id: request.id, error: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+
   if (request.type === "model.use") {
     try {
       model = normalizeModel(request.model);
@@ -398,6 +422,17 @@ async function handleLine(line) {
   }
 
   if (request.type === "session.list") {
+    writeSessionList(request.id);
+    return;
+  }
+
+  if (request.type === "session.delete") {
+    const deleted = await deleteSession(String(request.sessionId || ""));
+    if (!deleted) {
+      write({ type: "error", id: request.id, error: `Unknown session: ${request.sessionId}` });
+      return;
+    }
+    write({ type: "session.deleted", id: request.id, sessionId: deleted.id, sessionTitle: deleted.title });
     writeSessionList(request.id);
     return;
   }
@@ -522,6 +557,12 @@ async function handleLine(line) {
     activeSessionId = runSessionId;
   }
 
+  const requestedReasoningLevel = normalizeReasoningLevel(request.reasoningLevel || reasoningLevel);
+  if (requestedReasoningLevel !== reasoningLevel) {
+    reasoningLevel = requestedReasoningLevel;
+    runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
+  }
+
   const promptMode = normalizePromptMode(request.systemPromptMode || request.mode);
   if (runtimeState.promptMode !== promptMode) {
     runtimeState = await createRuntimeState(promptMode);
@@ -624,6 +665,14 @@ async function createRuntimeState(promptMode = "plan") {
   return { runtime, promptMode: normalizedPromptMode, ...providerConfig };
 }
 
+function providerReasoningOptions() {
+  return reasoningLevel === "none" ? false : { enabled: true, effort: reasoningLevel, capture: true, includeInMessages: true };
+}
+
+function codexReasoningEffort() {
+  return reasoningLevel === "none" ? "minimal" : reasoningLevel;
+}
+
 function createProvider(config) {
   if (config.providerName === "stub") return new StubProvider();
 
@@ -639,6 +688,7 @@ function createProvider(config) {
         apiKey: config.apiKey,
         baseURL: process.env.HYPERROUTER_BASE_URL || process.env.HYPER_ROUTER_BASE_URL || "https://hyperrouter.cloud/v1",
         name: "hyperrouter",
+        reasoning: providerReasoningOptions(),
       });
     case "openai":
       return new OpenAIProvider({
@@ -646,6 +696,7 @@ function createProvider(config) {
         baseURL: process.env.OPENAI_BASE_URL,
         organization: process.env.OPENAI_ORG_ID || process.env.OPENAI_ORGANIZATION,
         project: process.env.OPENAI_PROJECT,
+        reasoning: providerReasoningOptions(),
       });
     case "bedrock":
       return new AmazonBedrockVAIProvider({
@@ -667,6 +718,7 @@ function createProvider(config) {
         issuer: process.env.CODEX_ISSUER || "https://auth.openai.com",
         clientId: process.env.CODEX_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann",
         originator: process.env.CODEX_ORIGINATOR || "codex_cli_rs",
+        reasoningEffort: codexReasoningEffort(),
       });
     default:
       throw new Error(`Unsupported provider: ${config.providerName}`);
@@ -740,7 +792,14 @@ async function loadSettings() {
     }
   }
 
-  const normalized = { version: 1, defaultProvider, defaultModels };
+  let reasoningLevel = "medium";
+  try {
+    reasoningLevel = normalizeReasoningLevel(parsed?.reasoningLevel || "medium");
+  } catch {
+    reasoningLevel = "medium";
+  }
+
+  const normalized = { version: 1, defaultProvider, defaultModels, reasoningLevel };
   await saveSettings(normalized);
   return normalized;
 }
@@ -937,6 +996,7 @@ async function writeModelList(id) {
     activeProvider: runtimeState.providerName,
     activeKeyAlias: runtimeState.keyAlias,
     model,
+    reasoningLevel,
     models: await listModels(),
   });
 }
@@ -949,6 +1009,7 @@ async function writeModelUpdated(id, status) {
     activeProvider: runtimeState.providerName,
     activeKeyAlias: runtimeState.keyAlias,
     model,
+    reasoningLevel,
     status,
     models: await listModels(),
   });
@@ -1424,6 +1485,21 @@ async function activateSession(sessionId) {
   session.updatedAt = new Date().toISOString();
   await saveSessionIndex();
   return session;
+}
+
+async function deleteSession(sessionId) {
+  const index = sessionIndex.sessions.findIndex((candidate) => candidate.id === sessionId);
+  if (index < 0) return null;
+  if (sessionIndex.sessions.length <= 1) throw new Error("Cannot delete the only session.");
+  const [deleted] = sessionIndex.sessions.splice(index, 1);
+  if (storage.deleteSession) await storage.deleteSession(sessionId);
+  if (activeSessionId === sessionId || sessionIndex.activeSessionId === sessionId) {
+    const next = sessionIndex.sessions[Math.min(index, sessionIndex.sessions.length - 1)] || sessionIndex.sessions[0];
+    activeSessionId = next.id;
+    sessionIndex.activeSessionId = next.id;
+  }
+  await saveSessionIndex();
+  return deleted;
 }
 
 async function renameSession(sessionId, title) {

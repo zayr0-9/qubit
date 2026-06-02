@@ -258,6 +258,16 @@ func (m model) resolveModalAction(actionID string) (tea.Model, tea.Cmd) {
 	}
 
 	if modal.Kind == modalKindConfirm {
+		if modal.Payload["action"] == "session.delete" {
+			if actionID != "delete" {
+				m.status = "delete cancelled"
+				return m, nil
+			}
+			sessionID, _ := modal.Payload["sessionId"].(string)
+			m.busy = true
+			m.status = "deleting session"
+			return m, sendRuntime(m.runtime, map[string]any{"type": "session.delete", "sessionId": sessionID})
+		}
 		if modal.Payload["action"] == "key.delete" {
 			if actionID != "delete" {
 				m.status = "delete cancelled"

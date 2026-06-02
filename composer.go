@@ -224,6 +224,42 @@ func (c *composerModel) DeleteForward() {
 	c.ensureCursorVisible()
 }
 
+func (c *composerModel) DeleteWordBackward() {
+	if c.HasSelection() {
+		c.ReplaceSelection("")
+		return
+	}
+	original := c.cursor
+	c.MoveWordLeft(false)
+	start := c.cursor
+	if start == original {
+		return
+	}
+	c.value = append(c.value[:start], c.value[original:]...)
+	c.cursor = start
+	c.preferredColumn = -1
+	c.ClearSelection()
+	c.ensureCursorVisible()
+}
+
+func (c *composerModel) DeleteWordForward() {
+	if c.HasSelection() {
+		c.ReplaceSelection("")
+		return
+	}
+	original := c.cursor
+	c.MoveWordRight(false)
+	end := c.cursor
+	if end == original {
+		return
+	}
+	c.value = append(c.value[:original], c.value[end:]...)
+	c.cursor = original
+	c.preferredColumn = -1
+	c.ClearSelection()
+	c.ensureCursorVisible()
+}
+
 func (c *composerModel) beginOrUpdateSelection(selecting bool) {
 	if selecting {
 		if !c.selecting {
@@ -369,7 +405,13 @@ func (c *composerModel) UpdateKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return true, nil
 	case "ctrl+v":
 		return true, pasteClipboardCmd()
-	case "backspace", "ctrl+h":
+	case "ctrl+backspace", "ctrl+h":
+		c.DeleteWordBackward()
+		return true, nil
+	case "ctrl+delete":
+		c.DeleteWordForward()
+		return true, nil
+	case "backspace":
 		c.DeleteBackward()
 		return true, nil
 	case "delete":
@@ -473,6 +515,16 @@ func (c *composerModel) updateModifiedNavigationKey(msg tea.KeyPressMsg) (bool, 
 		}
 		if hasCtrl(key.Mod) {
 			c.MoveWordRight(false)
+			return true, nil
+		}
+	case tea.KeyBackspace:
+		if hasCtrl(key.Mod) {
+			c.DeleteWordBackward()
+			return true, nil
+		}
+	case tea.KeyDelete:
+		if hasCtrl(key.Mod) {
+			c.DeleteWordForward()
 			return true, nil
 		}
 	}

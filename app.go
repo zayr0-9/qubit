@@ -341,7 +341,7 @@ func (m model) submitInput() (tea.Model, tea.Cmd) {
 	m.status = "thinking"
 	m.autoScroll = true
 	m.refreshViewport()
-	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "systemPromptMode": m.systemPromptMode()}
+	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "systemPromptMode": m.systemPromptMode(), "reasoningLevel": m.reasoningLevelValue()}
 	if m.autoNewSessionOnChat {
 		payload["newSession"] = true
 		payload["title"] = titleFromInput(input)
@@ -366,7 +366,7 @@ func (m model) submitMessageEdit(input string) (tea.Model, tea.Cmd) {
 	m.autoScroll = true
 	m.refreshViewport()
 
-	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "sessionId": m.session, "replaceFromMessageIndex": target, "title": "Edit: " + fallback(m.title, m.currentSessionTitle()), "systemPromptMode": m.systemPromptMode()}
+	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "sessionId": m.session, "replaceFromMessageIndex": target, "title": "Edit: " + fallback(m.title, m.currentSessionTitle()), "systemPromptMode": m.systemPromptMode(), "reasoningLevel": m.reasoningLevelValue()}
 	return m, tea.Batch(sendRuntime(m.runtime, payload), m.spinner.Tick)
 }
 
@@ -381,6 +381,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		}
 		m.activeKeyAlias = ev.ActiveKeyAlias
 		m.model = ev.Model
+		m.reasoningLevel = normalizeReasoningLevel(ev.ReasoningLevel)
 		if ev.WorkspaceCwd != "" {
 			m.runtime.launchCwd = ev.WorkspaceCwd
 		}
@@ -436,6 +437,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		if ev.Model != "" {
 			m.model = ev.Model
 		}
+		m.reasoningLevel = normalizeReasoningLevel(ev.ReasoningLevel)
 		if len(ev.Models) > 0 {
 			m.models = ev.Models
 		}
@@ -443,6 +445,8 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m = m.openModelSelectorModal(ev.Models)
 	case "model.updated":
 		m.applyModelUpdated(ev)
+	case "reasoning.updated":
+		m.applyReasoningUpdated(ev)
 	case "key.updated":
 		m.applyKeyUpdated(ev)
 	case "codex.login.started", "codex.login.completed", "codex.login.cancelled", "codex.logout.completed", "codex.status", "codex.error":
@@ -487,6 +491,8 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.messages", "sessionId": m.session}))
 	case "session.messages":
 		m.applySessionMessages(ev)
+	case "session.deleted":
+		m.applySessionDeleted(ev)
 	case "session.renamed":
 		m.busy = false
 		if ev.SessionID != "" {
@@ -708,6 +714,31 @@ func (m *model) applySessionList(ev runtimeEvent) {
 		m.activeRunID = ""
 	}
 	m.ensureSessionCursor()
+}
+
+func (m *model) applySessionDeleted(ev runtimeEvent) {
+	m.busy = false
+	m.status = "ready"
+	deletedID := ev.SessionID
+	if deletedID == "" {
+		deletedID = m.pendingDeleteSession.ID
+	}
+	filtered := m.sessions[:0]
+	for _, session := range m.sessions {
+		if session.ID != deletedID {
+			filtered = append(filtered, session)
+		}
+	}
+	m.sessions = filtered
+	m.pendingDeleteSession = sessionInfo{}
+	if m.session == deletedID {
+		m.session = ""
+		m.title = ""
+		m.messages = []chatMessage{{Role: "assistant", Content: "Session deleted. Choose another session or start a new chat."}}
+		m.autoNewSessionOnChat = true
+		m.refreshViewport()
+	}
+	m.ensureSessionCursorInBounds()
 }
 
 func (m *model) applySessionMessages(ev runtimeEvent) {

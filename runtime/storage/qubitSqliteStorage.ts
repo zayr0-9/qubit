@@ -129,6 +129,14 @@ export class QubitSqliteStorage implements StorageAdapter {
     return row?.metadata_json ? (JSON.parse(row.metadata_json) as SessionMetadata) : null;
   }
 
+  async deleteSession(sessionId: string): Promise<void> {
+    const tx = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM qubit_sessions WHERE session_id = ?").run(sessionId);
+    }) as SqliteTransaction<[]>;
+
+    tx.default();
+  }
+
   async setSessionMetadata(sessionId: string, metadata: SessionMetadata): Promise<void> {
     const tx = this.db.transaction(() => {
       this.ensureSession(sessionId);

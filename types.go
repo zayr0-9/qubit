@@ -135,6 +135,15 @@ type fileMentionSelection struct {
 	Path    string
 }
 
+type reasoningLevel string
+
+const (
+	reasoningLevelNone   reasoningLevel = "none"
+	reasoningLevelLow    reasoningLevel = "low"
+	reasoningLevelMedium reasoningLevel = "medium"
+	reasoningLevelHigh   reasoningLevel = "high"
+)
+
 type fileMentionState struct {
 	Entries    []fileMentionEntry
 	Cursor     int
@@ -276,6 +285,7 @@ type runtimeEvent struct {
 	Status           string         `json:"status,omitempty"`
 	Content          string         `json:"content,omitempty"`
 	ReasoningContent string         `json:"reasoningContent,omitempty"`
+	ReasoningLevel   string         `json:"reasoningLevel,omitempty"`
 	Step             int            `json:"step,omitempty"`
 	ToolCallID       string         `json:"toolCallId,omitempty"`
 	ToolName         string         `json:"toolName,omitempty"`
@@ -325,6 +335,7 @@ type model struct {
 
 	messages              []chatMessage
 	sessions              []sessionInfo
+	pendingDeleteSession  sessionInfo
 	apiKeys               []apiKeyInfo
 	models                []modelInfo
 	busy                  bool
@@ -334,6 +345,7 @@ type model struct {
 	activeProvider        string
 	activeKeyAlias        string
 	model                 string
+	reasoningLevel        reasoningLevel
 	session               string
 	title                 string
 	status                string
