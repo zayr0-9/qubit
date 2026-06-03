@@ -96,7 +96,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		if m.busy {
+		if m.inputSpinnerActive() {
 			return m, cmd
 		}
 		return m, nil
@@ -113,6 +113,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m.updateInputAndViewport(msg)
+}
+
+func (m model) inputSpinnerActive() bool {
+	return m.busy || m.streaming || m.activeRunID != ""
 }
 
 func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

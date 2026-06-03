@@ -113,7 +113,7 @@ func (m model) renderInput() string {
 }
 
 func (m model) inputPrompt() string {
-	if m.busy || m.streaming {
+	if m.inputSpinnerActive() {
 		return m.spinner.View() + " "
 	}
 	return idleInputPrompt()

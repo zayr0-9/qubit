@@ -11,6 +11,29 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+func TestInputSpinnerActiveDuringRunningStreamAfterForkTree(t *testing.T) {
+	m := initialModel(nil)
+	m.busy = true
+	m.activeRunID = "run_1"
+	m.mode = modeForkTree
+	m.status = "fork tree"
+
+	updated, cmd := m.updateForkTree(tea.KeyPressMsg{Code: tea.KeyEsc})
+	got := updated.(model)
+	if cmd != nil {
+		t.Fatal("esc returned command, want nil")
+	}
+	if got.mode != modeChat {
+		t.Fatalf("mode = %v, want modeChat", got.mode)
+	}
+	if !got.inputSpinnerActive() {
+		t.Fatal("inputSpinnerActive = false, want true while active run continues after returning from tree")
+	}
+	if prompt := plainText(got.inputPrompt()); prompt == plainText(idleInputPrompt()) {
+		t.Fatalf("input prompt = %q, want streaming spinner prompt", prompt)
+	}
+}
+
 func TestIsNewlineKey(t *testing.T) {
 	tests := []struct {
 		name string
