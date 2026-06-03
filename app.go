@@ -157,6 +157,13 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, copyClipboardCmd(m.composer.SelectedText())
 		}
 		return m, tea.Quit
+	case "ctrl+x":
+		if m.composer.HasSelection() {
+			selected := m.composer.CutSelection()
+			m.status = "cut input"
+			m.layout()
+			return m, copyClipboardCmd(selected)
+		}
 	case "esc":
 		if m.showFileMentionPalette() {
 			m.fileMention.Cursor = 0

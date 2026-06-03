@@ -843,6 +843,28 @@ func TestTypingReplacesSelectedInput(t *testing.T) {
 	}
 }
 
+func TestCtrlXCutsSelectedInput(t *testing.T) {
+	m := initialModel(nil)
+	m.composer.SetValue("hello")
+	m.composer.SelectAll()
+
+	updated, cmd := m.updateKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	got := updated.(model)
+
+	if cmd == nil {
+		t.Fatal("ctrl+x returned nil command, want clipboard copy command")
+	}
+	if got.composer.HasSelection() {
+		t.Fatal("selection = true, want false after cut")
+	}
+	if got.composer.Value() != "" {
+		t.Fatalf("input value = %q, want empty after cut", got.composer.Value())
+	}
+	if got.status != "cut input" {
+		t.Fatalf("status = %q, want cut input", got.status)
+	}
+}
+
 func TestSlashSessionsOpensPickerAndRequestsList(t *testing.T) {
 	rt, stdin := newTestRuntime(t)
 	m := initialModel(rt)

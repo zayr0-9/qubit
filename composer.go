@@ -265,6 +265,15 @@ func (c *composerModel) ReplaceSelection(s string) {
 	c.replaceRange(start, end, []rune(normalizeInputNewlines(s)))
 }
 
+func (c *composerModel) CutSelection() string {
+	if !c.HasSelection() {
+		return ""
+	}
+	text := c.SelectedText()
+	c.ReplaceSelection("")
+	return text
+}
+
 func (c *composerModel) InsertString(s string) {
 	if c.HasSelection() {
 		c.ReplaceSelection(s)

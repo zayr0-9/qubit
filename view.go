@@ -158,7 +158,7 @@ func (m model) renderFooter() string {
 		footer = "enter send | shift+enter newline | shift+arrows select | ctrl+shift+left/right words | ctrl+a all | ctrl+c copy/quit"
 	}
 	if m.composer.HasSelection() {
-		footer = "selection | ctrl+c copy | type replace | backspace/delete remove | esc clear"
+		footer = "selection | ctrl+c copy | ctrl+x cut | type replace | backspace/delete remove | esc clear"
 	}
 	if m.messageEdit.Active {
 		footer = "enter fork/reroll | ctrl+j newline | esc cancel edit"
