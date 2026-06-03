@@ -72,8 +72,10 @@ D:\qubit
   .qubit\\session-index.json Qubit-owned session index in the terminal launch cwd
   .qubit\\runtime.log        Runtime diagnostic log in the terminal launch cwd
   .qubit\\input-history.json Persisted non-secret composer history in the terminal launch cwd
-  .qubit\\theme.json         Persisted selected `/theme` palette in the terminal launch cwd
-  .qubit\\settings.json      Persisted non-secret app defaults, including default provider and per-provider default models
+  %APPDATA%\\Qubit or ~/.config/qubit
+                            User-global Qubit config directory, overrideable with QUBIT_CONFIG_DIR
+  <config>\\theme.json       User-global selected `/theme` palette
+  <config>\\settings.json    User-global non-secret app defaults, including default provider and per-provider default models
   .qubit\\todos\\*.md        Project todo lists managed by todoMd
   .qubit\\plans\\*.md        Project plans managed by planMd
 
@@ -240,7 +242,7 @@ view.MouseMode = tea.MouseModeCellMotion
 - Slash command palette filtering should rank command-name matches before description-only matches so command names remain the primary selection signal.
 - Slash commands that open interactive UI directly from the palette should mark `slashCommand.OpensOnSelect` so Enter/Tab clears the composer and opens the UI instead of inserting command text.
 - Reusable modal selector lists use `modalState.Options` plus `OptionCursor`: Up/down moves the option cursor, left/right or tab/shift+tab moves actions, Enter resolves the selected action, and Esc cancels selector-style modals.
-- `/models` should open the model selector modal backed by runtime `model.list`/`model.use` protocol data, not a hardcoded demo list. The model selector offers Use now and Set default actions; Set default sends `model.use` with `persistDefault: true` so the runtime stores a non-secret per-provider default model in `.qubit/settings.json`.
+- `/models` should open the model selector modal backed by runtime `model.list`/`model.use` protocol data, not a hardcoded demo list. The model selector offers Use now and Set default actions; Set default sends `model.use` with `persistDefault: true` so the runtime stores a non-secret per-provider default model in user-global `<config>/settings.json`.
 - `/sessions` should open an interactive picker, not print repeated lists into chat.
 - Session picker results should be sorted by most recent activity (`updatedAt`, falling back to `createdAt`) so chats with new messages surface above merely newer-created sessions.
 - Session switching should happen through the interactive picker. Do not add a `/use` slash command unless explicitly requested.
@@ -249,7 +251,7 @@ view.MouseMode = tea.MouseModeCellMotion
   - Up/down selection
   - Enter activation
   - Esc close
-- `/providers` should open the provider selector modal. The selector offers Use now and Set default actions; Set default sends `provider.use` with `persistDefault: true` so the runtime stores the non-secret default provider in `.qubit/settings.json` for future launches.
+- `/providers` should open the provider selector modal. The selector offers Use now and Set default actions; Set default sends `provider.use` with `persistDefault: true` so the runtime stores the non-secret default provider in user-global `<config>/settings.json` for future launches across cwd/projects.
 - `/keys` should open the API key manager, not require users to put raw API keys in slash-command text.
 - API key manager should support:
   - Listing masked keys for each provider, including read-only environment keys such as `env:ZAI_API_KEY`.
@@ -285,7 +287,7 @@ $env:GLM_ENDPOINT = "coding" # optional
 
 - Support secure in-app API key management through OS keychain integration (`keytar`).
   - Raw API keys must be stored in the OS keychain, not plaintext `.qubit` JSON files.
-  - `.qubit\api-key-index.json` may store only non-secret metadata such as provider, alias, active key, source, account name, and timestamps.
+  - `<config>\api-key-index.json` may store only non-secret user-global metadata such as provider, alias, active key, source, account name, and timestamps.
   - Runtime protocol events must only expose masked keys and metadata; never send raw key material back to Go.
   - Runtime stdout/stderr and `.qubit\runtime.log` must not contain raw API keys. Redaction should avoid hiding useful non-secret diagnostics such as function names.
   - `keytar` ESM import shape should be handled as `module.default ?? module`; verify `setPassword`, `getPassword`, and `deletePassword` exist.

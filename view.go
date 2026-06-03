@@ -18,21 +18,23 @@ func (m model) View() tea.View {
 		return newAppView("loading...")
 	}
 
+	queuedStatus := m.renderQueuedStatus()
 	input := m.renderInput()
 	status := m.renderInputStatus()
 	footer := m.renderFooter()
-	bottomHeight := lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
+	bottomHeight := lipgloss.Height(queuedStatus) + lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
 	mainHeight := max(0, m.height-bottomHeight)
 	content := appStyle.Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
 			renderFixedHeight(m.renderMainArea(mainHeight), mainHeight),
-			"",
+			queuedStatus,
 			input,
 			status,
 			footer,
 		),
 	)
+
 	return newAppView(content)
 }
 
@@ -142,7 +144,7 @@ func (m model) renderInputStatus() string {
 func (m model) permissionModeBadge() string {
 	mode := m.permissionModeLabel()
 	style := lipgloss.NewStyle().Bold(true)
-	if m.permissionMode == permissionModeAlwaysAllow {
+	if m.permissionMode == permissionModeAlwaysAllow || m.permissionMode == permissionModeAllowAll {
 		style = style.Foreground(green)
 	} else {
 		style = style.Foreground(accent)
@@ -531,7 +533,9 @@ func (m *model) renderViewMessage(message chatMessage) string {
 
 func renderMessageWithIcon(message chatMessage, content string, number int) string {
 	icon := aiIcon.Render("◆")
-	if message.Role == "reasoning" {
+	if message.LocalOnly || message.Role == "status" {
+		icon = mutedSt.Render("◇")
+	} else if message.Role == "reasoning" {
 		icon = mutedSt.Render("◇")
 	} else if message.Role == "user" {
 		if number > 0 {
@@ -589,7 +593,7 @@ func (m *model) renderMessageContent(message chatMessage, cacheable bool) string
 
 func renderMessageContentAtWidth(message chatMessage, width int) (string, error) {
 	width = max(20, width)
-	if message.Role == "error" || message.Role == "reasoning" {
+	if message.LocalOnly || message.Role == "status" || message.Role == "error" || message.Role == "reasoning" {
 		return wrap(message.Content, width), nil
 	}
 	markdown, err := renderMarkdown(message.Content, width)

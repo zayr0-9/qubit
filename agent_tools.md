@@ -78,8 +78,8 @@ todoMd
   Supports create/list/read/edit actions, auto-generated lowercase dash names, single or batched line replacement edits, and permission mode is ask.
 
 planMd
-  Manages Markdown plans stored in the project .qubit/plans directory under the default/supplied workspace.
-  Supports create/list/read/edit/view actions. The view action emits a UI-only plan.view event so Go can render the selected Markdown plan in chat without sending that content as a model message. On transcript reload, stored planMd view tool calls are hydrated back into UI-only plan preview messages from the current plan file so viewed plans remain visible after restarting Qubit.
+  Manages Markdown plans stored in the project .qubit/plans directory.
+  Supports create/list/read/edit/display actions and is always-allowed so planning can create/update/display Markdown plans without opening a permission modal. The display action emits a UI-only plan.view event so Go can render the selected Markdown plan in chat without sending that content as a model message. On transcript reload, stored planMd display tool calls are hydrated back into UI-only plan preview messages from the current plan file so displayed plans remain visible after restarting Qubit.
 ```
 
 ## Important Files
@@ -126,7 +126,7 @@ tools/todoMd.ts
 
 tools/planMd.ts
   Markdown plan implementation and tool definition.
-  Stores plan files in project .qubit/plans and can emit UI-only plan.view events.
+  Stores plan files in project .qubit/plans and can emit UI-only plan.view events for displayed plans.
 
 utils/qubitProject.ts
   Resolves Qubit-owned internal paths under the active project .qubit directory for project-scoped stores that should not be blocked by normal cwd file-tool containment.
@@ -232,19 +232,22 @@ Do not reintroduce old `YGG_*` concepts. Qubit-owned project storage is the hidd
 
 ## Runtime Permission Modes
 
-Qubit currently supports two user-facing permission modes for gated tools:
+Qubit currently supports three user-facing permission modes for gated tools:
 
 ```txt
 ask
-  The Go client opens the permission modal when the runtime emits tool.permission.request.
+  The Go client opens the permission modal when the runtime emits tool.permission.request, except planMd is always-allowed for planning workflows.
 
 always_allow
-  The Go client immediately sends tool.permission.response with allow=true for runtime permission requests.
+  The Go client immediately sends tool.permission.response with allow=true for runtime permission requests and uses the edit prompt.
+
+allow_all
+  The Go client immediately sends tool.permission.response with allow=true for runtime permission requests while keeping the plan prompt. Choosing Allow all in the permission modal enables this for the rest of the current TUI session.
 ```
 
-The permission mode is Go UI/session state. Keep the runtime/tool definitions responsible for declaring static tool safety (`permission: { mode: 'ask' }` for gated tools and `permission: { mode: 'always' }` for intrinsically safe read/search tools), but keep user-facing auto-approval gating in the Go client. Do not conflate tool-level `always` with user-level `always_allow`.
+The permission mode is Go UI/session state. Keep the runtime/tool definitions responsible for declaring static tool safety (`permission: { mode: 'ask' }` for gated tools and `permission: { mode: 'always' }` for intrinsically safe read/search/planning tools), but keep user-facing auto-approval gating in the Go client. Do not conflate tool-level `always` with user-level `always_allow` or `allow_all`.
 
-For now, permission mode is changed with `/permission <plan|edit>` or cycled in the chat UI with Shift+Tab. The current mode is rendered as a minimal bright `plan` / `edit` label in a dedicated status section below the input area and is not persisted across process restarts. Plan mode maps to ask-before-gated-tools behavior and edit mode maps to always-allow gated tools for the session. If persistence is added later, document the settings file and migration behavior here.
+For now, permission mode is changed with `/permission <plan|edit|allow-all>` or cycled in the chat UI with Shift+Tab. The current mode is rendered as a minimal bright `plan` / `edit` / `allow all` label in a dedicated status section below the input area and is not persisted across process restarts. Plan mode maps to ask-before-gated-tools behavior with planMd allowed, edit mode maps to always-allow gated tools plus the edit prompt, and allow-all mode maps to always-allow gated tools while retaining the plan prompt. If persistence is added later, document the settings file and migration behavior here.
 
 ## Tool Definition Standards
 
@@ -265,7 +268,7 @@ Guidelines:
 
 - Keep read-only tools permission mode `always` unless a reason emerges to ask.
 - Write/shell/network tools should be permission-gated when migrated.
-- Keep user-facing permission-mode behavior in Go: ask mode shows the modal; always-allow mode auto-approves runtime permission requests.
+- Keep user-facing permission-mode behavior in Go: ask mode shows the modal except always-allowed tools such as planMd; always-allow and allow-all modes auto-approve runtime permission requests.
 - Keep input schemas explicit and JSON-serializable.
 - Validate required arguments before doing filesystem work.
 - Catch implementation errors inside `execute` and return `{ ok: false, error }`.
@@ -336,7 +339,7 @@ tool.call.finish
 
 Runtime summary helpers must keep these events user-relevant and bounded. Do not send unbounded file contents, stdout/stderr, edit replacements, or raw tool payloads over stdout. Summaries should include paths, commands, counts, success/error messages, and capped previews with obvious secrets redacted.
 
-The Go UI groups tool calls by `(step, toolName)` and renders them as expandable tool rows in the chat transcript. Collapsed rows show compact summaries such as `Read 2 files` or `Searched 3 times · 12 matches`; clicking a row expands per-call details. `session.messages` reconstructs persisted tool groups from Hyper Router assistant `toolCalls` plus matching `role: "tool"` messages so session reloads preserve tool-call UI rows instead of dropping tool activity.
+The Go UI groups tool calls by `(step, toolName)` and renders them as expandable tool rows in the chat transcript. Collapsed rows show compact summaries such as `Read 2 files` or `Searched 3 times · 12 matches`; clicking a row expands per-call details. When expanding a `multiCall` row, the details should list each nested tool invocation as its own row using the summarized nested args/results, not just the outer multiCall wrapper payload. `session.messages` reconstructs persisted tool groups from Hyper Router assistant `toolCalls` plus matching `role: "tool"` messages so session reloads preserve tool-call UI rows instead of dropping tool activity.
 
 ## Testing Expectations
 

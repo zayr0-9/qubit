@@ -19,7 +19,7 @@ It implements `hyper-router`'s `ModelProvider` interface so the existing Qubit r
 - Default storage is the OS keychain (`service=Qubit`, `account=codex:chatgpt`).
 - The keychain secret is a Codex-compatible auth JSON blob.
 - Windows Credential Manager can reject large token blobs with `The stub received bad data.`; Qubit stores large Codex auth JSON as chunked keychain entries behind a small manifest.
-- `.qubit/codex-auth-index.json` may contain sanitized metadata only.
+- User-global `<config>/codex-auth-index.json` may contain sanitized metadata only.
 - Do not log, print, or send to Go any raw access token, refresh token, ID token, authorization code, OAuth state, PKCE verifier/challenge, or bearer header.
 - Plaintext auth-file storage is an explicit escape hatch only via `QUBIT_CODEX_AUTH_STORAGE=file` or `QUBIT_CODEX_AUTH_FILE`.
 
@@ -110,6 +110,8 @@ response.completed
 response.failed
 response.incomplete
 ```
+
+Reasoning capture must handle both streaming deltas and completed output items. Codex may return reasoning as `response.reasoning_text.delta` / `response.reasoning_summary_text.delta`, or later as `item.type === "reasoning"` inside `response.output_item.done` / `response.completed` output arrays with `summary` or `content` text parts. Preserve extracted text on `message.reasoningContent` so the Go TUI can surface a separate reasoning block.
 
 ## Validation
 

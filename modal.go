@@ -39,6 +39,7 @@ func (m model) openToolPermissionModal(ev runtimeEvent) model {
 		Fields:      fields,
 		Actions: []modalAction{
 			{ID: "allow", Label: "Allow", Style: "primary", Default: true},
+			{ID: "allow_all", Label: "Allow all"},
 			{ID: "deny", Label: "Deny", Style: "danger"},
 		},
 		Payload: map[string]any{
@@ -234,7 +235,10 @@ func (m model) resolveModalAction(actionID string) (tea.Model, tea.Cmd) {
 	m.previousMode = modeChat
 
 	if modal.Kind == modalKindPermission {
-		allow := actionID == "allow"
+		allow := actionID == "allow" || actionID == "allow_all"
+		if actionID == "allow_all" {
+			m.permissionMode = permissionModeAllowAll
+		}
 		if modal.ID == "demo_permission" {
 			if allow {
 				m.appendSystem("Demo permission allowed.")

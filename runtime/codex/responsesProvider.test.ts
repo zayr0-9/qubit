@@ -71,3 +71,45 @@ describe("CodexResponsesProvider", () => {
     assert.deepEqual(capturedBody.client_metadata, { "x-codex-installation-id": "session-1" });
   });
 });
+
+
+describe("CodexResponsesProvider reasoning", () => {
+  it("returns reasoningContent from completed Codex reasoning output items", async () => {
+    const tokenStore = new MemoryTokenStore({
+      tokens: {
+        access_token: VALID_ACCESS_TOKEN,
+        refresh_token: "refresh-token",
+      },
+    });
+    const provider = new CodexResponsesProvider({
+      tokenStore,
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      fetch: (async () => new Response([
+        "event: response.completed",
+        `data: ${JSON.stringify({
+          type: "response.completed",
+          response: {
+            id: "resp-1",
+            output: [
+              { type: "reasoning", summary: [{ type: "summary_text", text: "Inspected code and found parser gap." }] },
+              { type: "message", content: [{ type: "output_text", text: "Implemented." }] },
+            ],
+          },
+        })}`,
+        "",
+        "",
+      ].join("\n"), { status: 200 })) as typeof fetch,
+    });
+
+    const response = await provider.generate({
+      model: "gpt-5.2-codex",
+      sessionId: "session-1",
+      runId: "run-1",
+      messages: [{ role: "user", content: "hello" } as any],
+      tools: [],
+    });
+
+    assert.equal(response.message?.content, "Implemented.");
+    assert.equal(response.message?.reasoningContent, "Inspected code and found parser gap.");
+  });
+});

@@ -24,7 +24,7 @@ var slashCommands = []slashCommand{
 	{Name: "theme", Usage: "/theme", Description: "Customize terminal colors", NeedsArg: false, OpensOnSelect: true},
 	{Name: "rename", Usage: "/rename <title>", Description: "Rename current session", NeedsArg: true},
 	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal keyboard and appearance setup", NeedsArg: false},
-	{Name: "permission", Usage: "/permission <plan|edit>", Description: "Set plan/edit mode", NeedsArg: true},
+	{Name: "permission", Usage: "/permission <plan|edit|allow-all>", Description: "Set tool permission mode", NeedsArg: true},
 	{Name: "reasoning", Usage: "/reasoning <none|low|medium|high>", Description: "Set model reasoning effort", NeedsArg: true},
 	{Name: "permission-test", Usage: "/permission-test", Description: "Open a demo permission modal", NeedsArg: false},
 	{Name: "help", Usage: "/help", Description: "Show command help", NeedsArg: false},
@@ -168,6 +168,10 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	fields := strings.Fields(input)
 	cmd := strings.ToLower(strings.TrimPrefix(fields[0], "/"))
 	arg := strings.TrimSpace(strings.TrimPrefix(input, fields[0]))
+	if (m.busy || m.streaming || m.activeRunID != "") && !slashCommandRunsDuringActiveRun(cmd) {
+		m.appendLocalStatus("Command queued status only: /" + cmd + " cannot run while a model response is active.")
+		return m, nil
+	}
 
 	switch cmd {
 	case "new", "n":
@@ -236,7 +240,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title|message-number] - fork current chat or edit a numbered user message\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal keyboard and appearance setup\n/permission <plan|edit> - switch between plan and edit mode\n/reasoning <none|low|medium|high> - set model reasoning effort\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title|message-number] - fork current chat or edit a numbered user message\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal keyboard and appearance setup\n/permission <plan|edit|allow-all> - switch tool permission mode\n/reasoning <none|low|medium|high> - set model reasoning effort\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
@@ -368,15 +372,19 @@ func (m model) setPermissionMode(arg string) (tea.Model, tea.Cmd) {
 	case "plan", "ask", "a", "p":
 		m.permissionMode = permissionModeAsk
 		m.status = "ready"
-		m.appendSystem("Mode: plan. Tool permissions will ask before running gated tools.")
+		m.appendSystem("Mode: plan. Tool permissions will ask before running gated tools, except planMd.")
 	case "edit", "always", "always-allow", "always_allow", "allow", "auto", "auto-allow", "e":
 		m.permissionMode = permissionModeAlwaysAllow
 		m.status = "ready"
 		m.appendSystem("Mode: edit. Gated tools will be allowed automatically for this session.")
+	case "allow-all", "allow_all", "all", "approve-all", "approve_all":
+		m.permissionMode = permissionModeAllowAll
+		m.status = "ready"
+		m.appendSystem("Mode: allow all. Gated tools will be allowed automatically for this TUI session while keeping the plan prompt.")
 	case "":
-		m.appendSystem(fmt.Sprintf("Current mode: %s. Usage: /permission <plan|edit>", m.permissionModeLabel()))
+		m.appendSystem(fmt.Sprintf("Current mode: %s. Usage: /permission <plan|edit|allow-all>", m.permissionModeLabel()))
 	default:
-		m.appendSystem("Usage: /permission <plan|edit>")
+		m.appendSystem("Usage: /permission <plan|edit|allow-all>")
 	}
 	return m, nil
 }
@@ -420,19 +428,26 @@ func (m model) reasoningLevelValue() string {
 }
 
 func (m model) cyclePermissionMode() (tea.Model, tea.Cmd) {
-	if m.permissionMode == permissionModeAlwaysAllow {
-		m.permissionMode = permissionModeAsk
-	} else {
+	switch m.permissionMode {
+	case permissionModeAsk:
 		m.permissionMode = permissionModeAlwaysAllow
+	case permissionModeAlwaysAllow:
+		m.permissionMode = permissionModeAllowAll
+	default:
+		m.permissionMode = permissionModeAsk
 	}
 	return m, nil
 }
 
 func (m model) permissionModeLabel() string {
-	if m.permissionMode == permissionModeAlwaysAllow {
+	switch m.permissionMode {
+	case permissionModeAlwaysAllow:
 		return "edit"
+	case permissionModeAllowAll:
+		return "allow all"
+	default:
+		return "plan"
 	}
-	return "plan"
 }
 
 func (m *model) applyReasoningUpdated(ev runtimeEvent) {
@@ -449,6 +464,13 @@ func (m model) systemPromptMode() string {
 		return "edit"
 	}
 	return "plan"
+}
+
+func (m model) shouldAutoAllowPermission(ev runtimeEvent) bool {
+	if m.permissionMode == permissionModeAlwaysAllow || m.permissionMode == permissionModeAllowAll {
+		return true
+	}
+	return m.permissionMode == permissionModeAsk && ev.ToolName == "planMd"
 }
 
 func (m model) openForkTree() (tea.Model, tea.Cmd) {
@@ -470,7 +492,16 @@ func (m model) openForkTreeForSession(sessionID string) (tea.Model, tea.Cmd) {
 
 func (m model) showSlashPalette() bool {
 	value := m.composer.Value()
-	return strings.HasPrefix(value, "/") && !strings.Contains(value, " ") && m.mode == modeChat && !m.busy && m.ready && !m.forkSelector.Active
+	return strings.HasPrefix(value, "/") && !strings.Contains(value, " ") && m.mode == modeChat && m.ready && !m.forkSelector.Active
+}
+
+func slashCommandRunsDuringActiveRun(cmd string) bool {
+	switch strings.ToLower(strings.TrimSpace(cmd)) {
+	case "help", "h", "permission", "permissions", "perm", "theme", "themes", "colors", "color", "permission-test", "modal-test":
+		return true
+	default:
+		return false
+	}
 }
 
 func (m model) filteredSlashCommands() []slashCommand {

@@ -31,8 +31,8 @@ func TestOpenToolPermissionModal(t *testing.T) {
 	if m.modal.ID != "perm_1" {
 		t.Fatalf("modal id = %q, want perm_1", m.modal.ID)
 	}
-	if len(m.modal.Actions) != 2 || m.modal.Actions[0].ID != "allow" || m.modal.Actions[1].ID != "deny" {
-		t.Fatalf("actions = %#v, want allow/deny", m.modal.Actions)
+	if len(m.modal.Actions) != 3 || m.modal.Actions[0].ID != "allow" || m.modal.Actions[1].ID != "allow_all" || m.modal.Actions[2].ID != "deny" {
+		t.Fatalf("actions = %#v, want allow/allow_all/deny", m.modal.Actions)
 	}
 	if !modalHasField(m.modal, "Tool", "write_file") {
 		t.Fatalf("modal fields missing tool: %#v", m.modal.Fields)
@@ -224,6 +224,18 @@ func TestSetPermissionModeSlashCommand(t *testing.T) {
 		t.Fatalf("status = %q, want ready", got.status)
 	}
 
+	updated, cmd = got.handleSlashCommand("/permission allow-all")
+	if cmd != nil {
+		t.Fatal("/permission allow-all returned command, want nil")
+	}
+	got = updated.(model)
+	if got.permissionMode != permissionModeAllowAll {
+		t.Fatalf("permissionMode = %q, want %q", got.permissionMode, permissionModeAllowAll)
+	}
+	if got.systemPromptMode() != "plan" {
+		t.Fatalf("systemPromptMode = %q, want plan", got.systemPromptMode())
+	}
+
 	updated, cmd = got.handleSlashCommand("/permission ask")
 	if cmd != nil {
 		t.Fatal("/permission ask returned command, want nil")
@@ -259,11 +271,20 @@ func TestShiftTabCyclesPermissionMode(t *testing.T) {
 		t.Fatal("second shift+tab returned command, want nil")
 	}
 	got = updated.(model)
-	if got.permissionMode != permissionModeAsk {
-		t.Fatalf("permissionMode = %q, want %q", got.permissionMode, permissionModeAsk)
+	if got.permissionMode != permissionModeAllowAll {
+		t.Fatalf("permissionMode = %q, want %q", got.permissionMode, permissionModeAllowAll)
 	}
 	if strings.Contains(got.status, "permission") {
 		t.Fatalf("status = %q, should not display permission mode in title/status", got.status)
+	}
+
+	updated, cmd = got.updateKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if cmd != nil {
+		t.Fatal("third shift+tab returned command, want nil")
+	}
+	got = updated.(model)
+	if got.permissionMode != permissionModeAsk {
+		t.Fatalf("permissionMode = %q, want %q", got.permissionMode, permissionModeAsk)
 	}
 }
 
@@ -372,5 +393,37 @@ func TestRenderModalKeepsSelectedOptionVisible(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "more above") {
 		t.Fatalf("rendered modal missing above hint:\n%s", rendered)
+	}
+}
+
+func TestPlanModeAutoApprovesPlanToolOnly(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.permissionMode = permissionModeAsk
+
+	updated, cmd := m.updateRuntime(runtimeEvent{Type: "tool.permission.request", ID: "perm_plan", ToolName: "planMd"})
+	got := updated.(model)
+	if got.modal != nil || got.mode == modeModal {
+		t.Fatalf("planMd opened modal in plan mode: mode=%v modal=%#v", got.mode, got.modal)
+	}
+	payload := runBatchSendCommand(t, cmd, stdin, "tool.permission.response")
+	if payload["id"] != "perm_plan" || payload["allow"] != true {
+		t.Fatalf("payload = %#v, want allow response for perm_plan", payload)
+	}
+}
+
+func TestPermissionModalAllowAllEnablesSessionAutoAllow(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m = m.openToolPermissionModal(runtimeEvent{ID: "perm_all", ToolName: "editFile"})
+
+	updated, cmd := m.resolveModalAction("allow_all")
+	got := updated.(model)
+	if got.permissionMode != permissionModeAllowAll {
+		t.Fatalf("permissionMode = %q, want %q", got.permissionMode, permissionModeAllowAll)
+	}
+	payload := runBatchSendCommand(t, cmd, stdin, "tool.permission.response")
+	if payload["id"] != "perm_all" || payload["allow"] != true {
+		t.Fatalf("payload = %#v, want allow response for perm_all", payload)
 	}
 }

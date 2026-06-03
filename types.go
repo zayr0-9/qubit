@@ -16,6 +16,28 @@ type chatMessage struct {
 	Title            string     `json:"title,omitempty"`
 	Path             string     `json:"path,omitempty"`
 	ToolGroup        *toolGroup `json:"toolGroup,omitempty"`
+	LocalOnly        bool       `json:"localOnly,omitempty"`
+	MessageKind      string     `json:"messageKind,omitempty"`
+}
+
+const (
+	messageKindStatus   = "status"
+	messageKindReminder = "reminder"
+)
+
+type queuedMessageKind string
+
+const (
+	queuedMessageStatus   queuedMessageKind = "status"
+	queuedMessageReminder queuedMessageKind = "reminder"
+	queuedMessageUser     queuedMessageKind = "user"
+)
+
+type queuedMessage struct {
+	Kind        queuedMessageKind
+	Role        string
+	Content     string
+	SendToModel bool
 }
 
 type forkTreeLineageMessage struct {
@@ -176,6 +198,7 @@ type permissionMode string
 const (
 	permissionModeAsk         permissionMode = "ask"
 	permissionModeAlwaysAllow permissionMode = "always_allow"
+	permissionModeAllowAll    permissionMode = "allow_all"
 )
 
 type modalKind string
@@ -349,6 +372,7 @@ type model struct {
 	renderCache map[renderCacheKey]string
 
 	messages              []chatMessage
+	queuedMessages        []queuedMessage
 	sessions              []sessionInfo
 	pendingDeleteSession  sessionInfo
 	apiKeys               []apiKeyInfo

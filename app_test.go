@@ -2236,7 +2236,7 @@ func TestAutoScrollStaysOffDuringNewContentUntilUserReachesBottom(t *testing.T) 
 	}
 }
 
-func TestPlanViewEventAddsUiOnlyMarkdownMessage(t *testing.T) {
+func TestPlanDisplayEventAddsUiOnlyMarkdownMessage(t *testing.T) {
 	m := initialModel(nil)
 	m.width = 100
 	m.height = 30
@@ -2246,7 +2246,7 @@ func TestPlanViewEventAddsUiOnlyMarkdownMessage(t *testing.T) {
 	got := updated.(model)
 
 	if len(got.messages) < 2 {
-		t.Fatalf("messages = %#v, want plan view appended", got.messages)
+		t.Fatalf("messages = %#v, want plan display appended", got.messages)
 	}
 	last := got.messages[len(got.messages)-1]
 	if last.Role != "view" || last.ViewType != "plan" || last.Content == "" {
@@ -2322,14 +2322,14 @@ func TestApplySessionListKeepsLocalNewerActivity(t *testing.T) {
 	}
 }
 
-func TestApplySessionMessagesPreservesPersistedPlanViewMessages(t *testing.T) {
+func TestApplySessionMessagesPreservesPersistedPlanDisplayMessages(t *testing.T) {
 	m := initialModel(nil)
 	m.width = 100
 	m.height = 30
 	m.layout()
 
 	m.applySessionMessages(runtimeEvent{Type: "session.messages", Messages: []chatMessage{
-		{Role: "tool", ToolGroup: &toolGroup{ID: "stored-tool-1-planMd-0", Name: "planMd", Step: 1, Calls: []toolCallUI{{ID: "plan-1", Name: "planMd", Step: 1, Status: "completed", Args: map[string]any{"action": "view", "name": "distribution-plan"}, Result: map[string]any{"viewed": true, "name": "distribution-plan", "path": "./.qubit/plans/distribution-plan.md"}}}}},
+		{Role: "tool", ToolGroup: &toolGroup{ID: "stored-tool-1-planMd-0", Name: "planMd", Step: 1, Calls: []toolCallUI{{ID: "plan-1", Name: "planMd", Step: 1, Status: "completed", Args: map[string]any{"action": "display", "name": "distribution-plan"}, Result: map[string]any{"displayed": true, "name": "distribution-plan", "path": "./.qubit/plans/distribution-plan.md"}}}}},
 		{Role: "view", ViewType: "plan", Title: "Plan: distribution-plan", Path: "./.qubit/plans/distribution-plan.md", Content: "# Distribution Plan\n\n- package"},
 	}})
 
@@ -2338,10 +2338,124 @@ func TestApplySessionMessagesPreservesPersistedPlanViewMessages(t *testing.T) {
 	}
 	last := m.messages[1]
 	if last.Role != "view" || last.ViewType != "plan" || !strings.Contains(last.Content, "Distribution Plan") {
-		t.Fatalf("last message = %#v, want persisted plan view", last)
+		t.Fatalf("last message = %#v, want persisted plan display", last)
 	}
 	viewport := plainText(m.viewport.View())
 	if !strings.Contains(viewport, "Plan: distribution-plan") || !strings.Contains(viewport, "Distribution") || !strings.Contains(viewport, "package") {
 		t.Fatalf("viewport = %q, want persisted plan rendered", viewport)
+	}
+}
+
+func TestSlashHelpWhileStreamingQueuesLocalStatus(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.busy = true
+	m.activeRunID = "run_1"
+	m.streaming = true
+	m.streamingMessageIndex = 0
+	m.streamingFullContent = "assistant response"
+	m.messages = []chatMessage{{Role: "assistant", Content: "assistant"}}
+
+	updated, cmd := m.handleSlashCommand("/help")
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatalf("/help while streaming cmd = %T, want nil", cmd)
+	}
+	if len(got.queuedMessages) != 1 {
+		t.Fatalf("queuedMessages = %#v, want one queued status", got.queuedMessages)
+	}
+	if got.queuedMessages[0].SendToModel || got.queuedMessages[0].Kind != queuedMessageStatus {
+		t.Fatalf("queued status = %#v, want display-only status", got.queuedMessages[0])
+	}
+	if len(got.messages) != 1 {
+		t.Fatalf("messages changed while streaming: %#v", got.messages)
+	}
+}
+
+func TestQueuedStatusFlushesAfterStreamCompletion(t *testing.T) {
+	m := initialModel(nil)
+	m.busy = true
+	m.activeRunID = "run_1"
+	m.streaming = true
+	m.streamingMessageIndex = 0
+	m.streamingFullContent = "ok"
+	m.streamingFinished = true
+	m.streamingFinishStatus = "completed"
+	m.messages = []chatMessage{{Role: "assistant", Content: ""}}
+	m.queueStatus("Mode: edit")
+
+	updated, _ := m.updateFakeStreamTick()
+	got := updated.(model)
+	if got.busy || got.streaming || got.activeRunID != "" {
+		t.Fatalf("run state busy=%v streaming=%v activeRunID=%q, want idle", got.busy, got.streaming, got.activeRunID)
+	}
+	if len(got.queuedMessages) != 0 {
+		t.Fatalf("queuedMessages = %#v, want flushed", got.queuedMessages)
+	}
+	if len(got.messages) != 2 || !got.messages[1].LocalOnly || got.messages[1].Role != "status" || got.messages[1].Content != "Mode: edit" {
+		t.Fatalf("messages = %#v, want local-only status appended", got.messages)
+	}
+}
+
+func TestBusyUserInputQueuesAndStartsAfterRunFinishes(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.busy = true
+	m.activeRunID = "run_1"
+	m.streaming = true
+	m.streamingMessageIndex = 0
+	m.streamingFullContent = "ok"
+	m.streamingFinished = true
+	m.streamingFinishStatus = "completed"
+	m.autoNewSessionOnChat = false
+	m.session = "sess_1"
+	m.messages = []chatMessage{{Role: "assistant", Content: ""}}
+	m.composer.SetValue("next question")
+
+	updated, cmd := m.submitInput()
+	got := updated.(model)
+	if cmd != nil {
+		t.Fatalf("submit busy user input cmd = %T, want nil until current run finishes", cmd)
+	}
+	if len(got.queuedMessages) != 1 || got.queuedMessages[0].Kind != queuedMessageUser || !got.queuedMessages[0].SendToModel {
+		t.Fatalf("queuedMessages = %#v, want queued user message", got.queuedMessages)
+	}
+
+	updated, cmd = got.updateFakeStreamTick()
+	got = updated.(model)
+	payload := runBatchSendCommand(t, cmd, stdin, "chat")
+	if payload["input"] != "next question" {
+		t.Fatalf("chat input = %#v, want queued next question", payload["input"])
+	}
+	if got.activeRunID == "" || !got.busy {
+		t.Fatalf("queued run state busy=%v activeRunID=%q, want new active run", got.busy, got.activeRunID)
+	}
+	if len(got.queuedMessages) != 0 {
+		t.Fatalf("queuedMessages = %#v, want consumed", got.queuedMessages)
+	}
+}
+
+func TestUnsafeSlashCommandDuringStreamDoesNotInterruptRun(t *testing.T) {
+	rt, _ := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.busy = true
+	m.activeRunID = "run_1"
+	m.streaming = true
+	m.messages = []chatMessage{{Role: "assistant", Content: "partial"}}
+
+	updated, cmd := m.handleSlashCommand("/new Later")
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatalf("unsafe slash command during stream cmd = %T, want nil", cmd)
+	}
+	if !got.busy || !got.streaming || got.activeRunID != "run_1" {
+		t.Fatalf("run interrupted: busy=%v streaming=%v activeRunID=%q", got.busy, got.streaming, got.activeRunID)
+	}
+	if len(got.queuedMessages) != 1 || got.queuedMessages[0].SendToModel {
+		t.Fatalf("queuedMessages = %#v, want local status explaining block", got.queuedMessages)
 	}
 }

@@ -5,6 +5,7 @@ import net from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   createRuntime,
@@ -21,16 +22,20 @@ import { setPlanViewEmitter } from "./tools/planMd.js";
 import { setMultiCallLifecycleEmitter, setMultiCallPermissionRequester } from "./tools/multiCall.js";
 import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
 import { CodexResponsesProvider, QubitCodexTokenStore, cancelCodexLogin, startCodexLogin } from "./runtime/codex/index.js";
+import { overlayActiveRunUserMessages } from "./runtime/activeRunOverlay.js";
 
 const entryDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = basename(entryDir) === "dist" ? dirname(entryDir) : entryDir;
 const initialWorkspaceCwd = process.env.QUBIT_WORKSPACE_CWD || process.cwd();
 setDefaultToolCwd(initialWorkspaceCwd);
 const dataDir = process.env.QUBIT_PROJECT_DIR || join(initialWorkspaceCwd, ".qubit");
+const configDir = resolveConfigDir();
 const storagePath = join(dataDir, "sessions.sqlite");
 const indexPath = join(dataDir, "session-index.json");
-const keyIndexPath = join(dataDir, "api-key-index.json");
-const settingsPath = join(dataDir, "settings.json");
+const legacyKeyIndexPath = join(dataDir, "api-key-index.json");
+const legacySettingsPath = join(dataDir, "settings.json");
+const keyIndexPath = join(configDir, "api-key-index.json");
+const settingsPath = join(configDir, "settings.json");
 const promptsDir = join(rootDir, "prompts");
 const baseInstructions = "You are Qubit, a concise terminal coding assistant MVP. Be helpful, direct, and practical. Keep answers brief unless the user asks for detail.";
 const defaultModePrompts = {
@@ -38,6 +43,13 @@ const defaultModePrompts = {
   edit: "You are in edit mode: implement changes directly and validate them.",
 };
 const defaultSessionId = process.env.QUBIT_SESSION_ID || "qubit-default";
+function resolveConfigDir() {
+  if (process.env.QUBIT_CONFIG_DIR) return process.env.QUBIT_CONFIG_DIR;
+  if (process.platform === "win32") return join(process.env.APPDATA || join(os.homedir(), "AppData", "Roaming"), "Qubit");
+  if (process.platform === "darwin") return join(os.homedir(), "Library", "Application Support", "Qubit");
+  return join(process.env.XDG_CONFIG_HOME || join(os.homedir(), ".config"), "qubit");
+}
+
 const providerDefinitions = {
   glm: {
     aliases: ["zai"],
@@ -307,7 +319,7 @@ const hooks = {
 };
 
 let apiKeyIndex = await loadApiKeyIndex();
-const codexTokenStore = new QubitCodexTokenStore({ dataDir, keychainService, keytar });
+const codexTokenStore = new QubitCodexTokenStore({ dataDir: configDir, legacyDataDir: dataDir, keychainService, keytar });
 let runtimeState = await createRuntimeState("plan");
 let sessionIndex = await loadSessionIndex();
 let activeSessionId = sessionIndex.activeSessionId;
@@ -658,11 +670,24 @@ async function handleLine(line) {
     return;
   }
 
-  if (request.type !== "chat" || typeof request.input !== "string") {
-    write({ type: "error", id: request.id, error: "Expected chat/session/key command" });
+  if (request.type === "chat" && typeof request.input === "string") {
+    const responseTarget = currentResponseTarget;
+    void handleChatRequest(request, responseTarget).catch((error) => {
+      write({
+        type: "error",
+        id: request.id,
+        runId: request.runId,
+        sessionId: request.sessionId,
+        error: redactSecrets(error instanceof Error ? error.message : String(error)),
+      }, responseTarget);
+    });
     return;
   }
 
+  write({ type: "error", id: request.id, error: "Expected chat/session/key command" });
+}
+
+async function handleChatRequest(request, responseTarget = null) {
   const runId = String(request.runId || request.id || createRunId());
   const controller = new AbortController();
   let runSessionId = request.sessionId || activeSessionId;
@@ -671,7 +696,7 @@ async function handleLine(line) {
     const sourceSessionId = String(request.sessionId || activeSessionId);
     const source = sessionIndex.sessions.find((candidate) => candidate.id === sourceSessionId);
     if (!source) {
-      write({ type: "error", id: request.id, error: `Unknown session: ${sourceSessionId}` });
+      write({ type: "error", id: request.id, error: `Unknown session: ${sourceSessionId}` }, responseTarget);
       return;
     }
     const session = await forkSession({
@@ -681,7 +706,7 @@ async function handleLine(line) {
       includeUiMessageAtIndex: false,
     });
     if (!session) {
-      write({ type: "error", id: request.id, error: `Unknown session: ${sourceSessionId}` });
+      write({ type: "error", id: request.id, error: `Unknown session: ${sourceSessionId}` }, responseTarget);
       return;
     }
     runSessionId = session.id;
@@ -706,12 +731,12 @@ async function handleLine(line) {
 
   await touchSession(runSessionId, { title: titleFromInput(request.input) });
 
-  const responseTarget = currentResponseTarget;
-  activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, controller, runtime: runtimeState.runtime, target: responseTarget });
-  write({ type: "run_started", id: request.id, runId, sessionId: runSessionId });
+  const runRuntimeState = runtimeState;
+  activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, input: request.input, controller, runtime: runRuntimeState.runtime, target: responseTarget });
+  write({ type: "run_started", id: request.id, runId, sessionId: runSessionId }, responseTarget);
 
   try {
-    const result = await runtimeState.runtime.run({
+    const result = await runRuntimeState.runtime.run({
       runId,
       signal: controller.signal,
       sessionId: runSessionId,
@@ -735,12 +760,12 @@ async function handleLine(line) {
         status: result.status,
         content: assistant?.content || "",
         reasoningContent: assistant?.reasoningContent,
-      });
+      }, responseTarget);
     }
-    write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: result.status });
+    write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: result.status }, responseTarget);
   } catch (error) {
     if (controller.signal.aborted || isAbortError(error)) {
-      write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: "cancelled" });
+      write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: "cancelled" }, responseTarget);
     } else {
       write({
         type: "error",
@@ -748,7 +773,7 @@ async function handleLine(line) {
         runId,
         sessionId: runSessionId,
         error: redactSecrets(error instanceof Error ? error.message : String(error)),
-      });
+      }, responseTarget);
     }
   } finally {
     activeRuns.delete(runId);
@@ -756,10 +781,11 @@ async function handleLine(line) {
 }
 
 function handleCancelRequest(request) {
+  const requesterTarget = currentResponseTarget;
   const runId = String(request.runId || "");
   const active = activeRuns.get(runId);
   if (!runId || !active) {
-    write({ type: "run_cancelled", id: request.id, runId, status: "not_found" });
+    write({ type: "run_cancelled", id: request.id, runId, status: "not_found" }, requesterTarget);
     return;
   }
 
@@ -769,7 +795,12 @@ function handleCancelRequest(request) {
     // Best-effort: the AbortController below is the local cancellation path.
   }
   active.controller?.abort();
-  write({ type: "run_cancelled", id: request.id, runId, sessionId: active.sessionId, status: "cancelled" });
+
+  const message = { type: "run_cancelled", id: request.id, runId, sessionId: active.sessionId, status: "cancelled" };
+  write(message, requesterTarget);
+  if (active.target && active.target !== requesterTarget) {
+    write(message, active.target);
+  }
 }
 
 function defaultModelForProvider(provider) {
@@ -913,7 +944,11 @@ async function loadSettings() {
   try {
     parsed = JSON.parse(await readFile(settingsPath, "utf8"));
   } catch {
-    parsed = null;
+    try {
+      parsed = JSON.parse(await readFile(legacySettingsPath, "utf8"));
+    } catch {
+      parsed = null;
+    }
   }
 
   let defaultProvider = "";
@@ -948,9 +983,8 @@ async function loadSettings() {
   await saveSettings(normalized);
   return normalized;
 }
-
 async function saveSettings(nextSettings = settings) {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(configDir, { recursive: true });
   await writeFile(settingsPath, `${JSON.stringify(nextSettings, null, 2)}\n`, { mode: 0o600 });
 }
 
@@ -959,7 +993,11 @@ async function loadApiKeyIndex() {
   try {
     parsed = JSON.parse(await readFile(keyIndexPath, "utf8"));
   } catch {
-    parsed = null;
+    try {
+      parsed = JSON.parse(await readFile(legacyKeyIndexPath, "utf8"));
+    } catch {
+      parsed = null;
+    }
   }
   const keys = Array.isArray(parsed?.keys) ? parsed.keys : [];
   const normalized = keys
@@ -990,9 +1028,8 @@ async function loadApiKeyIndex() {
   await saveApiKeyIndex(index);
   return index;
 }
-
 async function saveApiKeyIndex(index = apiKeyIndex) {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(configDir, { recursive: true });
   await writeFile(keyIndexPath, `${JSON.stringify(index, null, 2)}\n`, { mode: 0o600 });
 }
 
@@ -1498,7 +1535,7 @@ function summarizeToolResult(toolName, result) {
     case "todoMd":
       return { ...summary, ...compactObject(data, ["id", "created", "exists", "success", "message", "modifiedAt"]), contentPreview: previewText(data.content, 1600) };
     case "planMd":
-      return { ...summary, ...compactObject(data, ["name", "created", "exists", "success", "message", "modifiedAt", "viewed", "path"]), planCount: Array.isArray(payload) ? payload.length : undefined, contentPreview: data.viewed ? undefined : previewText(data.content, 1600) };
+      return { ...summary, ...compactObject(data, ["name", "created", "exists", "success", "message", "modifiedAt", "displayed", "path"]), planCount: Array.isArray(payload) ? payload.length : undefined, contentPreview: data.displayed ? undefined : previewText(data.content, 1600) };
     default:
       return { ...summary, payloadPreview: previewText(payload, 2400) };
   }
@@ -1740,14 +1777,14 @@ async function planViewMessagesForToolGroup(group) {
   for (const call of group.calls) {
     const args = plainObject(call.args);
     const result = plainObject(call.result);
-    if (args.action !== "view" || result.viewed !== true) continue;
+    if (!(args.action === "display" && result.displayed === true)) continue;
     const name = String(result.name || args.name || "plan");
     const planPath = String(result.path || join(dataDir, "plans", `${name}.md`));
     let content = "";
     try {
       content = await readFile(planPath, "utf8");
     } catch {
-      content = `Plan \"${name}\" was viewed, but ${planPath} could not be loaded.`;
+      content = `Plan \"${name}\" was displayed, but ${planPath} could not be loaded.`;
     }
     views.push({ role: "view", viewType: "plan", title: `Plan: ${name}`, path: planPath, content });
   }
@@ -2031,8 +2068,16 @@ async function rawSessionMessagesCached(sessionId, cache) {
   } catch {
     messages = [];
   }
+  messages = overlayActiveRunUserMessages(messages, activeRunInputsForSession(sessionId));
   cache.set(sessionId, messages);
   return messages;
+}
+
+function activeRunInputsForSession(sessionId) {
+  const normalizedSessionId = String(sessionId || "");
+  return [...activeRuns.values()]
+    .filter((run) => run?.sessionId === normalizedSessionId && typeof run.input === "string" && run.input.trim())
+    .map((run) => run.input);
 }
 
 function lastTextPreview(messages) {
@@ -2311,8 +2356,10 @@ function isAbortError(error) {
   return /\babort(?:ed)?\b|\bcancell?ed\b/i.test(message);
 }
 
+const sessionTitleMaxChars = 96;
+
 function titleFromInput(input) {
   const cleaned = input.replace(/\s+/g, " ").trim();
   if (!cleaned) return "New chat";
-  return cleaned.length > 48 ? `${cleaned.slice(0, 45)}...` : cleaned;
+  return cleaned.length > sessionTitleMaxChars ? `${cleaned.slice(0, sessionTitleMaxChars - 3)}...` : cleaned;
 }

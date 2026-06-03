@@ -35,16 +35,16 @@ describe('planMd', () => {
     assert.match(edited.content ?? '', /\[x\] first/)
   })
 
-  it('view emits UI-only plan event and returns bounded result', async () => {
-    await createPlan('# View Me\n\nhello', 'view-me', tmpDir)
+  it('display emits UI-only plan event and returns bounded result', async () => {
+    await createPlan('# Display Me\n\nhello', 'display-me', tmpDir)
     let event: any = null
     setPlanViewEmitter((next) => { event = next })
 
-    const result = await runPlanTool({ action: 'view', name: 'view-me', cwd: tmpDir }) as any
-    assert.equal(result.viewed, true)
-    assert.equal(result.name, 'view-me')
-    assert.equal(event.name, 'view-me')
-    assert.equal(event.content, '# View Me\n\nhello')
+    const result = await runPlanTool({ action: 'display', name: 'display-me', cwd: tmpDir }) as any
+    assert.equal(result.displayed, true)
+    assert.equal(result.name, 'display-me')
+    assert.equal(event.name, 'display-me')
+    assert.equal(event.content, '# Display Me\n\nhello')
     assert.equal(path.basename(path.dirname(event.path)), 'plans')
   })
 })

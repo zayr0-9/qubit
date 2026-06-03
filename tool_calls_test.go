@@ -76,6 +76,41 @@ func TestToolCallFinishWithoutStartCreatesGroup(t *testing.T) {
 	}
 }
 
+func TestExpandedMultiCallGroupShowsEachNestedTool(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 120
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "inspect"}}
+	m.applyToolCallFinish(runtimeEvent{
+		Type:       "tool.call.finish",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "multi_1",
+		ToolName:   "multiCall",
+		Status:     "completed",
+		Args: map[string]any{"calls": []any{
+			map[string]any{"tool": "readFile", "args": map[string]any{"path": "agent.md"}},
+			map[string]any{"tool": "ripgrep", "args": map[string]any{"pattern": "multiCall", "searchPath": "D:\\qubit"}},
+		}},
+		Result: map[string]any{"results": []any{
+			map[string]any{"index": float64(0), "tool": "readFile", "ok": true, "result": map[string]any{"totalLines": float64(42), "contentPreview": "# Qubit Agent Guide"}},
+			map[string]any{"index": float64(1), "tool": "ripgrep", "ok": true, "result": map[string]any{"matchCount": float64(7)}},
+		}},
+	})
+	m.messages[1].ToolGroup.Expanded = true
+	m.refreshViewport()
+
+	viewport := plainText(m.viewport.View())
+	if !strings.Contains(viewport, "completed · readFile · agent.md") || !strings.Contains(viewport, "completed · ripgrep · \"multiCall\"") {
+		t.Fatalf("viewport = %q, want expanded multiCall nested tool rows", viewport)
+	}
+	if !strings.Contains(viewport, "lines: 42") || !strings.Contains(viewport, "matches: 7") {
+		t.Fatalf("viewport = %q, want nested tool details", viewport)
+	}
+}
+
 func TestToolGroupExpandedRenderingAndMouseToggle(t *testing.T) {
 	m := initialModel(nil)
 	m.session = "sess_1"

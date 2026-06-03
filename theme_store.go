@@ -7,33 +7,55 @@ import (
 	"path/filepath"
 )
 
-func themeConfigPath(qubitDir string) string {
+func themeConfigPath() (string, error) {
+	configDir, err := qubitConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(configDir, "theme.json"), nil
+}
+
+func legacyThemeConfigPath(qubitDir string) string {
 	return filepath.Join(qubitDir, "theme.json")
 }
 
 func loadThemeConfig(qubitDir string) (themeConfig, error) {
-	if qubitDir == "" {
-		return themeConfig{}, nil
-	}
-	data, err := os.ReadFile(themeConfigPath(qubitDir))
+	path, err := themeConfigPath()
 	if err != nil {
-		if os.IsNotExist(err) {
+		return themeConfig{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return themeConfig{}, fmt.Errorf("read theme config: %w", err)
+		}
+		if qubitDir == "" {
 			return themeConfig{}, nil
 		}
-		return themeConfig{}, fmt.Errorf("read theme config: %w", err)
+		data, err = os.ReadFile(legacyThemeConfigPath(qubitDir))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return themeConfig{}, nil
+			}
+			return themeConfig{}, fmt.Errorf("read legacy theme config: %w", err)
+		}
 	}
 	var theme themeConfig
 	if err := json.Unmarshal(data, &theme); err != nil {
 		return themeConfig{}, fmt.Errorf("parse theme config: %w", err)
 	}
-	return resolveThemeConfig(theme), nil
+	resolved := resolveThemeConfig(theme)
+	if resolved.Background != "" && resolved.Text != "" && !fileExists(path) {
+		_ = saveThemeConfig(qubitDir, resolved)
+	}
+	return resolved, nil
 }
 
-func saveThemeConfig(qubitDir string, theme themeConfig) error {
-	if qubitDir == "" {
-		return nil
+func saveThemeConfig(_ string, theme themeConfig) error {
+	path, err := themeConfigPath()
+	if err != nil {
+		return err
 	}
-	path := themeConfigPath(qubitDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("create theme config directory: %w", err)
 	}
@@ -73,12 +95,16 @@ func resolveThemeConfig(theme themeConfig) themeConfig {
 }
 
 func (m *model) saveThemeConfig() {
-	qubitDir := ""
-	if m.runtime != nil {
-		qubitDir = m.runtime.qubitDir
+	if m.runtime == nil {
+		return
 	}
-	if err := saveThemeConfig(qubitDir, m.theme); err != nil {
+	if err := saveThemeConfig(m.runtime.qubitDir, m.theme); err != nil {
 		m.err = err.Error()
 		m.status = "theme save failed"
 	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

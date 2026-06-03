@@ -16,12 +16,14 @@ interface KeychainChunkManifest {
 
 export class QubitCodexTokenStore implements CodexTokenStore {
   private readonly dataDir: string;
+  private readonly legacyDataDir: string;
   private readonly keychainService: string;
   private readonly keychainAccount: string;
   private readonly keytar: KeytarLike | null;
 
   constructor(options: CodexTokenStoreOptions) {
     this.dataDir = options.dataDir;
+    this.legacyDataDir = options.legacyDataDir || "";
     this.keychainService = options.keychainService || "Qubit";
     this.keychainAccount = options.keychainAccount || CODEX_KEYCHAIN_ACCOUNT;
     this.keytar = options.keytar || null;
@@ -101,6 +103,10 @@ export class QubitCodexTokenStore implements CodexTokenStore {
 
   private indexPath(): string {
     return join(this.dataDir, INDEX_FILE);
+  }
+
+  private legacyIndexPath(): string {
+    return this.legacyDataDir ? join(this.legacyDataDir, INDEX_FILE) : "";
   }
 
   private async loadFromFile(filePath: string): Promise<CodexAuthJson | null> {
@@ -192,13 +198,19 @@ export class QubitCodexTokenStore implements CodexTokenStore {
   }
 
   private async readIndex(): Promise<Record<string, unknown>> {
+    const parsed = await this.readIndexFile(this.indexPath()) || await this.readIndexFile(this.legacyIndexPath());
+    if (!parsed || typeof parsed !== "object") return {};
+    const { accountEmail, accountId, planType, updatedAt, source } = parsed;
+    return { accountEmail, accountId, planType, updatedAt, source };
+  }
+
+  private async readIndexFile(path: string): Promise<Record<string, unknown> | null> {
+    if (!path) return null;
     try {
-      const parsed = JSON.parse(await readFile(this.indexPath(), "utf8"));
-      if (!parsed || typeof parsed !== "object") return {};
-      const { accountEmail, accountId, planType, updatedAt, source } = parsed;
-      return { accountEmail, accountId, planType, updatedAt, source };
+      const parsed = JSON.parse(await readFile(path, "utf8"));
+      return parsed && typeof parsed === "object" ? parsed : null;
     } catch {
-      return {};
+      return null;
     }
   }
 

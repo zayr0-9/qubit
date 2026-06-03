@@ -308,7 +308,9 @@ func (m *model) toolKindStyle(toolName string) lipgloss.Style {
 		return toolReadSt
 	case "glob", "ripgrep":
 		return toolSearchSt
-	case "createFile", "editFile", "multiEdit", "deleteFile", "planMd":
+	case "createFile", "editFile", "multiEdit", "deleteFile":
+		return toolWriteSt
+	case "planMd":
 		return toolWriteSt
 	case "bash", "powershell":
 		return toolShellSt
@@ -369,8 +371,8 @@ func toolGroupLabel(group *toolGroup) string {
 				action = "Listed"
 			case "read":
 				action = "Read"
-			case "view":
-				action = "Viewed"
+			case "display", "view":
+				action = "Displayed"
 			case "create":
 				action = "Created"
 			}
@@ -443,6 +445,11 @@ func (m *model) renderToolGroupDetails(group *toolGroup, width int) string {
 	detailWidth := max(20, width-4)
 	var b strings.Builder
 	calls := append([]toolCallUI(nil), group.Calls...)
+	if group != nil && group.Name == "multiCall" {
+		if nested := multiCallNestedToolCalls(group); len(nested) > 0 {
+			calls = nested
+		}
+	}
 	sort.SliceStable(calls, func(i, j int) bool { return calls[i].ID < calls[j].ID })
 	for i, call := range calls {
 		if i > 0 {
@@ -458,24 +465,35 @@ func (m *model) renderToolGroupDetails(group *toolGroup, width int) string {
 }
 
 func toolCallTitle(call toolCallUI, width int) string {
+	status := call.Status
+	if status == "" {
+		status = "completed"
+	}
+	prefix := status
+	if call.Name != "" {
+		prefix = fmt.Sprintf("%s · %s", status, call.Name)
+	}
 	if path := stringValue(call.Args, "path"); path != "" {
-		return fmt.Sprintf("%s · %s", call.Status, oneLine(path, max(8, width-16)))
+		return fmt.Sprintf("%s · %s", prefix, oneLine(path, max(8, width-16)))
 	}
 	if paths, ok := call.Args["paths"].([]any); ok && len(paths) > 0 {
-		return fmt.Sprintf("%s · %d files", call.Status, len(paths))
+		return fmt.Sprintf("%s · %d files", prefix, len(paths))
 	}
 	if pattern := stringValue(call.Args, "pattern"); pattern != "" {
-		return fmt.Sprintf("%s · %q", call.Status, oneLine(pattern, max(8, width-16)))
+		return fmt.Sprintf("%s · %q", prefix, oneLine(pattern, max(8, width-16)))
 	}
 	if command := stringValue(call.Args, "command"); command != "" {
-		return fmt.Sprintf("%s · %s", call.Status, oneLine(command, max(8, width-16)))
+		return fmt.Sprintf("%s · %s", prefix, oneLine(command, max(8, width-16)))
 	}
-	return call.Status
+	return prefix
 }
 
 func toolCallDetailLines(call toolCallUI, width int) []string {
 	var lines []string
 	showDevDetails := showDevToolDetails()
+	if call.Name != "" {
+		lines = append(lines, fmt.Sprintf("tool: %s", call.Name))
+	}
 	if showDevDetails && call.DurationMs > 0 {
 		lines = append(lines, fmt.Sprintf("duration: %dms", call.DurationMs))
 	}
@@ -514,6 +532,48 @@ func toolCallDetailLines(call toolCallUI, width int) []string {
 		lines = append(lines, "no details")
 	}
 	return lines
+}
+
+func multiCallNestedToolCalls(group *toolGroup) []toolCallUI {
+	if group == nil {
+		return nil
+	}
+	var nested []toolCallUI
+	for _, call := range group.Calls {
+		results := arrayValue(call.Result, "results")
+		argsCalls := arrayValue(call.Args, "calls")
+		count := max(len(results), len(argsCalls))
+		for i := 0; i < count; i++ {
+			result := mapFromArray(results, i)
+			argCall := mapFromArray(argsCalls, i)
+			toolName := firstNonEmpty(stringValue(result, "tool"), stringValue(argCall, "tool"))
+			args := objectValue(argCall, "args")
+			resultSummary := objectValue(result, "result")
+			if toolName == "" && args == nil && resultSummary == nil {
+				continue
+			}
+			status := "failed"
+			if ok, found := boolValue(result, "ok"); found && ok {
+				status = "completed"
+			}
+			index := i
+			if n, found := numberValue(result, "index"); found {
+				index = n
+			}
+			if toolName == "" {
+				toolName = "tool"
+			}
+			nested = append(nested, toolCallUI{
+				ID:     fmt.Sprintf("%s-nested-%d-%s", call.ID, index, toolName),
+				Name:   toolName,
+				Step:   call.Step,
+				Status: status,
+				Args:   args,
+				Result: resultSummary,
+			})
+		}
+	}
+	return nested
 }
 
 func plural(n int, one string, many string) string {
@@ -561,6 +621,18 @@ func numberValue(source map[string]any, key string) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func boolValue(source map[string]any, key string) (bool, bool) {
+	if source == nil {
+		return false, false
+	}
+	value, ok := source[key]
+	if !ok {
+		return false, false
+	}
+	typed, ok := value.(bool)
+	return typed, ok
 }
 
 const toolGroupsPerLine = 4

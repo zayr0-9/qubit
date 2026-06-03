@@ -12,8 +12,9 @@ The intended shape is:
 Terminal A qubit TUI ─┐
 Terminal B qubit TUI ─┼─ localhost JSON-lines runtime server ─ .qubit/sessions.sqlite
 Terminal C qubit TUI ─┘                                      ├─ .qubit/session-index.json
-                                                              ├─ .qubit/settings.json
-                                                              └─ .qubit/api-key-index.json
+                                                              └─ project-local session/runtime files
+
+User-global provider/model/key metadata lives outside the project `.qubit` directory in the Qubit config directory (`%APPDATA%\Qubit` on Windows, `~/.config/qubit` on Linux, overrideable with `QUBIT_CONFIG_DIR`).
 ```
 
 The first TUI for a project starts the Node runtime server. Later TUIs connect to that existing server. The first TUI must still be a normal usable TUI; it is not server-only.
@@ -37,9 +38,8 @@ The first TUI for a project starts the Node runtime server. Later TUIs connect t
 2. The runtime server owns persistent shared state.
    - Session transcript persistence through SQLite.
    - `session-index.json`.
-   - `settings.json`.
-   - `api-key-index.json` metadata.
-   - Provider/model/key runtime state.
+   - Project session/runtime state.
+   - Provider/model/key runtime state loaded from user-global config.
 
 3. Each TUI owns local UI state.
    - Selected session/fork view.
@@ -104,6 +104,10 @@ request id where relevant
 ```
 
 Tool lifecycle and permission events are run-scoped. Hyper-router hook payloads (`requestToolPermission`, `onToolCallStart`, and `onToolCallFinish`) are run-aware and should include `runId` whenever emitted from an active agent run. Qubit routes these events by `runId` first, using `sessionId` only as a defensive fallback for older payloads.
+
+Chat requests must not occupy the singleton server's global request queue for the full provider/model call. Queue only short shared-state setup/command handling; start long-running chat runs as independent async tasks, snapshot the run runtime state, store the originating client target in `activeRuns`, and write run-scoped events (`run_started`, `assistant`, `run_finished`, tool/permission events, cancellation) to that target explicitly.
+
+`activeRuns` should retain enough run-local metadata for runtime-owned views that are requested while a run is in flight. In particular, keep the submitted user `input` with the active run and overlay it onto session tree raw-message snapshots, because hyper-router may not persist the user message until the run finishes. This keeps `/tree` snapshots consistent with the chat UI during streaming without broadcasting local UI state.
 
 Do not broadcast local navigation responses such as `session.activated` and `session.messages`; that causes every TUI to mirror one TUI's selected session.
 

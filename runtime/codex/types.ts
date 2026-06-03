@@ -49,6 +49,7 @@ export interface CodexTokenStore {
 
 export interface CodexTokenStoreOptions {
   dataDir: string;
+  legacyDataDir?: string;
   keychainService?: string;
   keychainAccount?: string;
   keytar?: KeytarLike | null;

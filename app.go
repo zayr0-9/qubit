@@ -334,7 +334,7 @@ func isNewlineKey(msg tea.KeyPressMsg) bool {
 
 func (m model) submitInput() (tea.Model, tea.Cmd) {
 	input := strings.TrimSpace(normalizeInputNewlines(m.composer.Value()))
-	if input == "" || m.busy || !m.ready {
+	if input == "" || !m.ready {
 		return m, nil
 	}
 	input = m.expandFileMentionsForSend(input)
@@ -342,15 +342,27 @@ func (m model) submitInput() (tea.Model, tea.Cmd) {
 	m.composer.Reset()
 	m.layout()
 	m.err = ""
-	m.recordInputHistory(input)
-	m.saveInputHistory()
 	if strings.HasPrefix(input, "/") {
 		return m.handleSlashCommand(input)
 	}
 	if m.messageEdit.Active {
+		if m.busy || m.streaming || m.activeRunID != "" {
+			m.appendLocalStatus("Cannot submit an edited message while a run is active.")
+			return m, nil
+		}
 		return m.submitMessageEdit(input)
 	}
+	if m.busy || m.streaming || m.activeRunID != "" {
+		m.queueUserMessage(input)
+		m.layout()
+		return m, nil
+	}
+	m.recordInputHistory(input)
+	m.saveInputHistory()
+	return m.startChatRun(input)
+}
 
+func (m model) startChatRun(input string) (model, tea.Cmd) {
 	runID := newRunID()
 	m.messages = append(m.messages, chatMessage{Role: "user", Content: input})
 	m.busy = true
@@ -440,11 +452,9 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 			m.streamingFinishStatus = finishStatus
 			m.status = "responding"
 		} else {
-			m.busy = false
 			m.status = finishStatus
-			m.lastRunStartedSession = ""
-			m.activeRunID = ""
 			notifyCmd = m.runCompleteNotificationCmd(finishStatus)
+			m, notifyCmd = m.finishIdleAndMaybeStartQueuedUser(notifyCmd)
 		}
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}), notifyCmd)
 	case "session.list":
@@ -473,7 +483,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	case "codex.login.started", "codex.login.completed", "codex.login.cancelled", "codex.logout.completed", "codex.status", "codex.error":
 		m.applyCodexEvent(ev)
 	case "tool.permission.request":
-		if m.permissionMode == permissionModeAlwaysAllow {
+		if m.shouldAutoAllowPermission(ev) {
 			m.status = "thinking"
 			return m, tea.Batch(sendRuntime(m.runtime, map[string]any{"type": "tool.permission.response", "id": ev.ID, "allow": true}), waitRuntimeEvent(m.runtime))
 		}
@@ -640,11 +650,9 @@ func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {
 	m.clearFakeStream()
 	var notifyCmd tea.Cmd
 	if finished {
-		m.busy = false
 		m.status = fallback(finishStatus, "ready")
-		m.lastRunStartedSession = ""
-		m.activeRunID = ""
 		notifyCmd = m.runCompleteNotificationCmd(finishStatus)
+		m, notifyCmd = m.finishIdleAndMaybeStartQueuedUser(notifyCmd)
 	} else {
 		m.status = "responding"
 	}
@@ -933,8 +941,7 @@ func (m *model) layout() {
 }
 
 func (m *model) appendSystem(content string) {
-	m.messages = append(m.messages, chatMessage{Role: "assistant", Content: content})
-	m.refreshViewport()
+	m.appendLocalStatus(content)
 }
 
 func (m *model) applyPlanView(ev runtimeEvent) {
