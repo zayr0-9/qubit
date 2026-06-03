@@ -142,6 +142,30 @@ func TestToolGroupExpandedRenderingAndMouseToggle(t *testing.T) {
 	}
 }
 
+func TestReasoningBlockMouseToggle(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "reasoning", Content: "**Investigating project details**\n\nReading files."}}
+	m.refreshViewport()
+
+	if len(m.toolHitboxes) == 0 {
+		t.Fatal("reasoning hitbox missing")
+	}
+	viewport := plainText(m.viewport.View())
+	if strings.Contains(viewport, "Reading files.") {
+		t.Fatalf("viewport = %q, want reasoning collapsed by default", viewport)
+	}
+	updated := m.updateMouseClick(tea.MouseClickMsg{X: 2, Y: m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset(), Button: tea.MouseLeft}).(model)
+	if !updated.messages[0].Expanded {
+		t.Fatal("reasoning block not expanded after click")
+	}
+	if viewport = plainText(updated.viewport.View()); !strings.Contains(viewport, "Reading files.") {
+		t.Fatalf("viewport = %q, want expanded reasoning details", viewport)
+	}
+}
+
 func TestToolGroupHitboxAlignsWithRenderedRow(t *testing.T) {
 	m := initialModel(nil)
 	m.session = "sess_1"
@@ -434,5 +458,27 @@ func TestEditDiffUsesForegroundColorsWithoutRowBackground(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "38;2;255;107;107") || !strings.Contains(rendered, "38;2;155;226;143") {
 		t.Fatalf("edit diff missing red/green foreground ANSI: %q", rendered)
+	}
+}
+
+func TestReasoningBlockUsesReasoningThemeColorAndSparkleIcon(t *testing.T) {
+	applyTheme(defaultTheme())
+	defer applyTheme(defaultTheme())
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "reasoning", Content: "**Investigating project details**\n\nReading files.", Expanded: true}}
+	m.refreshViewport()
+
+	rendered := m.viewport.View()
+	if !strings.Contains(rendered, "✦") || !strings.Contains(rendered, "Investigating project details") || !strings.Contains(rendered, "Reading files.") {
+		t.Fatalf("viewport = %q, want sparkle reasoning heading and content", rendered)
+	}
+	if strings.Contains(rendered, "▸") || strings.Contains(rendered, "â–¸") {
+		t.Fatalf("viewport = %q, old disclosure icon should not be used", rendered)
+	}
+	if !strings.Contains(rendered, "\x1b[38;2;199;160;255m") {
+		t.Fatalf("rendered reasoning missing default reasoning ANSI color: %q", rendered)
 	}
 }

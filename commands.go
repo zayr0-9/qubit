@@ -31,13 +31,22 @@ var slashCommands = []slashCommand{
 }
 
 func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.sessionSearchMode {
+		return m.updateSessionPickerSearch(msg)
+	}
+
 	switch msg.String() {
 	case "esc":
-		m.mode = modeChat
-		m.status = "ready"
+		m.closeSessionPicker()
 		return m, nil
 	case "ctrl+c":
 		return m, tea.Quit
+	case "s", "S":
+		m.sessionSearchMode = true
+		m.sessionSearchQuery = ""
+		m.sessionCursor = 0
+		m.status = "search sessions"
+		return m, nil
 	case "up", "k", "ctrl+p":
 		m.moveSessionCursor(-1)
 		return m, nil
@@ -49,27 +58,76 @@ func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "t", "T":
 		return m.openSelectedSessionForkTree()
 	case "enter":
-		sessions := m.sessionPickerSessions()
-		if len(sessions) == 0 {
-			m.mode = modeChat
-			return m, nil
-		}
-		m.ensureSessionCursorInBounds()
-		session := sessions[m.sessionCursor]
-		m.mode = modeChat
-		m.clearFakeStream()
-		m.autoScroll = true
-		m.busy = true
-		m.session = session.ID
-		m.title = session.Title
-		m.autoNewSessionOnChat = false
-		m.messages = nil
-		m.status = "loading transcript"
-		m.layout()
-		m.refreshViewport()
-		return m, sendRuntime(m.runtime, map[string]any{"type": "session.activate", "sessionId": session.ID})
+		return m.activateSelectedSession()
 	}
 	return m, nil
+}
+
+func (m model) updateSessionPickerSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.sessionSearchMode = false
+		m.sessionSearchQuery = ""
+		m.ensureSessionCursor()
+		m.status = "ready"
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	case "enter":
+		return m.activateSelectedSession()
+	case "up", "ctrl+p":
+		m.moveSessionCursor(-1)
+		return m, nil
+	case "down", "ctrl+n":
+		m.moveSessionCursor(1)
+		return m, nil
+	case "backspace", "ctrl+h":
+		if m.sessionSearchQuery != "" {
+			runes := []rune(m.sessionSearchQuery)
+			m.sessionSearchQuery = string(runes[:len(runes)-1])
+			m.sessionCursor = 0
+		}
+		return m, nil
+	case "delete":
+		return m, nil
+	}
+	if msg.Text != "" {
+		m.sessionSearchQuery += msg.Text
+		m.sessionCursor = 0
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *model) closeSessionPicker() {
+	m.mode = modeChat
+	m.sessionSearchMode = false
+	m.sessionSearchQuery = ""
+	m.status = "ready"
+}
+
+func (m model) activateSelectedSession() (tea.Model, tea.Cmd) {
+	sessions := m.sessionPickerSessions()
+	if len(sessions) == 0 {
+		m.closeSessionPicker()
+		return m, nil
+	}
+	m.ensureSessionCursorInBounds()
+	session := sessions[m.sessionCursor]
+	m.mode = modeChat
+	m.sessionSearchMode = false
+	m.sessionSearchQuery = ""
+	m.clearFakeStream()
+	m.autoScroll = true
+	m.busy = true
+	m.session = session.ID
+	m.title = session.Title
+	m.autoNewSessionOnChat = false
+	m.messages = nil
+	m.status = "loading transcript"
+	m.layout()
+	m.refreshViewport()
+	return m, sendRuntime(m.runtime, map[string]any{"type": "session.activate", "sessionId": session.ID})
 }
 
 func (m model) openSelectedSessionForkTree() (tea.Model, tea.Cmd) {
@@ -111,10 +169,15 @@ func (m model) openSessionDeleteConfirm() (tea.Model, tea.Cmd) {
 
 func (m model) sessionPickerSessions() []sessionInfo {
 	visible := make([]sessionInfo, 0, len(m.sessions))
+	query := strings.ToLower(strings.TrimSpace(m.sessionSearchQuery))
 	for _, session := range m.sessions {
-		if session.ForkedFromSessionID == "" {
-			visible = append(visible, session)
+		if session.ForkedFromSessionID != "" {
+			continue
 		}
+		if query != "" && !strings.Contains(strings.ToLower(session.Title), query) {
+			continue
+		}
+		visible = append(visible, session)
 	}
 	sort.SliceStable(visible, func(i, j int) bool {
 		left := sessionRecentTimestamp(visible[i])

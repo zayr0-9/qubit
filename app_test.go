@@ -2481,3 +2481,57 @@ func TestUnsafeSlashCommandDuringStreamDoesNotInterruptRun(t *testing.T) {
 		t.Fatalf("queuedMessages = %#v, want local status explaining block", got.queuedMessages)
 	}
 }
+
+func TestSessionPickerSearchFiltersTitles(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.mode = modeSessionPicker
+	m.width = 100
+	m.sessions = []sessionInfo{
+		{ID: "sess_alpha", Title: "Alpha planning"},
+		{ID: "sess_beta", Title: "Beta release notes"},
+		{ID: "sess_gamma", Title: "Gamma planning"},
+	}
+
+	updated, _ := m.updateSessionPicker(tea.KeyPressMsg{Text: "s"})
+	got := updated.(model)
+	if !got.sessionSearchMode {
+		t.Fatal("session search mode = false, want true")
+	}
+
+	updated, _ = got.updateSessionPicker(tea.KeyPressMsg{Text: "plan"})
+	got = updated.(model)
+	visible := got.sessionPickerSessions()
+	if got.sessionSearchQuery != "plan" {
+		t.Fatalf("sessionSearchQuery = %q, want plan", got.sessionSearchQuery)
+	}
+	if len(visible) != 2 || visible[0].ID != "sess_alpha" || visible[1].ID != "sess_gamma" {
+		t.Fatalf("visible sessions = %#v, want alpha and gamma", visible)
+	}
+
+	rendered := got.renderSessionPicker(20)
+	if !strings.Contains(rendered, "plan") || strings.Contains(rendered, "Beta release notes") {
+		t.Fatalf("rendered search picker mismatch:\n%s", rendered)
+	}
+}
+
+func TestSessionPickerSearchEscapeClearsSearch(t *testing.T) {
+	m := initialModel(nil)
+	m.mode = modeSessionPicker
+	m.sessionSearchMode = true
+	m.sessionSearchQuery = "beta"
+	m.sessions = []sessionInfo{{ID: "sess_alpha", Title: "Alpha"}, {ID: "sess_beta", Title: "Beta"}}
+
+	updated, _ := m.updateSessionPicker(tea.KeyPressMsg{Code: tea.KeyEsc})
+	got := updated.(model)
+
+	if got.sessionSearchMode || got.sessionSearchQuery != "" {
+		t.Fatalf("search mode/query = %v/%q, want cleared", got.sessionSearchMode, got.sessionSearchQuery)
+	}
+	if visible := got.sessionPickerSessions(); len(visible) != 2 {
+		t.Fatalf("visible sessions after escape = %d, want 2", len(visible))
+	}
+	if got.mode != modeSessionPicker {
+		t.Fatalf("mode = %v, want session picker", got.mode)
+	}
+}

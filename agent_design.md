@@ -18,6 +18,7 @@ Qubit's terminal interface should stay clean, minimal, and calm. Prefer readable
   - Muted color for hints, metadata, shortcuts, and descriptions.
   - Red only for errors or destructive actions.
   - Green only for success or enabled/ready states.
+- Reasoning blocks use the theme-provided `Reasoning` foreground color and a compact sparkle marker (`✦`) rather than the assistant/message colors.
 - Tool-call rows use theme-provided foreground colors by category (`ToolRead`, `ToolSearch`, `ToolWrite`, `ToolShell`, `ToolOther`) and communicate running/completed/failed state through colored symbols rather than status words. Expanded `multiCall` rows should show each nested tool invocation as a compact individual detail row.
 - Avoid full-row selection highlights. Prefer a small colored marker such as `›`, `•`, or an accent-colored label.
 - Avoid opaque full-width styles around chat, command palettes, pickers, and status areas unless a feature specifically requires it.
@@ -44,4 +45,4 @@ Qubit's terminal interface should stay clean, minimal, and calm. Prefer readable
 ## Context Status
 
 - The compact input status row may show approximate context usage next to mode/reasoning (for example `plan · medium · ctx 2.1k/400k`). Keep it terse and foreground-only.
-- Context usage is currently an MVP estimate using 1 token = 4 characters and includes visible chat messages, surfaced reasoning blocks, and tool-call summaries.
+- Context usage is currently an MVP estimate using 1 token = 4 characters and includes visible chat messages, surfaced reasoning blocks, and tool-call full-context character counts when available. Tool-call preview truncation is visual only and should not reduce the status estimate.

@@ -179,6 +179,12 @@ func (m model) renderFooter() string {
 	} else if m.mode == modeKeyPicker {
 		footer = "up/down choose key | enter activate | a add | d delete | esc close"
 	} else if m.mode == modeSessionPicker {
+		if m.sessionSearchMode {
+			footer = "type search · up/down select · enter activate · esc clear search"
+		} else {
+			footer = "up/down choose session | s search | enter activate | t tree | d delete | esc close"
+		}
+	} else if m.mode == modeSessionPicker {
 		footer = "up/down choose session | enter switch | t tree | d delete | esc close"
 	} else if m.showSlashPalette() {
 		footer = "up/down choose command | enter/tab complete"
@@ -308,11 +314,9 @@ func descriptionSuffix(description string) string {
 	}
 	return "  " + description
 }
+
 func (m model) renderSessionPicker(height int) string {
 	sessions := m.sessionPickerSessions()
-	if len(sessions) == 0 {
-		return mutedSt.Render("no sessions yet · esc then /new to create one")
-	}
 	panelWidth := max(20, m.width-4)
 	contentWidth := max(20, panelWidth-4)
 	rowWidth := max(20, contentWidth-2)
@@ -320,9 +324,29 @@ func (m model) renderSessionPicker(height int) string {
 
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Foreground(accent).Bold(true).Render("sessions") + "\n")
-	b.WriteString(mutedSt.Render("↑/↓ select · enter activate · t tree · d delete · esc close") + "\n\n")
+	if m.sessionSearchMode {
+		query := m.sessionSearchQuery
+		if query == "" {
+			query = mutedSt.Render("type title...")
+		}
+		b.WriteString(mutedSt.Render("search ") + lipgloss.NewStyle().Foreground(accent).Render(query) + "\n")
+		b.WriteString(mutedSt.Render("↑/↓ select · enter activate · esc clear search") + "\n\n")
+	} else {
+		b.WriteString(mutedSt.Render("↑/↓ select · enter activate · s search · t tree · d delete · esc close") + "\n\n")
+	}
+	if len(sessions) == 0 {
+		if strings.TrimSpace(m.sessionSearchQuery) != "" {
+			b.WriteString(mutedSt.Render("no matching sessions"))
+		} else {
+			b.WriteString(mutedSt.Render("no sessions yet · esc then /new to create one"))
+		}
+		return lipgloss.NewStyle().Padding(1, 2).Width(panelWidth).Render(b.String())
+	}
 
-	maxRows := max(1, height-5)
+	maxRows := max(1, height-6)
+	if !m.sessionSearchMode {
+		maxRows = max(1, height-5)
+	}
 	window := visibleListWindow(len(sessions), m.sessionCursor, maxRows)
 	if window.HasAbove {
 		b.WriteString(mutedSt.Render(fmt.Sprintf("  more above (%d)", window.Start)))
@@ -466,6 +490,14 @@ func (m *model) refreshViewport() {
 			contentLine += renderedLineCount(rendered)
 			continue
 		}
+		if message.Role == "reasoning" {
+			rendered := m.renderReasoningBlock(message, max(20, m.viewport.Width()))
+			b.WriteString(rendered)
+			headingWidth := lipgloss.Width(m.renderReasoningBlockHeading(message))
+			m.toolHitboxes = append(m.toolHitboxes, toolHitbox{Kind: "reasoning", MessageIndex: i, StartY: contentLine, EndY: contentLine, StartX: 0, EndX: max(0, headingWidth-1)})
+			contentLine += renderedLineCount(rendered)
+			continue
+		}
 		cacheable := !(m.streaming && i == m.streamingMessageIndex)
 		rendered := renderMessageWithIcon(message, m.renderMessageContent(message, cacheable), messageDisplayNumber(m.messages, i))
 		b.WriteString(rendered)
@@ -529,6 +561,74 @@ func (m *model) renderViewMessage(message chatMessage) string {
 		lines[i] = "  " + lines[i]
 	}
 	return header + "\n" + strings.Join(lines, "\n")
+}
+
+func (m *model) renderReasoningBlock(message chatMessage, width int) string {
+	heading := m.renderReasoningBlockHeading(message)
+	if !message.Expanded {
+		return heading
+	}
+	content := strings.TrimSpace(stripReasoningTitle(message.Content))
+	if content == "" {
+		return heading
+	}
+	lines := strings.Split(wrap(content, max(20, width-4)), "\n")
+	for i := range lines {
+		lines[i] = reasoningSt.Render("  " + lines[i])
+	}
+	return heading + "\n" + strings.Join(lines, "\n")
+}
+
+func (m *model) renderReasoningBlockHeading(message chatMessage) string {
+	icon := "✦"
+	title := reasoningBlockTitle(message.Content)
+	return reasoningSt.Render(icon) + " " + reasoningSt.Bold(true).Render(title)
+}
+
+func reasoningBlockTitle(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		title, ok := boldMarkdownLineTitle(line)
+		if ok {
+			return title
+		}
+	}
+	preview := oneLine(strings.TrimSpace(stripReasoningTitle(content)), 56)
+	if preview == "" {
+		return "Thinking"
+	}
+	return preview
+}
+
+func boldMarkdownLineTitle(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "**") {
+		return "", false
+	}
+	rest := strings.TrimPrefix(trimmed, "**")
+	end := strings.Index(rest, "**")
+	if end < 0 {
+		return "", false
+	}
+	title := strings.TrimSpace(rest[:end])
+	return title, title != ""
+}
+
+func stripReasoningTitle(content string) string {
+	lines := strings.Split(content, "\n")
+	for len(lines) > 0 {
+		if _, ok := boldMarkdownLineTitle(lines[0]); ok {
+			lines = lines[1:]
+			for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+				lines = lines[1:]
+			}
+			break
+		}
+		if strings.TrimSpace(lines[0]) != "" {
+			break
+		}
+		lines = lines[1:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func renderMessageWithIcon(message chatMessage, content string, number int) string {

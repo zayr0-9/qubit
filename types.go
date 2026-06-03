@@ -18,6 +18,7 @@ type chatMessage struct {
 	ToolGroup        *toolGroup `json:"toolGroup,omitempty"`
 	LocalOnly        bool       `json:"localOnly,omitempty"`
 	MessageKind      string     `json:"messageKind,omitempty"`
+	Expanded         bool       `json:"expanded,omitempty"`
 }
 
 const (
@@ -325,6 +326,7 @@ type runtimeEvent struct {
 	ToolName         string         `json:"toolName,omitempty"`
 	Args             map[string]any `json:"args,omitempty"`
 	Result           map[string]any `json:"result,omitempty"`
+	ContextChars     int            `json:"contextChars,omitempty"`
 	StartedAt        string         `json:"startedAt,omitempty"`
 	FinishedAt       string         `json:"finishedAt,omitempty"`
 	DurationMs       int            `json:"durationMs,omitempty"`
@@ -395,25 +397,30 @@ type model struct {
 	autoNewSessionOnChat  bool
 	lastRunStartedSession string
 	activeRunID           string
+	activeReasoningRunID  string
+	activeReasoningIndex  int
+	activeReasoningStart  int
 	inputHistory          []string
 	inputHistoryIndex     int
 	inputHistoryActive    bool
 	forkSelector          forkSelectorState
 	messageEdit           messageEditState
 
-	mode          uiMode
-	previousMode  uiMode
-	sessionCursor int
-	apiKeyCursor  int
-	slashCursor   int
-	fileMention   fileMentionState
-	modal         *modalState
-	keyEntry      *keyEntryState
-	themeEntry    *themeEntryState
-	forkTree      forkTreeState
-	autoScroll    bool
-	toolHitboxes  []toolHitbox
-	chatTopY      int
+	mode               uiMode
+	previousMode       uiMode
+	sessionCursor      int
+	sessionSearchMode  bool
+	sessionSearchQuery string
+	apiKeyCursor       int
+	slashCursor        int
+	fileMention        fileMentionState
+	modal              *modalState
+	keyEntry           *keyEntryState
+	themeEntry         *themeEntryState
+	forkTree           forkTreeState
+	autoScroll         bool
+	toolHitboxes       []toolHitbox
+	chatTopY           int
 
 	toolCallRevealing          bool
 	toolCallRevealMessageIndex int

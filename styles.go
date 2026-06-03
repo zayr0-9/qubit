@@ -24,6 +24,7 @@ type themeConfig struct {
 	Cyan       string
 	Red        string
 	Green      string
+	Reasoning  string
 	ToolRead   string
 	ToolSearch string
 	ToolWrite  string
@@ -44,6 +45,7 @@ var builtinThemes = []themeConfig{
 		Cyan:       "#89cdd6",
 		Red:        "#ff6b6b",
 		Green:      "#9be28f",
+		Reasoning:  "#c7a0ff",
 		ToolRead:   "#89cdd6",
 		ToolSearch: "#c7a0ff",
 		ToolWrite:  "#e8a15d",
@@ -62,6 +64,7 @@ var builtinThemes = []themeConfig{
 		Cyan:       "#006d77",
 		Red:        "#b42318",
 		Green:      "#287a3e",
+		Reasoning:  "#7a3eb1",
 		ToolRead:   "#006d77",
 		ToolSearch: "#7a3eb1",
 		ToolWrite:  "#9a5b00",
@@ -80,6 +83,7 @@ var builtinThemes = []themeConfig{
 		Cyan:       "#00f5ff",
 		Red:        "#ff9aa2",
 		Green:      "#b8f7b1",
+		Reasoning:  "#ffd166",
 		ToolRead:   "#00f5ff",
 		ToolSearch: "#ff2bd6",
 		ToolWrite:  "#ffd166",
@@ -98,6 +102,7 @@ var (
 	cyan       color.Color
 	red        color.Color
 	green      color.Color
+	reasoning  color.Color
 	toolRead   color.Color
 	toolSearch color.Color
 	toolWrite  color.Color
@@ -116,6 +121,7 @@ var (
 	errSt                 lipgloss.Style
 	okSt                  lipgloss.Style
 	selectSt              lipgloss.Style
+	reasoningSt           lipgloss.Style
 	inputSelectSt         lipgloss.Style
 	composerCursorSt      lipgloss.Style
 	composerCursorStyles  []lipgloss.Style
@@ -155,6 +161,7 @@ func applyTheme(theme themeConfig) {
 	cyan = lipgloss.Color(fallback(theme.Cyan, "#8bd3dd"))
 	red = lipgloss.Color(fallback(theme.Red, "#ff6b6b"))
 	green = lipgloss.Color(fallback(theme.Green, "#9be28f"))
+	reasoning = lipgloss.Color(fallback(theme.Reasoning, fallback(theme.ToolSearch, "#c7a0ff")))
 	toolRead = lipgloss.Color(fallback(theme.ToolRead, fallback(theme.Cyan, "#8bd3dd")))
 	toolSearch = lipgloss.Color(fallback(theme.ToolSearch, fallback(theme.Accent, "#f2a65a")))
 	toolWrite = lipgloss.Color(fallback(theme.ToolWrite, fallback(theme.Accent, "#f2a65a")))
@@ -173,6 +180,7 @@ func applyTheme(theme themeConfig) {
 	errSt = lipgloss.NewStyle().Foreground(red)
 	okSt = lipgloss.NewStyle().Foreground(green)
 	selectSt = lipgloss.NewStyle().Foreground(accent).Bold(true)
+	reasoningSt = lipgloss.NewStyle().Foreground(reasoning)
 	inputSelectSt = lipgloss.NewStyle().Foreground(bg).Background(accent)
 	composerCursorSt = lipgloss.NewStyle().Foreground(bg).Background(text)
 	composerCursorStyles = smoothCursorStyles(theme.Background, fallback(theme.Muted, "#7c838a"), theme.Text)

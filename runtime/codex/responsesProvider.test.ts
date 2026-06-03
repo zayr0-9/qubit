@@ -67,6 +67,8 @@ describe("CodexResponsesProvider", () => {
     assert.equal(capturedHeaders?.get("session-id"), "session-1");
     assert.equal(capturedHeaders?.get("thread-id"), "session-1");
     assert.equal(capturedHeaders?.get("x-client-request-id"), "run-1");
+    assert.deepEqual(capturedBody.reasoning, { effort: "medium", summary: "auto" });
+    assert.deepEqual(capturedBody.include, ["reasoning.encrypted_content"]);
     assert.equal(capturedBody.prompt_cache_key, "session-1");
     assert.deepEqual(capturedBody.client_metadata, { "x-codex-installation-id": "session-1" });
   });
@@ -111,5 +113,41 @@ describe("CodexResponsesProvider reasoning", () => {
 
     assert.equal(response.message?.content, "Implemented.");
     assert.equal(response.message?.reasoningContent, "Inspected code and found parser gap.");
+  });
+});
+
+
+describe("CodexResponsesProvider reasoning request options", () => {
+  it("can disable reasoning summary request for backend compatibility", async () => {
+    let capturedBody: any;
+    const tokenStore = new MemoryTokenStore({
+      tokens: {
+        access_token: VALID_ACCESS_TOKEN,
+        refresh_token: "refresh-token",
+      },
+    });
+    const provider = new CodexResponsesProvider({
+      tokenStore,
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      reasoningSummary: null,
+      fetch: (async (_url, init) => {
+        capturedBody = JSON.parse(String(init?.body));
+        return new Response([
+          "event: response.completed",
+          'data: {"type":"response.completed","response":{"id":"resp-1","output":[]}}',
+          "",
+          "",
+        ].join("\n"), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    await provider.generate({
+      model: "gpt-5.2-codex",
+      sessionId: "session-1",
+      messages: [{ role: "user", content: "hello" } as any],
+      tools: [],
+    });
+
+    assert.deepEqual(capturedBody.reasoning, { effort: "medium" });
   });
 });

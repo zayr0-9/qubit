@@ -1,79 +1,151 @@
 import type { CodexSseParseResult } from "./types.js";
 import { createRetryableCodexHttpError } from "./responsesRetry.js";
 
-export async function parseCodexSseResponse(response: Response): Promise<CodexSseParseResult> {
-  const text = await response.text();
+type CodexSseParseOptions = {
+  onReasoningDelta?: (delta: string) => void;
+};
+
+type CodexSseParseState = {
+  content: string;
+  reasoningParts: string[];
+  toolCalls: NonNullable<CodexSseParseResult["toolCalls"]>;
+  generatedImages: NonNullable<CodexSseParseResult["generatedImages"]>;
+  providerStopReason: string;
+  debug: boolean;
+  debugEventCounts: Map<string, number>;
+  debugReasoningItemCount: number;
+  debugReasoningDeltaCount: number;
+  debugOutputItemTypes: Map<string, number>;
+  options: CodexSseParseOptions;
+};
+
+export async function parseCodexSseResponse(response: Response, options: CodexSseParseOptions = {}): Promise<CodexSseParseResult> {
   if (!response.ok) {
+    const text = await response.text();
     throw createRetryableCodexHttpError(response.status, text);
   }
-  return parseCodexSseText(text);
-}
-
-export function parseCodexSseText(text: string): CodexSseParseResult {
-  let content = "";
-  const reasoningParts: string[] = [];
-  const toolCalls: NonNullable<CodexSseParseResult["toolCalls"]> = [];
-  const generatedImages: NonNullable<CodexSseParseResult["generatedImages"]> = [];
-  let providerStopReason = "";
-
-  const appendReasoning = (value: unknown) => {
-    const reasoningText = textFromUnknown(value);
-    if (!reasoningText) return;
-    const current = reasoningParts.join("");
-    if (current.includes(reasoningText)) return;
-    reasoningParts.push(reasoningText);
-  };
-
-  for (const frame of splitFrames(text)) {
-    const parsed = parseFrame(frame);
-    if (!parsed) continue;
-    if (parsed.data === "[DONE]") break;
-    let payload: any;
-    try {
-      payload = JSON.parse(parsed.data);
-    } catch {
-      continue;
-    }
-    const eventType = parsed.event || payload.type || "";
-    switch (eventType) {
-      case "response.output_text.delta":
-        content += String(payload.delta ?? "");
-        break;
-      case "response.reasoning_text.delta":
-      case "response.reasoning_summary_text.delta":
-        appendReasoning(payload.delta);
-        break;
-      case "response.output_item.done":
-        collectOutputItem(payload.item || payload.output_item || payload, toolCalls, generatedImages, appendReasoning, (value) => {
-          content += value;
-        });
-        break;
-      case "response.completed":
-        providerStopReason = "response.completed";
-        collectResponseOutput(payload.response, toolCalls, generatedImages, appendReasoning, (value) => {
-          if (!content.includes(value)) content += value;
-        });
-        break;
-      case "response.failed":
-        throw new Error(`Codex response failed${payload.response?.error?.message ? `: ${payload.response.error.message}` : ""}`);
-      case "response.incomplete":
-        throw new Error(`Codex response incomplete${payload.response?.incomplete_details?.reason ? `: ${payload.response.incomplete_details.reason}` : ""}`);
-      default:
-        if (payload.type === "function_call") collectOutputItem(payload, toolCalls, generatedImages, appendReasoning, (value) => {
-          content += value;
-        });
-        break;
+  if (!response.body) {
+    return parseCodexSseText(await response.text(), options);
+  }
+  const state = createParseState(options);
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+    const frames = buffer.split(/\n\n+/);
+    buffer = frames.pop() || "";
+    for (const frame of frames) {
+      if (frame.trim()) processFrameText(frame, state);
     }
   }
+  buffer += decoder.decode();
+  if (buffer.trim()) processFrameText(buffer, state);
+  return stateResult(state);
+}
 
-  const reasoningContent = reasoningParts.join("");
+export function parseCodexSseText(text: string, options: CodexSseParseOptions = {}): CodexSseParseResult {
+  const state = createParseState(options);
+  for (const frame of splitFrames(text)) processFrameText(frame, state);
+  return stateResult(state);
+}
+
+function createParseState(options: CodexSseParseOptions): CodexSseParseState {
   return {
-    content,
-    ...(reasoningContent ? { reasoningContent } : {}),
-    toolCalls: dedupeToolCalls(toolCalls),
-    providerStopReason: providerStopReason || undefined,
-    ...(generatedImages.length ? { generatedImages } : {}),
+    content: "",
+    reasoningParts: [],
+    toolCalls: [],
+    generatedImages: [],
+    providerStopReason: "",
+    debug: process.env.QUBIT_CODEX_REASONING_DEBUG === "1",
+    debugEventCounts: new Map<string, number>(),
+    debugReasoningItemCount: 0,
+    debugReasoningDeltaCount: 0,
+    debugOutputItemTypes: new Map<string, number>(),
+    options,
   };
+}
+
+function stateResult(state: CodexSseParseState): CodexSseParseResult {
+  const reasoningContent = state.reasoningParts.join("");
+  if (state.debug) {
+    console.error(`[codex-reasoning] events=${JSON.stringify(Object.fromEntries(state.debugEventCounts))} outputItemTypes=${JSON.stringify(Object.fromEntries(state.debugOutputItemTypes))} reasoningDeltas=${state.debugReasoningDeltaCount} reasoningItems=${state.debugReasoningItemCount} reasoningChars=${reasoningContent.length} outputChars=${state.content.length} toolCalls=${state.toolCalls.length} stop=${state.providerStopReason || ""}`);
+  }
+  return {
+    content: state.content,
+    ...(reasoningContent ? { reasoningContent } : {}),
+    toolCalls: dedupeToolCalls(state.toolCalls),
+    providerStopReason: state.providerStopReason || undefined,
+    ...(state.generatedImages.length ? { generatedImages: state.generatedImages } : {}),
+  };
+}
+
+function processFrameText(frame: string, state: CodexSseParseState): void {
+  const parsed = parseFrame(frame);
+  if (!parsed || parsed.data === "[DONE]") return;
+  let payload: any;
+  try {
+    payload = JSON.parse(parsed.data);
+  } catch {
+    return;
+  }
+  const eventType = parsed.event || payload.type || "";
+  if (state.debug) state.debugEventCounts.set(eventType || "unknown", (state.debugEventCounts.get(eventType || "unknown") || 0) + 1);
+  switch (eventType) {
+    case "response.output_text.delta":
+      state.content += String(payload.delta ?? "");
+      break;
+    case "response.reasoning_text.delta":
+    case "response.reasoning_summary_text.delta": {
+      state.debugReasoningDeltaCount += 1;
+      const delta = textFromUnknown(payload.delta);
+      if (delta) state.options.onReasoningDelta?.(delta);
+      appendReasoning(state, payload.delta);
+      break;
+    }
+    case "response.output_item.done": {
+      const item = payload.item || payload.output_item || payload;
+      recordOutputItemType(state, item);
+      if (item?.type === "reasoning") state.debugReasoningItemCount += 1;
+      collectOutputItem(item, state.toolCalls, state.generatedImages, (value) => appendReasoning(state, value), (value) => {
+        if (!state.content) state.content += value;
+      });
+      break;
+    }
+    case "response.completed":
+      state.providerStopReason = "response.completed";
+      if (state.debug) recordOutputItemTypes(payload.response?.output, state.debugOutputItemTypes);
+      state.debugReasoningItemCount += countReasoningItems(payload.response?.output);
+      collectResponseOutput(payload.response, state.toolCalls, state.generatedImages, (value) => appendReasoning(state, value), (value) => {
+        if (!state.content) state.content += value;
+      });
+      break;
+    case "response.failed":
+      throw new Error(`Codex response failed${payload.response?.error?.message ? `: ${payload.response.error.message}` : ""}`);
+    case "response.incomplete":
+      throw new Error(`Codex response incomplete${payload.response?.incomplete_details?.reason ? `: ${payload.response.incomplete_details.reason}` : ""}`);
+    default:
+      if (payload.type === "function_call") collectOutputItem(payload, state.toolCalls, state.generatedImages, (value) => appendReasoning(state, value), (value) => {
+        state.content += value;
+      });
+      break;
+  }
+}
+
+function appendReasoning(state: CodexSseParseState, value: unknown): void {
+  const reasoningText = textFromUnknown(value);
+  if (!reasoningText) return;
+  const current = state.reasoningParts.join("");
+  if (current.includes(reasoningText)) return;
+  state.reasoningParts.push(reasoningText);
+}
+
+function recordOutputItemType(state: CodexSseParseState, item: any): void {
+  if (!state.debug) return;
+  const type = typeof item?.type === "string" ? item.type : "unknown";
+  state.debugOutputItemTypes.set(type, (state.debugOutputItemTypes.get(type) || 0) + 1);
 }
 
 function splitFrames(text: string): string[] {
@@ -89,6 +161,19 @@ function parseFrame(frame: string): { event?: string; data: string } | null {
   }
   if (data.length === 0) return null;
   return { ...(event ? { event } : {}), data: data.join("\n") };
+}
+
+function countReasoningItems(output: unknown): number {
+  if (!Array.isArray(output)) return 0;
+  return output.filter((item: any) => item?.type === "reasoning").length;
+}
+
+function recordOutputItemTypes(output: unknown, counts: Map<string, number>): void {
+  if (!Array.isArray(output)) return;
+  for (const item of output) {
+    const type = typeof item?.type === "string" ? item.type : "unknown";
+    counts.set(type, (counts.get(type) || 0) + 1);
+  }
 }
 
 function collectResponseOutput(

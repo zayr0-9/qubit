@@ -93,6 +93,8 @@ export interface CodexResponsesProviderOptions extends CodexAuthOptions {
   originator?: string;
   userAgent?: string;
   reasoningEffort?: "minimal" | "low" | "medium" | "high";
+  reasoningSummary?: "auto" | "concise" | "detailed" | null;
+  onReasoningDelta?: (event: { sessionId?: string; runId?: string; delta: string }) => void;
 }
 
 export interface CodexRequestParts {

@@ -43,6 +43,8 @@ func initialModel(rt *runtimeClient) model {
 		theme:                theme,
 		autoNewSessionOnChat: true,
 		autoScroll:           true,
+		activeReasoningIndex: -1,
+		activeReasoningStart: -1,
 		inputHistory:         inputHistory,
 		inputHistoryIndex:    len(inputHistory),
 		notifier:             newPlatformNotifier(),
@@ -300,7 +302,11 @@ func (m model) updateMouseClick(msg tea.MouseClickMsg) tea.Model {
 	for _, hitbox := range m.toolHitboxes {
 		if contentY >= hitbox.StartY && contentY <= hitbox.EndY && mouse.X >= hitbox.StartX && mouse.X <= hitbox.EndX {
 			m.autoScroll = false
-			m.toggleToolGroup(hitbox.GroupID)
+			if hitbox.Kind == "reasoning" {
+				m.toggleReasoningBlock(hitbox.MessageIndex)
+			} else {
+				m.toggleToolGroup(hitbox.GroupID)
+			}
 			return m
 		}
 	}
@@ -433,12 +439,17 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		if ev.RunID != "" {
 			m.activeRunID = ev.RunID
 		}
+		m.activeReasoningRunID = ev.RunID
+		m.activeReasoningIndex = -1
+		m.activeReasoningStart = len(m.messages)
 		m.status = "thinking"
 		if ev.SessionID != "" {
 			m.session = ev.SessionID
 			m.lastRunStartedSession = ev.SessionID
 			m.touchLocalSessionActivity(ev.SessionID, m.latestUserMessageTitle())
 		}
+	case "reasoning.delta":
+		m.applyReasoningDeltaEvent(ev)
 	case "assistant":
 		m.applyAssistantEvent(ev)
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), fakeStreamTick())
@@ -600,6 +611,33 @@ func (m *model) applyCodexEvent(ev runtimeEvent) {
 	}
 }
 
+func (m *model) applyReasoningDeltaEvent(ev runtimeEvent) {
+	if ev.RunID != "" && m.activeRunID != "" && ev.RunID != m.activeRunID {
+		return
+	}
+	delta := ev.Content
+	if delta == "" {
+		return
+	}
+	if ev.RunID != "" {
+		m.activeReasoningRunID = ev.RunID
+	}
+	if m.activeReasoningStart < 0 {
+		m.activeReasoningStart = len(m.messages)
+	}
+	if ev.SessionID != "" {
+		m.session = ev.SessionID
+	}
+	if m.activeReasoningIndex < 0 || m.activeReasoningIndex != len(m.messages)-1 || m.activeReasoningIndex >= len(m.messages) || m.messages[m.activeReasoningIndex].Role != "reasoning" {
+		m.messages = append(m.messages, chatMessage{Role: "reasoning", Content: delta})
+		m.activeReasoningIndex = len(m.messages) - 1
+	} else {
+		m.messages[m.activeReasoningIndex].Content += delta
+	}
+	m.status = "thinking"
+	m.refreshViewport()
+}
+
 func (m *model) applyAssistantEvent(ev runtimeEvent) {
 	m.clearFakeStream()
 	if ev.RunID != "" {
@@ -609,10 +647,11 @@ func (m *model) applyAssistantEvent(ev runtimeEvent) {
 	if content == "" {
 		content = "(empty response)"
 	}
-	if reasoningContent := strings.TrimSpace(ev.ReasoningContent); reasoningContent != "" {
-		m.messages = append(m.messages, chatMessage{Role: "reasoning", Content: reasoningContent})
-	}
+	m.applyFinalReasoningContent(ev)
 	m.messages = append(m.messages, chatMessage{Role: "assistant", Content: "", ReasoningContent: ev.ReasoningContent})
+	m.activeReasoningRunID = ""
+	m.activeReasoningIndex = -1
+	m.activeReasoningStart = -1
 	m.streaming = true
 	m.streamingMessageIndex = len(m.messages) - 1
 	m.streamingFullContent = content
@@ -628,6 +667,51 @@ func (m *model) applyAssistantEvent(ev runtimeEvent) {
 		m.status = "responding"
 	}
 	m.refreshViewport()
+}
+
+func (m *model) applyFinalReasoningContent(ev runtimeEvent) {
+	reasoningContent := strings.TrimSpace(ev.ReasoningContent)
+	if reasoningContent == "" {
+		return
+	}
+	if ev.RunID != "" && m.activeReasoningRunID != "" && ev.RunID != m.activeReasoningRunID {
+		m.messages = append(m.messages, chatMessage{Role: "reasoning", Content: reasoningContent})
+		return
+	}
+	if m.streamedReasoningContent(m.activeReasoningStart) == reasoningContent {
+		return
+	}
+	if m.activeReasoningIndex >= 0 && m.activeReasoningIndex < len(m.messages) && m.messages[m.activeReasoningIndex].Role == "reasoning" {
+		current := strings.TrimSpace(m.messages[m.activeReasoningIndex].Content)
+		switch {
+		case current == reasoningContent:
+			return
+		case strings.HasPrefix(reasoningContent, current):
+			m.messages[m.activeReasoningIndex].Content = reasoningContent
+			return
+		case strings.Contains(reasoningContent, current):
+			m.messages[m.activeReasoningIndex].Content = reasoningContent
+			return
+		}
+	}
+	m.messages = append(m.messages, chatMessage{Role: "reasoning", Content: reasoningContent})
+}
+
+func (m *model) streamedReasoningContent(start int) string {
+	parts := []string{}
+	if start < 0 || start > len(m.messages) {
+		start = 0
+	}
+	for _, message := range m.messages[start:] {
+		if message.Role != "reasoning" {
+			continue
+		}
+		content := strings.TrimSpace(message.Content)
+		if content != "" {
+			parts = append(parts, content)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {

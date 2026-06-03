@@ -205,3 +205,24 @@ func TestNeonThemeUsesBlackMessageRowBackground(t *testing.T) {
 		t.Fatalf("renderChat emitted background ANSI sequence for chat row: %q", rendered)
 	}
 }
+
+func TestThemeReasoningColorDefaultsAndCustomFallback(t *testing.T) {
+	if defaultTheme().Reasoning != "#c7a0ff" {
+		t.Fatalf("default reasoning color = %q, want #c7a0ff", defaultTheme().Reasoning)
+	}
+	custom, err := customThemeFrom("#010203", "#abcdef", themeConfig{Reasoning: "#123456", ToolSearch: "#654321"})
+	if err != nil {
+		t.Fatalf("customThemeFrom error = %v", err)
+	}
+	applyTheme(custom)
+	defer applyTheme(defaultTheme())
+	if got := colorToHex(reasoning); got != "#123456" {
+		t.Fatalf("reasoning color = %q, want custom reasoning color", got)
+	}
+
+	custom.Reasoning = ""
+	applyTheme(custom)
+	if got := colorToHex(reasoning); got != "#654321" {
+		t.Fatalf("reasoning color fallback = %q, want tool search fallback", got)
+	}
+}

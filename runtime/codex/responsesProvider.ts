@@ -25,10 +25,13 @@ export class CodexResponsesProvider implements ModelProvider {
       ...(parts.instructions ? { instructions: parts.instructions } : {}),
       input: parts.input,
       ...(parts.tools.length ? { tools: parts.tools, tool_choice: "auto", parallel_tool_calls: true } : {}),
-      reasoning: { effort: this.options.reasoningEffort || "medium" },
+      reasoning: {
+        effort: this.options.reasoningEffort || "medium",
+        ...(this.options.reasoningSummary === null ? {} : { summary: this.options.reasoningSummary || "auto" }),
+      },
       store: false,
       stream: true,
-      include: [],
+      include: ["reasoning.encrypted_content"],
       prompt_cache_key: promptCacheKey,
       client_metadata: {
         "x-codex-installation-id": promptCacheKey,
@@ -48,6 +51,10 @@ export class CodexResponsesProvider implements ModelProvider {
     }
     headers.set("x-client-request-id", requestId);
 
+    const debugReasoning = process.env.QUBIT_CODEX_REASONING_DEBUG === "1";
+    if (debugReasoning) {
+      console.error(`[codex-reasoning] request model=${input.model || "unknown"} reasoningEffort=${body.reasoning.effort} reasoningSummary=${"summary" in body.reasoning ? body.reasoning.summary : "disabled"} include=${JSON.stringify(body.include)}`);
+    }
     const parsed = await withCodexRetry(async () => {
       input.signal?.throwIfAborted();
       const response = await this.fetchImpl(this.responsesUrl(), {
@@ -56,13 +63,18 @@ export class CodexResponsesProvider implements ModelProvider {
         body: JSON.stringify(body),
         ...(input.signal ? { signal: input.signal } : {}),
       });
-      return await parseCodexSseResponse(response);
+      return await parseCodexSseResponse(response, {
+        onReasoningDelta: (delta) => this.options.onReasoningDelta?.({ sessionId: input.sessionId, runId: input.runId, delta }),
+      });
     }, {
       onRetry: (event) => {
         this.logRetry(input, event.nextAttempt, event.maxAttempts, event.delayMs, event.reason);
       },
     });
     input.signal?.throwIfAborted();
+    if (debugReasoning) {
+      console.error(`[codex-reasoning] parsed reasoningChars=${parsed.reasoningContent?.length || 0} outputChars=${parsed.content?.length || 0} toolCalls=${parsed.toolCalls.length} stop=${parsed.providerStopReason || ""}`);
+    }
     const modelResponse: ModelResponse = {
       toolCalls: parsed.toolCalls,
       stopReason: parsed.toolCalls.length > 0 ? "tool_calls" : "stop",

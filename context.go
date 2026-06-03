@@ -49,6 +49,17 @@ func toolGroupContextText(group *toolGroup) string {
 	if group == nil {
 		return ""
 	}
+	chars := 0
+	hasContextChars := false
+	for _, call := range group.Calls {
+		if call.ContextChars > 0 {
+			hasContextChars = true
+			chars += call.ContextChars
+		}
+	}
+	if hasContextChars {
+		return strings.Repeat("x", chars)
+	}
 	data, err := json.Marshal(group)
 	if err != nil {
 		return toolGroupLabel(group)

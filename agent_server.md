@@ -157,6 +157,7 @@ Do not regress the first TUI into a server-only process. It must connect to the 
   - `[runtime-server]`
   - `[codex-oauth]`
   - `[codex-retry]`
+  - `[codex-reasoning]`
 - Do not surface expected server lifecycle diagnostics as user-visible runtime errors.
 - Do surface actual runtime crashes, JSON decode failures, and send failures clearly.
 

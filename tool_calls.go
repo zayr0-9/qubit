@@ -12,15 +12,16 @@ import (
 )
 
 type toolCallUI struct {
-	ID         string         `json:"id"`
-	Name       string         `json:"name"`
-	Step       int            `json:"step"`
-	Status     string         `json:"status"`
-	Args       map[string]any `json:"args,omitempty"`
-	Result     map[string]any `json:"result,omitempty"`
-	StartedAt  string         `json:"startedAt,omitempty"`
-	FinishedAt string         `json:"finishedAt,omitempty"`
-	DurationMs int            `json:"durationMs,omitempty"`
+	ID           string         `json:"id"`
+	Name         string         `json:"name"`
+	Step         int            `json:"step"`
+	Status       string         `json:"status"`
+	Args         map[string]any `json:"args,omitempty"`
+	Result       map[string]any `json:"result,omitempty"`
+	ContextChars int            `json:"contextChars,omitempty"`
+	StartedAt    string         `json:"startedAt,omitempty"`
+	FinishedAt   string         `json:"finishedAt,omitempty"`
+	DurationMs   int            `json:"durationMs,omitempty"`
 }
 
 type toolGroup struct {
@@ -32,11 +33,13 @@ type toolGroup struct {
 }
 
 type toolHitbox struct {
-	GroupID string
-	StartY  int
-	EndY    int
-	StartX  int
-	EndX    int
+	Kind         string
+	GroupID      string
+	MessageIndex int
+	StartY       int
+	EndY         int
+	StartX       int
+	EndX         int
 }
 
 func (m *model) applyToolCallStart(ev runtimeEvent) {
@@ -68,15 +71,16 @@ func (m *model) applyToolCallFinish(ev runtimeEvent) {
 
 func toolCallFromEvent(ev runtimeEvent) toolCallUI {
 	return toolCallUI{
-		ID:         ev.ToolCallID,
-		Name:       ev.ToolName,
-		Step:       ev.Step,
-		Status:     ev.Status,
-		Args:       ev.Args,
-		Result:     ev.Result,
-		StartedAt:  ev.StartedAt,
-		FinishedAt: ev.FinishedAt,
-		DurationMs: ev.DurationMs,
+		ID:           ev.ToolCallID,
+		Name:         ev.ToolName,
+		Step:         ev.Step,
+		Status:       ev.Status,
+		Args:         ev.Args,
+		Result:       ev.Result,
+		ContextChars: ev.ContextChars,
+		StartedAt:    ev.StartedAt,
+		FinishedAt:   ev.FinishedAt,
+		DurationMs:   ev.DurationMs,
 	}
 }
 
@@ -205,6 +209,9 @@ func upsertToolCall(group *toolGroup, call toolCallUI) {
 		}
 		if call.Result == nil {
 			call.Result = group.Calls[i].Result
+		}
+		if call.ContextChars == 0 {
+			call.ContextChars = group.Calls[i].ContextChars
 		}
 		if call.StartedAt == "" {
 			call.StartedAt = group.Calls[i].StartedAt
@@ -692,7 +699,7 @@ func (m *model) appendToolGroupHitboxes(groups []*toolGroup, startLine int, widt
 			}
 			segment := m.renderToolGroupInline(group)
 			segmentWidth := lipgloss.Width(segment)
-			m.toolHitboxes = append(m.toolHitboxes, toolHitbox{GroupID: group.ID, StartY: lineY, EndY: lineY, StartX: x, EndX: x + max(0, segmentWidth-1)})
+			m.toolHitboxes = append(m.toolHitboxes, toolHitbox{Kind: "tool", GroupID: group.ID, StartY: lineY, EndY: lineY, StartX: x, EndX: x + max(0, segmentWidth-1)})
 			x += segmentWidth
 			if i < len(rowGroups)-1 {
 				x += separatorWidth
@@ -700,6 +707,15 @@ func (m *model) appendToolGroupHitboxes(groups []*toolGroup, startLine int, widt
 		}
 		lineY += renderedLineCount(m.renderToolGroupRow(rowGroups, width))
 	}
+}
+
+func (m *model) toggleReasoningBlock(index int) bool {
+	if index < 0 || index >= len(m.messages) || m.messages[index].Role != "reasoning" {
+		return false
+	}
+	m.messages[index].Expanded = !m.messages[index].Expanded
+	m.refreshViewport()
+	return true
 }
 
 func (m *model) toggleToolGroup(groupID string) bool {

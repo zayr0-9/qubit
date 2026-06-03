@@ -23,6 +23,7 @@ import { setMultiCallLifecycleEmitter, setMultiCallPermissionRequester } from ".
 import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
 import { CodexResponsesProvider, QubitCodexTokenStore, cancelCodexLogin, startCodexLogin } from "./runtime/codex/index.js";
 import { overlayActiveRunUserMessages } from "./runtime/activeRunOverlay.js";
+import { assistantReasoningContent } from "./runtime/assistantReasoning.js";
 
 const entryDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = basename(entryDir) === "dist" ? dirname(entryDir) : entryDir;
@@ -273,6 +274,7 @@ setMultiCallLifecycleEmitter((event) => {
     status: event.status,
     args: summarizeToolArgs(event.toolName, event.args),
     result: summarizeToolResult(event.toolName, event.result),
+    contextChars: toolCallContextChars(event.toolName, event.args, event.result),
     startedAt: event.startedAt,
     finishedAt: event.finishedAt,
     durationMs: event.durationMs,
@@ -311,6 +313,7 @@ const hooks = {
       status: event.status,
       args: summarizeToolArgs(event.toolName, event.args),
       result: summarizeToolResult(event.toolName, event.result),
+      contextChars: toolCallContextChars(event.toolName, event.args, event.result),
       startedAt: event.startedAt,
       finishedAt: event.finishedAt,
       durationMs: event.durationMs,
@@ -745,7 +748,9 @@ async function handleChatRequest(request, responseTarget = null) {
       metadata: { workspaceCwd: getDefaultToolCwd() },
     });
 
-    const assistant = [...result.messages].reverse().find((message) => message.role === "assistant");
+    const assistant = [...result.messages].reverse().find((message) => message.role === "assistant" && String(message.content || "").trim());
+    const fallbackAssistant = [...result.messages].reverse().find((message) => message.role === "assistant");
+    const reasoningContent = assistantReasoningContent(result.messages);
     await touchSession(runSessionId, {
       title: titleFromInput(request.input),
       messageCount: result.messages.filter((message) => message.role !== "system").length,
@@ -758,8 +763,8 @@ async function handleChatRequest(request, responseTarget = null) {
         runId,
         sessionId: runSessionId,
         status: result.status,
-        content: assistant?.content || "",
-        reasoningContent: assistant?.reasoningContent,
+        content: assistant?.content || fallbackAssistant?.content || "",
+        reasoningContent,
       }, responseTarget);
     }
     write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: result.status }, responseTarget);
@@ -895,6 +900,15 @@ function createProvider(config) {
         clientId: process.env.CODEX_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann",
         originator: process.env.CODEX_ORIGINATOR || "codex_cli_rs",
         reasoningEffort: codexReasoningEffort(),
+        reasoningSummary: process.env.QUBIT_CODEX_REASONING_SUMMARY === "off" ? null : (process.env.QUBIT_CODEX_REASONING_SUMMARY || "auto"),
+        onReasoningDelta: (event) => {
+          write({
+            type: "reasoning.delta",
+            sessionId: event.sessionId,
+            runId: event.runId,
+            content: event.delta,
+          }, targetForRunEvent(event));
+        },
       });
     default:
       throw new Error(`Unsupported provider: ${config.providerName}`);
@@ -1456,6 +1470,12 @@ function previewText(value, maxChars = 1200) {
   return redacted.length > maxChars ? `${redacted.slice(0, maxChars)}…` : redacted;
 }
 
+function contextCharCount(value) {
+  if (value === undefined || value === null) return 0;
+  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  return [...redactSecrets(text || "")].length;
+}
+
 function resultPayload(result) {
   if (!result || typeof result !== "object") return result;
   if (result.data !== undefined) return result.data;
@@ -1498,6 +1518,36 @@ function summarizeToolArgs(toolName, args) {
       return { ...compactObject(source, ["action", "name", "cwd", "search"]), contentPreview: previewText(source.content, 600), replacementPreview: previewText(source.replacement, 600) };
     default:
       return JSON.parse(JSON.stringify(source, (_key, value) => typeof value === "string" ? previewText(value, 1000) : value));
+  }
+}
+
+function toolCallContextChars(toolName, args, result) {
+  const sourceArgs = plainObject(args);
+  const payload = resultPayload(result);
+  const data = plainObject(payload);
+  switch (toolName) {
+    case "readFile":
+    case "readFileContinuation":
+      return contextCharCount(data.content);
+    case "readFiles":
+      return Array.isArray(data.files) ? data.files.reduce((total, file) => total + contextCharCount(file?.content), 0) : 0;
+    case "bash":
+    case "powershell":
+      return contextCharCount(data.stdout) + contextCharCount(data.stderr) + contextCharCount(data.error);
+    case "multiCall": {
+      const outerArgs = plainObject(args);
+      const argCalls = Array.isArray(outerArgs.calls) ? outerArgs.calls : [];
+      return Array.isArray(data.results) ? data.results.reduce((total, item) => {
+        const index = Number.isFinite(Number(item?.index)) ? Number(item.index) : -1;
+        const argCall = index >= 0 ? argCalls[index] : undefined;
+        const nestedTool = item?.tool || argCall?.tool;
+        const nestedArgs = argCall?.args || {};
+        const nestedPayload = item?.data !== undefined ? item.data : item?.output;
+        return total + toolCallContextChars(nestedTool, nestedArgs, { ok: item?.ok, data: nestedPayload, error: item?.error });
+      }, 0) : 0;
+    }
+    default:
+      return contextCharCount(sourceArgs) + contextCharCount(payload);
   }
 }
 
@@ -2289,6 +2339,7 @@ function toolGroupsFromStoredToolCalls(toolCalls, toolResults, consumedToolResul
       status: storedToolStatus(toolName, parsedResult),
       args: summarizeToolArgs(toolName, toolCall.args),
       result: summarizeToolResult(toolName, parsedResult ?? { ok: false, error: "Missing stored tool result" }),
+      contextChars: toolCallContextChars(toolName, toolCall.args, parsedResult ?? storedResult?.content ?? ""),
     });
   }
   return groups.map((group) => ({ role: "tool", content: "", toolGroup: group }));
@@ -2311,6 +2362,7 @@ function toolGroupMessageFromStoredToolResult(message, step) {
         status: storedToolStatus(toolName, parsedResult),
         args: {},
         result: summarizeToolResult(toolName, parsedResult ?? { ok: false, error: "Missing stored tool result" }),
+        contextChars: toolCallContextChars(toolName, {}, parsedResult ?? message.content ?? ""),
       }],
       expanded: false,
     },

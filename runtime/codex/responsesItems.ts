@@ -21,15 +21,6 @@ function messageToCodexItems(message: Message, index: number): unknown[] {
   }
   if (message.role === "assistant") {
     const items: unknown[] = [];
-    if (message.reasoningContent) {
-      items.push({
-        type: "reasoning",
-        id: `reasoning-${index}`,
-        summary: [],
-        content: [{ type: "reasoning_text", text: message.reasoningContent }],
-        encrypted_content: null,
-      });
-    }
     if (message.content) {
       items.push({ type: "message", role: "assistant", content: [{ type: "output_text", text: message.content }] });
     }
