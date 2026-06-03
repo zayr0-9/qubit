@@ -69,12 +69,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.updateKey(msg)
 	case tea.MouseWheelMsg:
-		if m.mode == modeForkTree {
-			return m.updateForkTreeMouseWheel(msg), nil
-		}
-		return m.updateMouseWheel(msg), nil
+		return m.updateMouseWheelRouted(msg), nil
 	case tea.MouseClickMsg:
 		return m.updateMouseClick(msg), nil
+	case tea.MouseMotionMsg:
+		return m.updateMouseMotion(msg), nil
+	case tea.MouseReleaseMsg:
+		return m.updateMouseRelease(msg), nil
 	case runtimeMsg:
 		return m.updateRuntime(runtimeEvent(msg))
 	case runtimeErrMsg:
@@ -158,6 +159,10 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.status = "copied input"
 			return m, copyClipboardCmd(m.composer.SelectedText())
 		}
+		if text := m.transcriptSelectedText(); text != "" {
+			m.status = "copied transcript"
+			return m, copyClipboardCmd(text)
+		}
 		return m, tea.Quit
 	case "ctrl+x":
 		if m.composer.HasSelection() {
@@ -181,6 +186,12 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.composer.HasSelection() {
 			m.composer.ClearSelection()
 			m.layout()
+			return m, nil
+		}
+		if m.transcriptSelection.Active {
+			m.transcriptSelection = transcriptSelectionState{}
+			m.status = "ready"
+			m.repaintTranscriptSelection()
 			return m, nil
 		}
 		if m.streaming || (m.busy && m.activeRunID != "") {
@@ -279,38 +290,6 @@ func (m model) updateComposerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
-}
-
-func (m model) updateMouseWheel(msg tea.MouseWheelMsg) tea.Model {
-	switch msg.Mouse().Button {
-	case tea.MouseWheelUp:
-		m.autoScroll = false
-		m.viewport.ScrollUp(max(1, m.viewport.MouseWheelDelta))
-	case tea.MouseWheelDown:
-		m.viewport.ScrollDown(max(1, m.viewport.MouseWheelDelta))
-		m.autoScroll = m.viewport.AtBottom()
-	}
-	return m
-}
-
-func (m model) updateMouseClick(msg tea.MouseClickMsg) tea.Model {
-	mouse := msg.Mouse()
-	if mouse.Button != tea.MouseLeft || mouse.Y < m.chatTopY || mouse.Y >= m.chatTopY+m.viewport.Height() {
-		return m
-	}
-	contentY := m.viewport.YOffset() + mouse.Y - m.chatTopY
-	for _, hitbox := range m.toolHitboxes {
-		if contentY >= hitbox.StartY && contentY <= hitbox.EndY && mouse.X >= hitbox.StartX && mouse.X <= hitbox.EndX {
-			m.autoScroll = false
-			if hitbox.Kind == "reasoning" {
-				m.toggleReasoningBlock(hitbox.MessageIndex)
-			} else {
-				m.toggleToolGroup(hitbox.GroupID)
-			}
-			return m
-		}
-	}
-	return m
 }
 
 func (m model) insertInputNewline() (tea.Model, tea.Cmd) {

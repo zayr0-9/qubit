@@ -153,12 +153,14 @@ func (m model) permissionModeBadge() string {
 }
 
 func (m model) renderFooter() string {
-	footer := "enter send | ctrl+a all | ctrl+c copy/quit | shift+arrows select | ctrl+j newline | pgup/pgdn scroll"
+	footer := "enter send | drag select transcript | ctrl+c copy/quit | esc clear | wheel/pgup/pgdn scroll"
 	if m.keyboardEnhanced {
 		footer = "enter send | shift+enter newline | shift+arrows select | ctrl+shift+left/right words | ctrl+a all | ctrl+c copy/quit"
 	}
 	if m.composer.HasSelection() {
 		footer = "selection | ctrl+c copy | ctrl+x cut | type replace | backspace/delete remove | esc clear"
+	} else if m.transcriptSelection.Active {
+		footer = "transcript selection | ctrl+c copy | esc clear | wheel extends"
 	}
 	if m.messageEdit.Active {
 		footer = "enter fork/reroll | ctrl+j newline | esc cancel edit"
@@ -459,6 +461,7 @@ func pluralLabel(count int, singular string, plural string) string {
 func (m *model) refreshViewport() {
 	previousYOffset := m.viewport.YOffset()
 	m.toolHitboxes = nil
+	m.transcriptLines = nil
 	var b strings.Builder
 	contentLine := 0
 	for i := 0; i < len(m.messages); i++ {
@@ -507,7 +510,10 @@ func (m *model) refreshViewport() {
 			contentLine++
 		}
 	}
-	m.viewport.SetContent(b.String())
+	content := b.String()
+	m.transcriptContent = content
+	m.transcriptLines = transcriptRenderLines(content)
+	m.repaintTranscriptSelection()
 	m.restoreViewportPosition(previousYOffset)
 }
 

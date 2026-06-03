@@ -706,7 +706,7 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	m.viewport.SetContent("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10")
 	m.viewport.GotoTop()
 
-	updated := m.updateMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
+	updated := m.updateMouseWheelRouted(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
 	if updated.viewport.YOffset() == 0 {
 		t.Fatal("viewport did not move down on mouse wheel down")
 	}
@@ -714,7 +714,7 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 		t.Fatalf("autoScroll = %v, want AtBottom %v", updated.autoScroll, updated.viewport.AtBottom())
 	}
 
-	updated = updated.updateMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelUp}).(model)
+	updated = updated.updateMouseWheelRouted(tea.MouseWheelMsg{Button: tea.MouseWheelUp}).(model)
 	if updated.autoScroll {
 		t.Fatal("autoScroll = true after mouse wheel up, want false")
 	}
@@ -2317,7 +2317,7 @@ func TestAutoScrollStaysOffDuringNewContentUntilUserReachesBottom(t *testing.T) 
 	}
 
 	for i := 0; i < 20 && !m.viewport.AtBottom(); i++ {
-		m = m.updateMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
+		m = m.updateMouseWheelRouted(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
 	}
 	if !m.viewport.AtBottom() {
 		t.Fatal("viewport did not reach bottom")
@@ -2624,5 +2624,121 @@ func TestSessionPickerSearchEscapeClearsSearch(t *testing.T) {
 	}
 	if got.mode != modeSessionPicker {
 		t.Fatalf("mode = %v, want session picker", got.mode)
+	}
+}
+
+func TestTranscriptMouseDragSelectsTextAndEscClears(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 10
+	m.layout()
+	m.messages = []chatMessage{{Role: "assistant", Content: "line 1\nline 2\nline 3\nline 4"}}
+	m.refreshViewport()
+	m.viewport.GotoTop()
+
+	clicked := m.updateMouseClick(tea.MouseClickMsg{X: 0, Y: m.chatTopY, Button: tea.MouseLeft}).(model)
+	if !clicked.transcriptSelection.Active {
+		t.Fatal("transcript selection not active after mouse click")
+	}
+	dragged := clicked.updateMouseMotion(tea.MouseMotionMsg{X: 6, Y: clicked.chatTopY + 2, Button: tea.MouseLeft}).(model)
+	released := dragged.updateMouseRelease(tea.MouseReleaseMsg{X: 6, Y: dragged.chatTopY + 2, Button: tea.MouseLeft}).(model)
+
+	if !released.transcriptSelection.Active {
+		t.Fatal("transcript selection cleared after drag release")
+	}
+	if got, want := released.transcriptSelectedText(), "◆ line 1\n  line 2\n  line"; got != want {
+		t.Fatalf("selected text = %q, want %q", got, want)
+	}
+
+	updated, cmd := released.updateKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if cmd != nil {
+		t.Fatalf("esc command = %#v, want nil", cmd)
+	}
+	cleared := updated.(model)
+	if cleared.transcriptSelection.Active {
+		t.Fatal("transcript selection still active after esc")
+	}
+}
+
+func TestCtrlCCopiesTranscriptSelectionBeforeQuit(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 10
+	m.layout()
+	content := "copy me\nnot me"
+	m.viewport.SetContent(content)
+	m.transcriptLines = transcriptRenderLines(content)
+	m.transcriptSelection = transcriptSelectionState{
+		Active: true,
+		Anchor: transcriptSelectionPoint{Line: 0, Col: 0},
+		Cursor: transcriptSelectionPoint{Line: 0, Col: 7},
+	}
+
+	updated, cmd := m.updateKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	got := updated.(model)
+	if cmd == nil {
+		t.Fatal("ctrl+c returned nil command, want clipboard copy command")
+	}
+	if got.status != "copied transcript" {
+		t.Fatalf("status = %q, want copied transcript", got.status)
+	}
+}
+
+func TestMouseWheelRoutesToVisibleLists(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 10
+	m.layout()
+	m.viewport.SetContent("line 1\nline 2\nline 3\nline 4\nline 5\nline 6")
+	m.viewport.GotoTop()
+	m.mode = modeSessionPicker
+	m.sessions = []sessionInfo{{ID: "one", Title: "one"}, {ID: "two", Title: "two"}}
+
+	updated := m.updateMouseWheelRouted(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
+	if updated.sessionCursor != 1 {
+		t.Fatalf("sessionCursor = %d, want 1", updated.sessionCursor)
+	}
+	if updated.viewport.YOffset() != 0 {
+		t.Fatalf("viewport scrolled in session picker: y=%d", updated.viewport.YOffset())
+	}
+
+	updated.mode = modeKeyPicker
+	updated.apiKeys = []apiKeyInfo{{Alias: "one"}, {Alias: "two"}}
+	updated.apiKeyCursor = 0
+	updated = updated.updateMouseWheelRouted(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
+	if updated.apiKeyCursor != 1 {
+		t.Fatalf("apiKeyCursor = %d, want 1", updated.apiKeyCursor)
+	}
+
+	updated.mode = modeModal
+	updated.modal = &modalState{Options: []modalOption{{ID: "one"}, {ID: "two"}}, OptionCursor: 0}
+	updated = updated.updateMouseWheelRouted(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
+	if updated.modal.OptionCursor != 1 {
+		t.Fatalf("modal option cursor = %d, want 1", updated.modal.OptionCursor)
+	}
+}
+
+func TestMouseWheelDuringTranscriptSelectionScrollsChat(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 8
+	m.layout()
+	content := "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10"
+	m.viewport.SetContent(content)
+	m.transcriptLines = transcriptRenderLines(content)
+	m.viewport.GotoTop()
+	m.mode = modeChat
+	m.transcriptSelection = transcriptSelectionState{Active: true, Anchor: transcriptSelectionPoint{Line: 0, Col: 0}, Cursor: transcriptSelectionPoint{Line: 0, Col: 1}}
+
+	updated := m.updateMouseWheelRouted(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
+	if updated.viewport.YOffset() == 0 {
+		t.Fatal("viewport did not scroll while transcript selection was active")
+	}
+	if !updated.transcriptSelection.Active {
+		t.Fatal("transcript selection cleared by wheel scroll")
 	}
 }

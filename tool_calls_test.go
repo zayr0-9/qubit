@@ -132,7 +132,8 @@ func TestToolGroupExpandedRenderingAndMouseToggle(t *testing.T) {
 	if len(m.toolHitboxes) == 0 {
 		t.Fatal("tool hitbox missing")
 	}
-	updated := m.updateMouseClick(tea.MouseClickMsg{X: 2, Y: m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset(), Button: tea.MouseLeft}).(model)
+	clicked := m.updateMouseClick(tea.MouseClickMsg{X: 2, Y: m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset(), Button: tea.MouseLeft}).(model)
+	updated := clicked.updateMouseRelease(tea.MouseReleaseMsg{X: 2, Y: clicked.chatTopY + clicked.toolHitboxes[0].StartY - clicked.viewport.YOffset(), Button: tea.MouseLeft}).(model)
 	if !updated.messages[1].ToolGroup.Expanded {
 		t.Fatal("tool group not expanded after click")
 	}
@@ -157,7 +158,8 @@ func TestReasoningBlockMouseToggle(t *testing.T) {
 	if strings.Contains(viewport, "Reading files.") {
 		t.Fatalf("viewport = %q, want reasoning collapsed by default", viewport)
 	}
-	updated := m.updateMouseClick(tea.MouseClickMsg{X: 2, Y: m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset(), Button: tea.MouseLeft}).(model)
+	clicked := m.updateMouseClick(tea.MouseClickMsg{X: 2, Y: m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset(), Button: tea.MouseLeft}).(model)
+	updated := clicked.updateMouseRelease(tea.MouseReleaseMsg{X: 2, Y: clicked.chatTopY + clicked.toolHitboxes[0].StartY - clicked.viewport.YOffset(), Button: tea.MouseLeft}).(model)
 	if !updated.messages[0].Expanded {
 		t.Fatal("reasoning block not expanded after click")
 	}
@@ -201,7 +203,8 @@ func TestToolGroupHitboxAlignsWithRenderedRow(t *testing.T) {
 		t.Fatalf("hitbox startY = %d, rendered row = %d", got, visibleToolLine)
 	}
 
-	updated := m.updateMouseClick(tea.MouseClickMsg{X: 2, Y: m.chatTopY + visibleToolLine - m.viewport.YOffset(), Button: tea.MouseLeft}).(model)
+	clicked := m.updateMouseClick(tea.MouseClickMsg{X: 2, Y: m.chatTopY + visibleToolLine - m.viewport.YOffset(), Button: tea.MouseLeft}).(model)
+	updated := clicked.updateMouseRelease(tea.MouseReleaseMsg{X: 2, Y: clicked.chatTopY + visibleToolLine - clicked.viewport.YOffset(), Button: tea.MouseLeft}).(model)
 	if !updated.messages[1].ToolGroup.Expanded {
 		t.Fatal("click on visible tool row did not expand group")
 	}
@@ -258,7 +261,8 @@ func TestExpandedToolGroupHitboxOnlyCoversHeader(t *testing.T) {
 	}
 
 	detailClickY := m.chatTopY + m.toolHitboxes[0].StartY - m.viewport.YOffset() + 1
-	updated := m.updateMouseClick(tea.MouseClickMsg{X: 4, Y: detailClickY, Button: tea.MouseLeft}).(model)
+	clicked := m.updateMouseClick(tea.MouseClickMsg{X: 4, Y: detailClickY, Button: tea.MouseLeft}).(model)
+	updated := clicked.updateMouseRelease(tea.MouseReleaseMsg{X: 4, Y: detailClickY, Button: tea.MouseLeft}).(model)
 	if !updated.messages[1].ToolGroup.Expanded {
 		t.Fatal("detail-row click collapsed group; want only header row clickable")
 	}
