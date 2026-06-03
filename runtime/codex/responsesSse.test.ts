@@ -51,6 +51,12 @@ describe("parseCodexSseText", () => {
     const parsed = parseCodexSseText(frame("response.completed", {
       type: "response.completed",
       response: {
+        id: "resp-123",
+        usage: {
+          input_tokens: 20,
+          input_tokens_details: { cached_tokens: 12 },
+          output_tokens: 8,
+        },
         output: [
           {
             type: "reasoning",
@@ -70,6 +76,25 @@ describe("parseCodexSseText", () => {
     assert.equal(parsed.reasoningContent, "Look at parser. Fix extraction.");
     assert.equal(parsed.content, "final answer");
     assert.equal(parsed.providerStopReason, "response.completed");
+    assert.equal(parsed.responseId, "resp-123");
+    assert.deepEqual(parsed.usage, {
+      input_tokens: 20,
+      input_tokens_details: { cached_tokens: 12 },
+      output_tokens: 8,
+    });
+    assert.deepEqual(parsed.outputItems, [
+      {
+        type: "reasoning",
+        content: [
+          { type: "reasoning_text", text: "Look at parser. " },
+          { type: "reasoning_text", text: "Fix extraction." },
+        ],
+      },
+      {
+        type: "message",
+        content: [{ type: "output_text", text: "final answer" }],
+      },
+    ]);
   });
 
   it("does not duplicate completed message text after streamed output text", () => {
@@ -128,5 +153,42 @@ describe("parseCodexSseText", () => {
     ].join("\n"));
 
     assert.equal(parsed.reasoningContent, "same reasoning");
+  });
+
+  it("keeps hosted web search calls in outputItems without creating local tool calls", () => {
+    const webSearchCall = {
+      id: "ws_123",
+      type: "web_search_call",
+      status: "completed",
+      action: { type: "search", queries: ["current news"] },
+    };
+    const parsed = parseCodexSseText(frame("response.output_item.done", {
+      type: "response.output_item.done",
+      item: webSearchCall,
+    }));
+
+    assert.deepEqual(parsed.toolCalls, []);
+    assert.deepEqual(parsed.outputItems, [webSearchCall]);
+  });
+
+  it("normalizes image generation result base64 into generated image data URLs", () => {
+    const parsed = parseCodexSseText(frame("response.completed", {
+      type: "response.completed",
+      response: {
+        output: [
+          {
+            id: "ig_123",
+            type: "image_generation_call",
+            status: "completed",
+            output_format: "jpeg",
+            result: "aW1hZ2UtYnl0ZXM=",
+          },
+        ],
+      },
+    }));
+
+    assert.deepEqual(parsed.generatedImages, [
+      { dataUrl: "data:image/jpeg;base64,aW1hZ2UtYnl0ZXM=", mimeType: "image/jpeg" },
+    ]);
   });
 });

@@ -15,6 +15,9 @@ type chatMessage struct {
 	ViewType         string     `json:"viewType,omitempty"`
 	Title            string     `json:"title,omitempty"`
 	Path             string     `json:"path,omitempty"`
+	URL              string     `json:"url,omitempty"`
+	MimeType         string     `json:"mimeType,omitempty"`
+	SizeBytes        int        `json:"sizeBytes,omitempty"`
 	ToolGroup        *toolGroup `json:"toolGroup,omitempty"`
 	LocalOnly        bool       `json:"localOnly,omitempty"`
 	MessageKind      string     `json:"messageKind,omitempty"`
@@ -317,6 +320,9 @@ type runtimeEvent struct {
 	Content          string         `json:"content,omitempty"`
 	Name             string         `json:"name,omitempty"`
 	Path             string         `json:"path,omitempty"`
+	URL              string         `json:"url,omitempty"`
+	MimeType         string         `json:"mimeType,omitempty"`
+	SizeBytes        int            `json:"sizeBytes,omitempty"`
 	Cwd              string         `json:"cwd,omitempty"`
 	ReasoningContent string         `json:"reasoningContent,omitempty"`
 	ReasoningLevel   string         `json:"reasoningLevel,omitempty"`

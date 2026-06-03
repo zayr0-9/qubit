@@ -95,6 +95,7 @@ export interface CodexResponsesProviderOptions extends CodexAuthOptions {
   reasoningEffort?: "minimal" | "low" | "medium" | "high";
   reasoningSummary?: "auto" | "concise" | "detailed" | null;
   onReasoningDelta?: (event: { sessionId?: string; runId?: string; delta: string }) => void;
+  onCallLog?: (event: CodexProviderCallLogEvent) => void | Promise<void>;
 }
 
 export interface CodexRequestParts {
@@ -109,6 +110,9 @@ export interface CodexSseParseResult {
   toolCalls: ToolCall[];
   providerStopReason?: string;
   generatedImages?: NonNullable<ModelResponse["generatedImages"]>;
+  responseId?: string;
+  usage?: unknown;
+  outputItems?: unknown[];
 }
 
 export type CodexGenerateInput = {
@@ -119,3 +123,30 @@ export type CodexGenerateInput = {
   tools: AnyToolDefinition[];
   signal?: AbortSignal;
 };
+
+export interface CodexProviderCallLogEvent {
+  callId: string;
+  runId?: string;
+  sessionId?: string;
+  provider: "codex";
+  model: string;
+  requestId: string;
+  promptCacheKey: string;
+  status: "completed" | "failed" | "cancelled";
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  request: unknown;
+  responseId?: string;
+  usage?: unknown;
+  outputItems?: unknown[];
+  result?: {
+    contentChars: number;
+    reasoningChars: number;
+    toolCallCount: number;
+    generatedImageCount: number;
+    stopReason?: string;
+    providerStopReason?: string;
+  };
+  error?: string;
+}

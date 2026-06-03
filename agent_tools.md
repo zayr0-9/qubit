@@ -322,6 +322,8 @@ browseWeb
   Old Electron implementation should not be copied directly into Node sidecar.
 ```
 
+Codex-hosted `web_search` and `image_generation` are not Qubit local tools and are not part of this migration list. They are added only inside `runtime/codex/` request construction as OpenAI Responses hosted tools, execute server-side, and do not use Qubit's local permission lifecycle. Generated image payloads from Codex are saved under `.qubit/generated` and represented in chat by saved file paths.
+
 ## Tool Call UI Lifecycle
 
 Qubit bridges Hyper Router tool lifecycle hooks into the JSON-lines protocol:

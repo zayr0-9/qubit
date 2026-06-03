@@ -18,4 +18,28 @@ describe("toCodexRequestParts", () => {
       { type: "message", role: "user", content: [{ type: "input_text", text: "Continue." }] },
     ]);
   });
+
+  it("adds Codex hosted web search and image generation tools after local functions", () => {
+    const parts = toCodexRequestParts([
+      { role: "user", content: "hello" } as any,
+    ], [
+      {
+        name: "readFile",
+        description: "Read a file",
+        inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      } as any,
+    ]);
+
+    assert.deepEqual(parts.tools, [
+      {
+        type: "function",
+        name: "readFile",
+        description: "Read a file",
+        strict: false,
+        parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      },
+      { type: "web_search" },
+      { type: "image_generation" },
+    ]);
+  });
 });

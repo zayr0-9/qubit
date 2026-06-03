@@ -71,6 +71,8 @@ D:\qubit
   .qubit\\sessions.sqlite    hyper-router SQLite transcript store in the terminal launch cwd
   .qubit\\session-index.json Qubit-owned session index in the terminal launch cwd
   .qubit\\runtime.log        Runtime diagnostic log in the terminal launch cwd
+  .qubit\\codex-provider-calls.log
+                            JSON-lines Codex provider call log in the terminal launch cwd
   .qubit\\input-history.json Persisted non-secret composer history in the terminal launch cwd
   %APPDATA%\\Qubit or ~/.config/qubit
                             User-global Qubit config directory, overrideable with QUBIT_CONFIG_DIR

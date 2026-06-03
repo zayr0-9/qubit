@@ -99,6 +99,15 @@ https://chatgpt.com/backend-api/codex/responses
 
 Requests use `Authorization: Bearer <ChatGPT access token>` and `Accept: text/event-stream`.
 
+Codex requests include Qubit's local function tools plus OpenAI-hosted Responses tools:
+
+```txt
+web_search
+image_generation
+```
+
+These hosted tools run on OpenAI's server side. They are not Qubit local tools, do not emit local `tool.permission.request` events, and must not be added to `tools/index.ts`. Web search/browser actions may appear as `web_search_call` output items in Codex responses and should be preserved in provider call logs. Image generation appears as `image_generation_call` output with base64 image data; Qubit saves generated images under `.qubit\generated` and surfaces the saved path in chat.
+
 Important event types include:
 
 ```txt
@@ -112,6 +121,14 @@ response.incomplete
 ```
 
 Reasoning capture must handle both streaming deltas and completed output items. Codex may return reasoning as `response.reasoning_text.delta` / `response.reasoning_summary_text.delta`, or later as `item.type === "reasoning"` inside `response.output_item.done` / `response.completed` output arrays with `summary` or `content` text parts. Preserve extracted text on `message.reasoningContent` so the Go TUI can surface a separate reasoning block.
+
+Codex provider calls are logged as sanitized JSON lines to:
+
+```txt
+.qubit\codex-provider-calls.log
+```
+
+Each line represents one Codex `generate()` call, not one UI message. A single Qubit run can produce multiple Codex calls when tools are involved. Keep entries useful for debugging token/cache behavior by preserving request body, `response.id`, `usage`, final output items, run/session/call identifiers, timings, status, and summary counts. Never log authorization headers, raw access tokens, refresh tokens, ID tokens, API keys, OAuth secrets, or bearer values.
 
 ## Validation
 

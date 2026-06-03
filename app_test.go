@@ -1293,7 +1293,7 @@ func TestFirstChatAfterReadyRequestsNewSession(t *testing.T) {
 }
 
 func TestRunLifecycleTracksActiveRunID(t *testing.T) {
-	m := model{busy: true, activeRunID: "run_local"}
+	m := model{busy: true, activeRunID: "run_runtime"}
 
 	updated, _ := m.updateRuntime(runtimeEvent{Type: "run_started", RunID: "run_runtime", SessionID: "sess_1"})
 	got := updated.(model)
@@ -1308,6 +1308,72 @@ func TestRunLifecycleTracksActiveRunID(t *testing.T) {
 	}
 	if got.busy {
 		t.Fatal("busy = true, want false after run_finished")
+	}
+}
+
+func TestForeignRunEventsDoNotMirrorIntoIdleSession(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.session = "sess_t2"
+	m.title = "Terminal 2"
+	m.messages = []chatMessage{{Role: "assistant", Content: "keep t2"}}
+
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "run_started", RunID: "run_t1", SessionID: "sess_t1"})
+	got := updated.(model)
+	updated, _ = got.updateRuntime(runtimeEvent{Type: "assistant", RunID: "run_t1", SessionID: "sess_t1", Content: "t1 answer"})
+	got = updated.(model)
+	updated, _ = got.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_t1", SessionID: "sess_t1", Status: "completed"})
+	got = updated.(model)
+
+	if got.session != "sess_t2" {
+		t.Fatalf("session = %q, want sess_t2", got.session)
+	}
+	if len(got.messages) != 1 || got.messages[0].Content != "keep t2" {
+		t.Fatalf("messages = %#v, want original T2 transcript", got.messages)
+	}
+	if got.activeRunID != "" || got.busy || got.streaming {
+		t.Fatalf("run state busy=%v streaming=%v activeRunID=%q, want idle", got.busy, got.streaming, got.activeRunID)
+	}
+}
+
+func TestForeignRunEventsDoNotInterruptLocalRun(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.busy = true
+	m.activeRunID = "run_t2"
+	m.session = "sess_t2"
+	m.messages = []chatMessage{{Role: "user", Content: "local"}}
+
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "assistant", RunID: "run_t1", SessionID: "sess_t1", Content: "foreign"})
+	got := updated.(model)
+	updated, _ = got.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_t1", SessionID: "sess_t1", Status: "completed"})
+	got = updated.(model)
+
+	if got.session != "sess_t2" || got.activeRunID != "run_t2" || !got.busy {
+		t.Fatalf("state session=%q activeRunID=%q busy=%v, want local run unchanged", got.session, got.activeRunID, got.busy)
+	}
+	if len(got.messages) != 1 || got.messages[0].Content != "local" {
+		t.Fatalf("messages = %#v, want unchanged local transcript", got.messages)
+	}
+}
+
+func TestSessionListDoesNotSwitchVisibleSession(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.session = "sess_t2"
+	m.title = "Terminal 2"
+	m.autoNewSessionOnChat = false
+
+	m.applySessionList(runtimeEvent{Type: "session.list", SessionID: "sess_t1", SessionTitle: "Terminal 1", Sessions: []sessionInfo{
+		{ID: "sess_t1", Title: "Terminal 1"},
+		{ID: "sess_t2", Title: "Terminal 2"},
+	}})
+
+	if m.session != "sess_t2" {
+		t.Fatalf("session = %q, want sess_t2", m.session)
+	}
+	if m.title != "Terminal 2" {
+		t.Fatalf("title = %q, want Terminal 2", m.title)
 	}
 }
 
@@ -1631,6 +1697,7 @@ func TestStreamingLifecycleAfterToolCalls(t *testing.T) {
 	// completes the lifecycle, including draining remaining content.
 	m := initialModel(nil)
 	m.session = "sess_1"
+	m.activeRunID = "run_tool"
 	m.width = 100
 	m.height = 30
 	m.layout()
@@ -1749,6 +1816,7 @@ func TestRunFinishedWithoutAssistantAfterToolCall(t *testing.T) {
 	// the model should transition cleanly to not-busy.
 	m := initialModel(nil)
 	m.session = "sess_1"
+	m.activeRunID = "run_silent"
 	m.width = 100
 	m.height = 30
 	m.layout()
@@ -1799,6 +1867,7 @@ func TestMultipleToolCallsBeforeAssistant(t *testing.T) {
 	// by an assistant event produce correct streaming behavior.
 	m := initialModel(nil)
 	m.session = "sess_1"
+	m.activeRunID = "run_multi"
 	m.width = 100
 	m.height = 30
 	m.layout()
@@ -2277,6 +2346,28 @@ func TestPlanDisplayEventAddsUiOnlyMarkdownMessage(t *testing.T) {
 	viewport := plainText(got.viewport.View())
 	if !strings.Contains(viewport, "Plan: launch") || !strings.Contains(viewport, "Launch") || !strings.Contains(viewport, "step") {
 		t.Fatalf("viewport = %q, want rendered plan markdown", viewport)
+	}
+}
+
+func TestGeneratedImageEventAddsViewMessage(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "generated.image", Path: `D:\qubit\.qubit\generated\generated-run-01.png`, MimeType: "image/png", SizeBytes: 12})
+	got := updated.(model)
+
+	if len(got.messages) < 2 {
+		t.Fatalf("messages = %#v, want generated image view appended", got.messages)
+	}
+	last := got.messages[len(got.messages)-1]
+	if last.Role != "view" || last.ViewType != "image" || last.Path == "" {
+		t.Fatalf("last message = %#v, want generated image view message", last)
+	}
+	viewport := plainText(got.viewport.View())
+	if !strings.Contains(viewport, "Generated image") || !strings.Contains(viewport, `generated-run-01.png`) || !strings.Contains(viewport, "image/png") {
+		t.Fatalf("viewport = %q, want generated image path and metadata", viewport)
 	}
 }
 

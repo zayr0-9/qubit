@@ -68,9 +68,76 @@ describe("CodexResponsesProvider", () => {
     assert.equal(capturedHeaders?.get("thread-id"), "session-1");
     assert.equal(capturedHeaders?.get("x-client-request-id"), "run-1");
     assert.deepEqual(capturedBody.reasoning, { effort: "medium", summary: "auto" });
-    assert.deepEqual(capturedBody.include, ["reasoning.encrypted_content"]);
+    assert.deepEqual(capturedBody.include, ["reasoning.encrypted_content", "web_search_call.action.sources"]);
     assert.equal(capturedBody.prompt_cache_key, "session-1");
     assert.deepEqual(capturedBody.client_metadata, { "x-codex-installation-id": "session-1" });
+  });
+
+  it("emits completed call log events with request and response metadata", async () => {
+    const logs: any[] = [];
+    const tokenStore = new MemoryTokenStore({
+      tokens: {
+        access_token: VALID_ACCESS_TOKEN,
+        refresh_token: "refresh-token",
+      },
+    });
+    const provider = new CodexResponsesProvider({
+      tokenStore,
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      onCallLog: (event) => logs.push(event),
+      fetch: (async () => new Response([
+        "event: response.completed",
+        `data: ${JSON.stringify({
+          type: "response.completed",
+          response: {
+            id: "resp-logged",
+            usage: {
+              input_tokens: 15,
+              input_tokens_details: { cached_tokens: 6 },
+              output_tokens: 4,
+            },
+            output: [
+              { type: "message", content: [{ type: "output_text", text: "Logged." }] },
+            ],
+          },
+        })}`,
+        "",
+        "",
+      ].join("\n"), { status: 200 })) as typeof fetch,
+    });
+
+    await provider.generate({
+      model: "gpt-5.2-codex",
+      sessionId: "session-1",
+      runId: "run-1",
+      messages: [{ role: "user", content: "hello" } as any],
+      tools: [],
+    });
+
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].runId, "run-1");
+    assert.equal(logs[0].sessionId, "session-1");
+    assert.equal(logs[0].provider, "codex");
+    assert.equal(logs[0].model, "gpt-5.2-codex");
+    assert.equal(logs[0].status, "completed");
+    assert.equal(logs[0].responseId, "resp-logged");
+    assert.equal(logs[0].request.prompt_cache_key, "session-1");
+    assert.deepEqual(logs[0].usage, {
+      input_tokens: 15,
+      input_tokens_details: { cached_tokens: 6 },
+      output_tokens: 4,
+    });
+    assert.deepEqual(logs[0].outputItems, [
+      { type: "message", content: [{ type: "output_text", text: "Logged." }] },
+    ]);
+    assert.deepEqual(logs[0].result, {
+      contentChars: 7,
+      reasoningChars: 0,
+      toolCallCount: 0,
+      generatedImageCount: 0,
+      stopReason: "stop",
+      providerStopReason: "response.completed",
+    });
   });
 });
 

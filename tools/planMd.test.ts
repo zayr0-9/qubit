@@ -39,12 +39,17 @@ describe('planMd', () => {
     await createPlan('# Display Me\n\nhello', 'display-me', tmpDir)
     let event: any = null
     setPlanViewEmitter((next) => { event = next })
-
-    const result = await runPlanTool({ action: 'display', name: 'display-me', cwd: tmpDir }) as any
+    const result = await runPlanTool(
+      { action: 'display', name: 'display-me', cwd: tmpDir },
+      { sessionId: 'sess_1', runId: 'run_1', step: 3 },
+    ) as any
     assert.equal(result.displayed, true)
     assert.equal(result.name, 'display-me')
     assert.equal(event.name, 'display-me')
     assert.equal(event.content, '# Display Me\n\nhello')
+    assert.equal(event.sessionId, 'sess_1')
+    assert.equal(event.runId, 'run_1')
+    assert.equal(event.step, 3)
     assert.equal(path.basename(path.dirname(event.path)), 'plans')
   })
 })

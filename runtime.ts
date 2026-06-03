@@ -21,7 +21,7 @@ import { qubitTools } from "./tools/index.js";
 import { setPlanViewEmitter } from "./tools/planMd.js";
 import { setMultiCallLifecycleEmitter, setMultiCallPermissionRequester } from "./tools/multiCall.js";
 import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
-import { CodexResponsesProvider, QubitCodexTokenStore, cancelCodexLogin, startCodexLogin } from "./runtime/codex/index.js";
+import { CodexCallLogWriter, CodexResponsesProvider, QubitCodexTokenStore, cancelCodexLogin, startCodexLogin } from "./runtime/codex/index.js";
 import { overlayActiveRunUserMessages } from "./runtime/activeRunOverlay.js";
 import { assistantReasoningContent } from "./runtime/assistantReasoning.js";
 
@@ -32,6 +32,7 @@ setDefaultToolCwd(initialWorkspaceCwd);
 const dataDir = process.env.QUBIT_PROJECT_DIR || join(initialWorkspaceCwd, ".qubit");
 const configDir = resolveConfigDir();
 const storagePath = join(dataDir, "sessions.sqlite");
+const codexCallLogPath = join(dataDir, "codex-provider-calls.log");
 const indexPath = join(dataDir, "session-index.json");
 const legacyKeyIndexPath = join(dataDir, "api-key-index.json");
 const legacySettingsPath = join(dataDir, "settings.json");
@@ -214,6 +215,7 @@ async function loadModePrompts() {
 const storage = new QubitSqliteStorage({
   filePath: storagePath,
 });
+const codexCallLog = new CodexCallLogWriter(codexCallLogPath);
 
 const pendingPermissions = new Map();
 const activeRuns = new Map();
@@ -281,7 +283,8 @@ setMultiCallLifecycleEmitter((event) => {
   }, target);
 });
 setPlanViewEmitter((event) => {
-  write({ type: "plan.view", name: event.name, path: event.path, cwd: event.cwd, content: event.content });
+  const target = targetForRunEvent(event);
+  write({ type: "plan.view", sessionId: event.sessionId, runId: event.runId, step: event.step, name: event.name, path: event.path, cwd: event.cwd, content: event.content }, target);
 });
 
 const hooks = {
@@ -348,7 +351,6 @@ function readyMessage(id) {
 }
 
 let currentResponseTarget = null;
-
 function write(message, target = null) {
   const line = `${JSON.stringify(redactMessage(message))}\n`;
   const destination = target || currentResponseTarget;
@@ -356,13 +358,22 @@ function write(message, target = null) {
     destination.write(line);
     return;
   }
+  if (!serverAddress) {
+    process.stdout.write(line);
+    return;
+  }
+  console.error(`[runtime-server] dropped untargeted message type=${message?.type || "unknown"}`);
+}
+
+function broadcast(message) {
+  const line = `${JSON.stringify(redactMessage(message))}\n`;
   if (clients.size > 0) {
     for (const client of clients) {
       client.write(line);
     }
     return;
   }
-  process.stdout.write(line);
+  if (!serverAddress) process.stdout.write(line);
 }
 
 const serverAddress = process.env.QUBIT_RUNTIME_ADDR || "";
@@ -498,7 +509,7 @@ async function handleLine(line) {
   }
 
   if (request.type === "codex.login.start") {
-    await handleCodexLoginStart(request.id);
+    await handleCodexLoginStart(request.id, currentResponseTarget);
     return;
   }
 
@@ -748,22 +759,23 @@ async function handleChatRequest(request, responseTarget = null) {
       metadata: { workspaceCwd: getDefaultToolCwd() },
     });
 
+    const generatedImageMessages = await persistGeneratedImages(runSessionId, runId, result.generatedImages || [], responseTarget);
     const assistant = [...result.messages].reverse().find((message) => message.role === "assistant" && String(message.content || "").trim());
     const fallbackAssistant = [...result.messages].reverse().find((message) => message.role === "assistant");
     const reasoningContent = assistantReasoningContent(result.messages);
     await touchSession(runSessionId, {
       title: titleFromInput(request.input),
-      messageCount: result.messages.filter((message) => message.role !== "system").length,
+      messageCount: result.messages.filter((message) => message.role !== "system").length + generatedImageMessages.length,
     });
 
-    if (result.status !== "cancelled" || assistant?.content) {
+    if (result.status !== "cancelled" || assistant?.content || generatedImageMessages.length > 0) {
       write({
         type: "assistant",
         id: request.id,
         runId,
         sessionId: runSessionId,
         status: result.status,
-        content: assistant?.content || fallbackAssistant?.content || "",
+        content: assistant?.content || fallbackAssistant?.content || (generatedImageMessages.length > 0 ? "Generated image saved." : ""),
         reasoningContent,
       }, responseTarget);
     }
@@ -783,6 +795,89 @@ async function handleChatRequest(request, responseTarget = null) {
   } finally {
     activeRuns.delete(runId);
   }
+}
+
+async function persistGeneratedImages(sessionId, runId, generatedImages, responseTarget = null) {
+  if (!Array.isArray(generatedImages) || generatedImages.length === 0) return [];
+  const saved = [];
+  await mkdir(join(dataDir, "generated"), { recursive: true });
+
+  for (const [index, image] of generatedImages.entries()) {
+    const savedImage = await saveGeneratedImage(runId, index, image);
+    saved.push(savedImage);
+    write({
+      type: "generated.image",
+      sessionId,
+      runId,
+      path: savedImage.path,
+      url: savedImage.url,
+      mimeType: savedImage.mimeType,
+      sizeBytes: savedImage.sizeBytes,
+    }, responseTarget);
+  }
+
+  const imageMessages = saved.map((image) => ({
+    role: "assistant",
+    content: generatedImageMarkdown(image),
+    date: new Date(),
+  }));
+  if (imageMessages.length > 0) {
+    const existing = await storage.loadMessages(sessionId);
+    await storage.saveMessages(sessionId, [...existing, ...imageMessages]);
+  }
+  return imageMessages;
+}
+
+async function saveGeneratedImage(runId, index, image) {
+  const mimeType = String(image?.mimeType || mimeTypeFromDataUrl(image?.dataUrl) || "image/png");
+  const extension = extensionForMimeType(mimeType);
+  const baseName = `generated-${safeFilenamePart(runId || "run")}-${String(index + 1).padStart(2, "0")}`;
+  if (typeof image?.dataUrl === "string" && image.dataUrl.trim()) {
+    const bytes = bytesFromDataUrl(image.dataUrl);
+    const filePath = join(dataDir, "generated", `${baseName}.${extension}`);
+    await writeFile(filePath, bytes);
+    return { path: filePath, mimeType, sizeBytes: bytes.length };
+  }
+  if (typeof image?.url === "string" && image.url.trim()) {
+    const filePath = join(dataDir, "generated", `${baseName}.url.txt`);
+    await writeFile(filePath, `${image.url.trim()}\n`, "utf8");
+    return { path: filePath, url: image.url.trim(), mimeType, sizeBytes: 0 };
+  }
+  throw new Error("Generated image did not include dataUrl or url.");
+}
+
+function bytesFromDataUrl(dataUrl) {
+  const trimmed = String(dataUrl || "").trim();
+  const match = /^data:([^;]+);base64,(.+)$/is.exec(trimmed);
+  const base64 = match ? match[2] : trimmed;
+  if (!base64.trim()) throw new Error("Generated image payload was empty.");
+  return Buffer.from(base64, "base64");
+}
+
+function mimeTypeFromDataUrl(dataUrl) {
+  const match = /^data:([^;]+);base64,/i.exec(String(dataUrl || ""));
+  return match?.[1];
+}
+
+function extensionForMimeType(mimeType) {
+  const normalized = String(mimeType || "").toLowerCase();
+  if (normalized.includes("jpeg") || normalized.includes("jpg")) return "jpg";
+  if (normalized.includes("webp")) return "webp";
+  if (normalized.includes("png")) return "png";
+  return "bin";
+}
+
+function safeFilenamePart(value) {
+  return String(value || "image").replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "image";
+}
+
+function generatedImageMarkdown(image) {
+  const lines = ["Generated image saved."];
+  if (image.path) lines.push(`Path: \`${image.path}\``);
+  if (image.url) lines.push(`Source URL: ${image.url}`);
+  if (image.mimeType) lines.push(`MIME type: \`${image.mimeType}\``);
+  if (Number.isFinite(image.sizeBytes) && image.sizeBytes > 0) lines.push(`Size: ${image.sizeBytes} bytes`);
+  return lines.join("\n\n");
 }
 
 function handleCancelRequest(request) {
@@ -909,6 +1004,7 @@ function createProvider(config) {
             content: event.delta,
           }, targetForRunEvent(event));
         },
+        onCallLog: (event) => codexCallLog.append(event),
       });
     default:
       throw new Error(`Unsupported provider: ${config.providerName}`);
@@ -1247,7 +1343,7 @@ async function writeCodexStatus(id) {
   });
 }
 
-async function handleCodexLoginStart(id) {
+async function handleCodexLoginStart(id, responseTarget = null) {
   try {
     const login = await startCodexLogin({
       tokenStore: codexTokenStore,
@@ -1256,7 +1352,7 @@ async function handleCodexLoginStart(id) {
       originator: process.env.CODEX_ORIGINATOR || "codex_cli_rs",
       allowedWorkspaceId: process.env.QUBIT_CODEX_ALLOWED_WORKSPACE_ID,
     });
-    write({ type: "codex.login.started", id, authUrl: login.authUrl, localPort: login.localPort });
+    write({ type: "codex.login.started", id, authUrl: login.authUrl, localPort: login.localPort }, responseTarget);
     login.completed.then(async (result) => {
       if (activeProviderName === "codex") runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
       write({
@@ -1267,12 +1363,12 @@ async function handleCodexLoginStart(id) {
         activeKeyAlias: runtimeState.providerName === "codex" ? runtimeState.keyAlias : "chatgpt",
         model,
         ...result,
-      });
+      }, responseTarget);
     }).catch((error) => {
-      write({ type: "codex.error", id, error: redactSecrets(error instanceof Error ? error.message : String(error)) });
+      write({ type: "codex.error", id, error: redactSecrets(error instanceof Error ? error.message : String(error)) }, responseTarget);
     });
   } catch (error) {
-    write({ type: "codex.error", id, error: redactSecrets(error instanceof Error ? error.message : String(error)) });
+    write({ type: "codex.error", id, error: redactSecrets(error instanceof Error ? error.message : String(error)) }, responseTarget);
   }
 }
 

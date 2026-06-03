@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import type { ModelProvider, ModelResponse } from "@hyper-labs/hyper-router";
-import { CODEX_BASE_URL, CODEX_ORIGINATOR, type CodexGenerateInput, type CodexResponsesProviderOptions } from "./types.js";
+import { CODEX_BASE_URL, CODEX_ORIGINATOR, type CodexGenerateInput, type CodexProviderCallLogEvent, type CodexResponsesProviderOptions } from "./types.js";
 import { getCodexAuthContext } from "./auth.js";
 import { toCodexRequestParts } from "./responsesItems.js";
 import { parseCodexSseResponse } from "./responsesSse.js";
@@ -20,6 +21,9 @@ export class CodexResponsesProvider implements ModelProvider {
     const parts = toCodexRequestParts(input.messages, input.tools);
     const requestId = input.runId || input.sessionId || `qubit-${Date.now()}`;
     const promptCacheKey = input.sessionId || requestId;
+    const callId = randomUUID();
+    const startedAtMs = Date.now();
+    const startedAt = new Date(startedAtMs).toISOString();
     const body = {
       model: input.model,
       ...(parts.instructions ? { instructions: parts.instructions } : {}),
@@ -31,7 +35,7 @@ export class CodexResponsesProvider implements ModelProvider {
       },
       store: false,
       stream: true,
-      include: ["reasoning.encrypted_content"],
+      include: ["reasoning.encrypted_content", "web_search_call.action.sources"],
       prompt_cache_key: promptCacheKey,
       client_metadata: {
         "x-codex-installation-id": promptCacheKey,
@@ -55,42 +59,84 @@ export class CodexResponsesProvider implements ModelProvider {
     if (debugReasoning) {
       console.error(`[codex-reasoning] request model=${input.model || "unknown"} reasoningEffort=${body.reasoning.effort} reasoningSummary=${"summary" in body.reasoning ? body.reasoning.summary : "disabled"} include=${JSON.stringify(body.include)}`);
     }
-    const parsed = await withCodexRetry(async () => {
+    try {
+      const parsed = await withCodexRetry(async () => {
+        input.signal?.throwIfAborted();
+        const response = await this.fetchImpl(this.responsesUrl(), {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          ...(input.signal ? { signal: input.signal } : {}),
+        });
+        return await parseCodexSseResponse(response, {
+          onReasoningDelta: (delta) => this.options.onReasoningDelta?.({ sessionId: input.sessionId, runId: input.runId, delta }),
+        });
+      }, {
+        onRetry: (event) => {
+          this.logRetry(input, event.nextAttempt, event.maxAttempts, event.delayMs, event.reason);
+        },
+      });
       input.signal?.throwIfAborted();
-      const response = await this.fetchImpl(this.responsesUrl(), {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        ...(input.signal ? { signal: input.signal } : {}),
-      });
-      return await parseCodexSseResponse(response, {
-        onReasoningDelta: (delta) => this.options.onReasoningDelta?.({ sessionId: input.sessionId, runId: input.runId, delta }),
-      });
-    }, {
-      onRetry: (event) => {
-        this.logRetry(input, event.nextAttempt, event.maxAttempts, event.delayMs, event.reason);
-      },
-    });
-    input.signal?.throwIfAborted();
-    if (debugReasoning) {
-      console.error(`[codex-reasoning] parsed reasoningChars=${parsed.reasoningContent?.length || 0} outputChars=${parsed.content?.length || 0} toolCalls=${parsed.toolCalls.length} stop=${parsed.providerStopReason || ""}`);
-    }
-    const modelResponse: ModelResponse = {
-      toolCalls: parsed.toolCalls,
-      stopReason: parsed.toolCalls.length > 0 ? "tool_calls" : "stop",
-      ...(parsed.providerStopReason ? { providerStopReason: parsed.providerStopReason } : {}),
-      ...(parsed.generatedImages?.length ? { generatedImages: parsed.generatedImages } : {}),
-    };
-    if (parsed.content || parsed.reasoningContent || parsed.toolCalls.length > 0) {
-      modelResponse.message = {
-        role: "assistant",
-        content: parsed.content,
-        date: new Date(),
-        ...(parsed.reasoningContent ? { reasoningContent: parsed.reasoningContent } : {}),
-        ...(parsed.toolCalls.length > 0 ? { toolCalls: parsed.toolCalls } : {}),
+      if (debugReasoning) {
+        console.error(`[codex-reasoning] parsed reasoningChars=${parsed.reasoningContent?.length || 0} outputChars=${parsed.content?.length || 0} toolCalls=${parsed.toolCalls.length} stop=${parsed.providerStopReason || ""}`);
+      }
+      const modelResponse: ModelResponse = {
+        toolCalls: parsed.toolCalls,
+        stopReason: parsed.toolCalls.length > 0 ? "tool_calls" : "stop",
+        ...(parsed.providerStopReason ? { providerStopReason: parsed.providerStopReason } : {}),
+        ...(parsed.generatedImages?.length ? { generatedImages: parsed.generatedImages } : {}),
       };
+      if (parsed.content || parsed.reasoningContent || parsed.toolCalls.length > 0) {
+        modelResponse.message = {
+          role: "assistant",
+          content: parsed.content,
+          date: new Date(),
+          ...(parsed.reasoningContent ? { reasoningContent: parsed.reasoningContent } : {}),
+          ...(parsed.toolCalls.length > 0 ? { toolCalls: parsed.toolCalls } : {}),
+        };
+      }
+      await this.emitCallLog({
+        callId,
+        runId: input.runId,
+        sessionId: input.sessionId,
+        provider: "codex",
+        model: input.model,
+        requestId,
+        promptCacheKey,
+        status: "completed",
+        startedAt,
+        ...this.finishedTiming(startedAtMs),
+        request: body,
+        ...(parsed.responseId ? { responseId: parsed.responseId } : {}),
+        ...(parsed.usage !== undefined ? { usage: parsed.usage } : {}),
+        ...(parsed.outputItems?.length ? { outputItems: parsed.outputItems } : {}),
+        result: {
+          contentChars: parsed.content.length,
+          reasoningChars: parsed.reasoningContent?.length || 0,
+          toolCallCount: parsed.toolCalls.length,
+          generatedImageCount: parsed.generatedImages?.length || 0,
+          stopReason: modelResponse.stopReason,
+          ...(parsed.providerStopReason ? { providerStopReason: parsed.providerStopReason } : {}),
+        },
+      });
+      return modelResponse;
+    } catch (error) {
+      await this.emitCallLog({
+        callId,
+        runId: input.runId,
+        sessionId: input.sessionId,
+        provider: "codex",
+        model: input.model,
+        requestId,
+        promptCacheKey,
+        status: input.signal?.aborted || isAbortError(error) ? "cancelled" : "failed",
+        startedAt,
+        ...this.finishedTiming(startedAtMs),
+        request: body,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     }
-    return modelResponse;
   }
 
   private responsesUrl(): string {
@@ -101,4 +147,24 @@ export class CodexResponsesProvider implements ModelProvider {
     const safeReason = codexErrorMessage(reason).replace(/\s+/g, " ").slice(0, 300);
     console.error(`[codex-retry] retrying request attempt=${attempt}/${maxAttempts} delayMs=${delayMs} model=${input.model || "unknown"} runId=${input.runId || ""} sessionId=${input.sessionId || ""} reason=${safeReason}`);
   }
+
+  private finishedTiming(startedAtMs: number): Pick<CodexProviderCallLogEvent, "finishedAt" | "durationMs"> {
+    const finishedAtMs = Date.now();
+    return {
+      finishedAt: new Date(finishedAtMs).toISOString(),
+      durationMs: finishedAtMs - startedAtMs,
+    };
+  }
+
+  private async emitCallLog(event: CodexProviderCallLogEvent): Promise<void> {
+    try {
+      await this.options.onCallLog?.(event);
+    } catch (error) {
+      console.error(`[codex-call-log] failed to write call log: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }

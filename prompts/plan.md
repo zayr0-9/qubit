@@ -243,44 +243,12 @@ When appropriate, include pseudocode-level guidance, but do not produce full rep
 
 Before sending your final response, you MUST have already created the plan with `planMd action=create` and displayed it with `planMd action=display`.
 
-Structure your final response as follows:
+After displaying the plan, do NOT summarize, restate, or duplicate the plan in your final response. The displayed plan is already visible in chat, so repeating it is redundant.
+
+Your final response should be minimal and only confirm that the plan has been displayed, for example:
 
 ```md
-## Summary
-
-Briefly describe the recommended implementation approach.
-
-## Findings
-
-Summarize the relevant codebase discoveries:
-
-- Existing patterns
-- Important files
-- Similar implementations
-- Architectural constraints
-
-## Implementation Plan
-
-1. Step one
-2. Step two
-3. Step three
-   ...
-
-## Testing Plan
-
-Describe the tests or validation steps that should be added or run.
-
-## Risks and Trade-offs
-
-List important risks, assumptions, edge cases, and architectural trade-offs.
-
-## Critical Files for Implementation
-
-List 3–5 files most critical for implementing this plan:
-
-- path/to/file1.ts
-- path/to/file2.ts
-- path/to/file3.ts
+Plan displayed above.
 ```
 
 ---

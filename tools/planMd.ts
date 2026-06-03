@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { defineTool } from '@hyper-labs/hyper-router'
+import { defineTool, type AgentContext } from '@hyper-labs/hyper-router'
 import { resolveProjectQubitSubdirectory } from '../utils/qubitProject.js'
 
 const PLAN_DIR_NAME = 'plans'
@@ -63,6 +63,9 @@ export type PlanViewEvent = {
   path: string
   cwd?: string
   content: string
+  sessionId?: string
+  runId?: string
+  step?: number
 }
 
 let planViewEmitter: ((event: PlanViewEvent) => void | Promise<void>) | null = null
@@ -217,13 +220,13 @@ export async function editPlan(
   }
 }
 
-export async function displayPlan(name: string, cwd?: string): Promise<DisplayPlanResult> {
+export async function displayPlan(name: string, cwd?: string, context?: AgentContext): Promise<DisplayPlanResult> {
   const normalized = normalizeName(name)
   const dir = await getPlanStorageDirectory(cwd)
   const filePath = path.join(dir, `${normalized}${PLAN_FILE_EXTENSION}`)
   try {
     const content = await fs.promises.readFile(filePath, 'utf8')
-    await planViewEmitter?.({ name: normalized, path: filePath, cwd, content })
+    await planViewEmitter?.({ name: normalized, path: filePath, cwd, content, sessionId: context?.sessionId, runId: context?.runId, step: context?.step })
     return { displayed: true, exists: true, name: normalized, path: filePath, message: `Displayed plan "${normalized}" in the chat view.` }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -234,7 +237,7 @@ export async function displayPlan(name: string, cwd?: string): Promise<DisplayPl
 }
 
 
-export async function runPlanTool(args: PlanToolArgs) {
+export async function runPlanTool(args: PlanToolArgs, context?: AgentContext) {
   switch (args.action as string) {
     case 'create':
       return await createPlan(args.content ?? '', args.name, args.cwd)
@@ -250,7 +253,7 @@ export async function runPlanTool(args: PlanToolArgs) {
       return await editPlan(args.name, args.search, args.replacement, args.cwd)
     case 'display':
       if (!args.name) throw new Error('name is required for display action')
-      return await displayPlan(args.name, args.cwd)
+      return await displayPlan(args.name, args.cwd, context)
     default: {
       throw new Error(`Unsupported plan action: ${String(args.action)}`)
     }
@@ -274,9 +277,9 @@ export const planMdTool = defineTool({
     additionalProperties: false,
   },
   permission: { mode: 'always' },
-  async execute(args: PlanToolArgs) {
+  async execute(args: PlanToolArgs, context: AgentContext) {
     try {
-      return { ok: true, data: await runPlanTool(args) }
+      return { ok: true, data: await runPlanTool(args, context) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }

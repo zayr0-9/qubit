@@ -11,6 +11,9 @@ type CodexSseParseState = {
   toolCalls: NonNullable<CodexSseParseResult["toolCalls"]>;
   generatedImages: NonNullable<CodexSseParseResult["generatedImages"]>;
   providerStopReason: string;
+  responseId: string;
+  usage: unknown;
+  outputItems: unknown[];
   debug: boolean;
   debugEventCounts: Map<string, number>;
   debugReasoningItemCount: number;
@@ -59,6 +62,9 @@ function createParseState(options: CodexSseParseOptions): CodexSseParseState {
     toolCalls: [],
     generatedImages: [],
     providerStopReason: "",
+    responseId: "",
+    usage: undefined,
+    outputItems: [],
     debug: process.env.QUBIT_CODEX_REASONING_DEBUG === "1",
     debugEventCounts: new Map<string, number>(),
     debugReasoningItemCount: 0,
@@ -79,6 +85,9 @@ function stateResult(state: CodexSseParseState): CodexSseParseResult {
     toolCalls: dedupeToolCalls(state.toolCalls),
     providerStopReason: state.providerStopReason || undefined,
     ...(state.generatedImages.length ? { generatedImages: state.generatedImages } : {}),
+    ...(state.responseId ? { responseId: state.responseId } : {}),
+    ...(state.usage !== undefined ? { usage: state.usage } : {}),
+    ...(state.outputItems.length ? { outputItems: state.outputItems } : {}),
   };
 }
 
@@ -108,6 +117,7 @@ function processFrameText(frame: string, state: CodexSseParseState): void {
     case "response.output_item.done": {
       const item = payload.item || payload.output_item || payload;
       recordOutputItemType(state, item);
+      if (isHostedToolOutputItem(item)) state.outputItems.push(item);
       if (item?.type === "reasoning") state.debugReasoningItemCount += 1;
       collectOutputItem(item, state.toolCalls, state.generatedImages, (value) => appendReasoning(state, value), (value) => {
         if (!state.content) state.content += value;
@@ -116,6 +126,7 @@ function processFrameText(frame: string, state: CodexSseParseState): void {
     }
     case "response.completed":
       state.providerStopReason = "response.completed";
+      captureCompletedResponseMetadata(payload.response, state);
       if (state.debug) recordOutputItemTypes(payload.response?.output, state.debugOutputItemTypes);
       state.debugReasoningItemCount += countReasoningItems(payload.response?.output);
       collectResponseOutput(payload.response, state.toolCalls, state.generatedImages, (value) => appendReasoning(state, value), (value) => {
@@ -132,6 +143,13 @@ function processFrameText(frame: string, state: CodexSseParseState): void {
       });
       break;
   }
+}
+
+function captureCompletedResponseMetadata(response: any, state: CodexSseParseState): void {
+  if (!response || typeof response !== "object") return;
+  if (typeof response.id === "string") state.responseId = response.id;
+  if (response.usage !== undefined) state.usage = response.usage;
+  if (Array.isArray(response.output)) state.outputItems = response.output;
 }
 
 function appendReasoning(state: CodexSseParseState, value: unknown): void {
@@ -206,14 +224,37 @@ function collectOutputItem(
   }
   if (item.type === "image_generation_call" || item.type === "generated_image") {
     const url = item.url || item.image_url;
-    const dataUrl = item.result && typeof item.result === "string" ? item.result : undefined;
-    generatedImages.push({ ...(url ? { url } : {}), ...(dataUrl ? { dataUrl } : {}) });
+    const dataUrl = dataUrlFromImageItem(item);
+    const mimeType = mimeTypeFromImageItem(item);
+    generatedImages.push({ ...(url ? { url } : {}), ...(dataUrl ? { dataUrl } : {}), ...(mimeType ? { mimeType } : {}) });
     return;
   }
   if (item.type === "message" || item.type === "output_message") {
     const text = outputTextFromItem(item);
     if (text) appendContent(text);
   }
+}
+
+function isHostedToolOutputItem(item: any): boolean {
+  return item?.type === "web_search_call" || item?.type === "image_generation_call" || item?.type === "generated_image";
+}
+
+function dataUrlFromImageItem(item: any): string | undefined {
+  const value = typeof item?.result === "string" ? item.result : typeof item?.dataUrl === "string" ? item.dataUrl : "";
+  if (!value) return undefined;
+  if (/^data:[^;]+;base64,/i.test(value)) return value;
+  return `data:${mimeTypeFromImageItem(item) || "image/png"};base64,${value}`;
+}
+
+function mimeTypeFromImageItem(item: any): string | undefined {
+  const explicit = typeof item?.mimeType === "string" ? item.mimeType : typeof item?.mime_type === "string" ? item.mime_type : "";
+  if (explicit) return explicit;
+  const format = String(item?.output_format || item?.format || "").trim().toLowerCase();
+  if (format === "jpg" || format === "jpeg") return "image/jpeg";
+  if (format === "webp") return "image/webp";
+  if (format === "png") return "image/png";
+  if (item?.result || item?.dataUrl) return "image/png";
+  return undefined;
 }
 
 function reasoningTextFromItem(item: any): string {

@@ -8,7 +8,14 @@ export function toCodexRequestParts(messages: Message[], tools: AnyToolDefinitio
     .map((message) => message.content)
     .join("\n\n") || undefined;
   const input = messages.flatMap((message, index) => messageToCodexItems(message, index));
-  return { instructions, input, tools: tools.map(toCodexTool) };
+  return { instructions, input, tools: [...tools.map(toCodexTool), ...codexHostedTools()] };
+}
+
+function codexHostedTools(): unknown[] {
+  return [
+    { type: "web_search" },
+    { type: "image_generation" },
+  ];
 }
 
 function messageToCodexItems(message: Message, index: number): unknown[] {

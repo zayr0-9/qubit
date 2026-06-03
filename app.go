@@ -435,6 +435,9 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.status = "ready"
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"}))
 	case "run_started":
+		if !m.acceptRunScopedEvent(ev) {
+			return m, waitRuntimeEvent(m.runtime)
+		}
 		m.busy = true
 		if ev.RunID != "" {
 			m.activeRunID = ev.RunID
@@ -449,12 +452,18 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 			m.touchLocalSessionActivity(ev.SessionID, m.latestUserMessageTitle())
 		}
 	case "reasoning.delta":
+		if !m.acceptRunScopedEvent(ev) {
+			return m, waitRuntimeEvent(m.runtime)
+		}
 		m.applyReasoningDeltaEvent(ev)
 	case "assistant":
+		if !m.acceptRunScopedEvent(ev) {
+			return m, waitRuntimeEvent(m.runtime)
+		}
 		m.applyAssistantEvent(ev)
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), fakeStreamTick())
 	case "run_finished":
-		if ev.RunID != "" && m.activeRunID != "" && ev.RunID != m.activeRunID {
+		if !m.acceptRunScopedEvent(ev) {
 			return m, waitRuntimeEvent(m.runtime)
 		}
 		if ev.SessionID != "" {
@@ -501,18 +510,32 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	case "codex.login.started", "codex.login.completed", "codex.login.cancelled", "codex.logout.completed", "codex.status", "codex.error":
 		m.applyCodexEvent(ev)
 	case "tool.permission.request":
+		if !m.acceptRunScopedEvent(ev) {
+			return m, waitRuntimeEvent(m.runtime)
+		}
 		if m.shouldAutoAllowPermission(ev) {
 			m.status = "thinking"
 			return m, tea.Batch(sendRuntime(m.runtime, map[string]any{"type": "tool.permission.response", "id": ev.ID, "allow": true}), waitRuntimeEvent(m.runtime))
 		}
 		m = m.openToolPermissionModal(ev)
 	case "tool.call.start":
+		if !m.acceptRunScopedEvent(ev) {
+			return m, waitRuntimeEvent(m.runtime)
+		}
 		m.applyToolCallStart(ev)
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), toolCallRevealTick())
 	case "tool.call.finish":
+		if !m.acceptRunScopedEvent(ev) {
+			return m, waitRuntimeEvent(m.runtime)
+		}
 		m.applyToolCallFinish(ev)
 	case "plan.view":
+		if !m.acceptRunScopedEvent(ev) {
+			return m, waitRuntimeEvent(m.runtime)
+		}
 		m.applyPlanView(ev)
+	case "generated.image":
+		m.applyGeneratedImage(ev)
 	case "session.created":
 		m.clearFakeStream()
 		m.activeRunID = ""
@@ -564,6 +587,13 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 	}
 	return m, waitRuntimeEvent(m.runtime)
+}
+
+func (m model) acceptRunScopedEvent(ev runtimeEvent) bool {
+	if ev.RunID == "" {
+		return true
+	}
+	return m.activeRunID != "" && ev.RunID == m.activeRunID
 }
 
 func (m *model) applyCodexEvent(ev runtimeEvent) {
@@ -819,7 +849,7 @@ func fakeStreamChunkSize(totalRunes int, visibleRunes int) int {
 func (m *model) applySessionList(ev runtimeEvent) {
 	wasStreaming := m.streaming
 	m.sessions = mergeSessionActivity(m.sessions, ev.Sessions)
-	if ev.SessionID != "" && !(m.busy && m.lastRunStartedSession != "" && ev.SessionID != m.lastRunStartedSession) {
+	if m.session == "" && ev.SessionID != "" {
 		m.session = ev.SessionID
 	}
 	if !m.autoNewSessionOnChat {
@@ -832,7 +862,7 @@ func (m *model) applySessionList(ev runtimeEvent) {
 	if wasStreaming {
 		m.streaming = true
 		m.status = "responding"
-	} else {
+	} else if !(m.busy && m.activeRunID != "") {
 		m.status = "ready"
 		m.busy = false
 		m.lastRunStartedSession = ""
@@ -1038,6 +1068,24 @@ func (m *model) appendSystem(content string) {
 func (m *model) applyPlanView(ev runtimeEvent) {
 	name := fallback(ev.Name, "plan")
 	m.messages = append(m.messages, chatMessage{Role: "view", ViewType: "plan", Title: "Plan: " + name, Path: ev.Path, Content: ev.Content})
+	m.refreshViewport()
+}
+
+func (m *model) applyGeneratedImage(ev runtimeEvent) {
+	content := "Generated image saved."
+	if ev.Path != "" {
+		content += "\n\nPath: `" + ev.Path + "`"
+	}
+	if ev.URL != "" {
+		content += "\n\nSource URL: " + ev.URL
+	}
+	if ev.MimeType != "" {
+		content += "\n\nMIME type: `" + ev.MimeType + "`"
+	}
+	if ev.SizeBytes > 0 {
+		content += fmt.Sprintf("\n\nSize: %d bytes", ev.SizeBytes)
+	}
+	m.messages = append(m.messages, chatMessage{Role: "view", ViewType: "image", Title: "Generated image", Path: ev.Path, URL: ev.URL, MimeType: ev.MimeType, SizeBytes: ev.SizeBytes, Content: content})
 	m.refreshViewport()
 }
 
