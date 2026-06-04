@@ -751,3 +751,49 @@ func TestForkTreePageKeysStillScrollPreviewWhenOpenedFromChat(t *testing.T) {
 		t.Fatalf("preview YOffset = %d, want scrolled", got.forkTree.Preview.YOffset())
 	}
 }
+
+func TestForkTreePreviewUsesFullTranscriptIncludingToolCalls(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.session = "sess_root"
+	m.mode = modeForkTree
+	m.forkTree = newForkTreeState()
+
+	m.applyForkTree(runtimeEvent{Type: "session.tree", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_root", SessionID: "sess_root", SessionTitle: "Root", MessageCount: 3, TranscriptMessages: []chatMessage{
+			{Role: "user", Content: "please inspect"},
+			{Role: "tool", ToolGroup: &toolGroup{ID: "stored-tool-1-readFile-0", Name: "readFile", Step: 1, Calls: []toolCallUI{{ID: "read-1", Name: "readFile", Step: 1, Status: "completed", Args: map[string]any{"path": "agent.md"}, Result: map[string]any{"totalLines": float64(42)}}}}},
+			{Role: "assistant", Content: "I inspected it."},
+		}, LineageMessages: []forkTreeLineageMessage{
+			{Role: "user", Content: "please inspect"},
+			{Role: "assistant", Content: "I inspected it."},
+		}},
+	}})
+
+	preview := plainText(m.renderForkTreeLineagePreview(m.forkTree.Nodes[m.forkTree.Selected], 60))
+	for _, want := range []string{"please inspect", "Read 1 file", "I inspected it."} {
+		if !strings.Contains(preview, want) {
+			t.Fatalf("preview = %q, want %q", preview, want)
+		}
+	}
+}
+
+func TestForkTreeModalDescribesFullTranscriptPreview(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.mode = modeForkTree
+	m.forkTree = newForkTreeState()
+	m.applyForkTree(runtimeEvent{Type: "session.tree", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_root", SessionID: "sess_root", SessionTitle: "Root", TranscriptMessages: []chatMessage{{Role: "user", Content: "hello"}}},
+	}})
+
+	rendered := plainText(m.renderForkTreeModal(20))
+	if !strings.Contains(rendered, "current lineage · full transcript") {
+		t.Fatalf("rendered tree = %q, want full transcript title", rendered)
+	}
+	if strings.Contains(rendered, "text messages only") {
+		t.Fatalf("rendered tree = %q, want old text-only title removed", rendered)
+	}
+}

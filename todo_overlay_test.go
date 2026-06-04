@@ -26,7 +26,7 @@ func TestTodoOverlayLatestTodoResultWins(t *testing.T) {
 
 	m.todoOverlayExpanded = true
 	rendered := stripANSI(m.renderTodoOverlay(10))
-	for _, want := range []string{"todo · new-list · 1/2 done", "Sprint", "inspect", "implement"} {
+	for _, want := range []string{"todo · Sprint · 1/2 done", "Sprint", "inspect", "implement"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("todo overlay missing %q:\n%s", want, rendered)
 		}
@@ -233,5 +233,21 @@ func TestTodoOverlayExpandStartsAtBottomForScrollableList(t *testing.T) {
 	rendered := stripANSI(updated.renderTodoOverlay(10))
 	if !strings.Contains(rendered, "eight") || strings.Contains(rendered, "○ one") {
 		t.Fatalf("expanded todo overlay should show bottom rows, got: %q", rendered)
+	}
+}
+
+func TestTodoOverlayHeaderUsesMarkdownTitleWithoutHash(t *testing.T) {
+	m := todoOverlayTestModel()
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "tool", ToolGroup: &toolGroup{Name: "todoMd", Calls: []toolCallUI{{ID: "read", Name: "todoMd", Status: "completed", Args: map[string]any{"action": "read", "name": "bulma-sage-cell"}, Result: map[string]any{"content": "# Fork tree full transcript preview\n- [x] inspect\n- [x] implement\n- [x] test\n- [x] ship\n"}}}}}}
+
+	rendered := stripANSI(m.renderTodoOverlay(10))
+	if !strings.Contains(rendered, "✦ todo · Fork tree full transcript preview · 4/4 done") {
+		t.Fatalf("todo overlay header = %q, want markdown title without hash", rendered)
+	}
+	if strings.Contains(rendered, "bulma-sage-cell") || strings.Contains(rendered, "# Fork tree") {
+		t.Fatalf("todo overlay header should prefer title without hash over list id: %q", rendered)
 	}
 }

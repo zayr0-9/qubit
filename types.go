@@ -340,6 +340,7 @@ type forkTreeNode struct {
 	AssistantRole          string                   `json:"assistantRole,omitempty"`
 	AssistantContent       string                   `json:"assistantContent,omitempty"`
 	LineageMessages        []forkTreeLineageMessage `json:"lineageMessages,omitempty"`
+	TranscriptMessages     []chatMessage            `json:"transcriptMessages,omitempty"`
 	MessageNodes           []forkTreeMessageNode    `json:"messageNodes,omitempty"`
 	MessageCount           int                      `json:"messageCount,omitempty"`
 

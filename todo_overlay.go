@@ -25,6 +25,7 @@ type todoOverlayListEntry struct {
 type todoOverlaySnapshot struct {
 	Action    string
 	Name      string
+	Title     string
 	Message   string
 	Err       string
 	Items     []todoOverlayItem
@@ -119,7 +120,7 @@ func todoOverlaySnapshotFromCall(call toolCallUI) (todoOverlaySnapshot, bool) {
 		}
 	}
 	if content != "" {
-		snapshot.Items, snapshot.Completed, snapshot.Total = parseTodoOverlayContent(content)
+		snapshot.Items, snapshot.Completed, snapshot.Total, snapshot.Title = parseTodoOverlayContent(content)
 	}
 	return snapshot, content != "" || snapshot.Message != "" || snapshot.Err != ""
 }
@@ -166,11 +167,12 @@ func todoOverlayListEntries(result map[string]any, data map[string]any) []todoOv
 	return entries
 }
 
-func parseTodoOverlayContent(content string) ([]todoOverlayItem, int, int) {
+func parseTodoOverlayContent(content string) ([]todoOverlayItem, int, int, string) {
 	content = normalizeInputNewlines(content)
 	items := []todoOverlayItem{}
 	completed := 0
 	total := 0
+	title := ""
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -187,11 +189,14 @@ func parseTodoOverlayContent(content string) ([]todoOverlayItem, int, int) {
 		if strings.HasPrefix(trimmed, "#") {
 			heading := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
 			if heading != "" {
+				if title == "" {
+					title = heading
+				}
 				items = append(items, todoOverlayItem{Text: heading})
 			}
 		}
 	}
-	return items, completed, total
+	return items, completed, total, title
 }
 
 func parseTodoCheckboxLine(line string) (string, bool, bool) {
@@ -268,8 +273,8 @@ func sliceTodoOverlayRows(rows []string, capacity int, scroll int) ([]string, in
 
 func renderTodoOverlayHeader(snapshot todoOverlaySnapshot, width int) string {
 	title := "todo"
-	if snapshot.Name != "" {
-		title += " · " + snapshot.Name
+	if displayName := firstNonEmpty(snapshot.Title, snapshot.Name); displayName != "" {
+		title += " · " + displayName
 	}
 	if snapshot.Total > 0 {
 		title += fmt.Sprintf(" · %d/%d done", snapshot.Completed, snapshot.Total)

@@ -427,6 +427,10 @@ func (m *model) renderForkTreeLineagePreview(node forkTreeNode, width int) strin
 }
 
 func (m *model) renderForkTreeLineagePreviewWithOffset(node forkTreeNode, width int) (string, int) {
+	if len(node.TranscriptMessages) > 0 {
+		return m.renderForkTreeTranscriptPreviewWithOffset(node, width)
+	}
+
 	messages := forkTreeLineageMessages(node)
 	if len(messages) == 0 {
 		return mutedSt.Render("No text message preview for this fork."), 0
@@ -444,6 +448,94 @@ func (m *model) renderForkTreeLineagePreviewWithOffset(node forkTreeNode, width 
 		parts = append(parts, renderMessageWithIcon(message, rendered, 0))
 	}
 	return strings.Join(parts, "\n\n"), selectedMessageOffset
+}
+
+func (m *model) renderForkTreeTranscriptPreviewWithOffset(node forkTreeNode, width int) (string, int) {
+	messages := node.TranscriptMessages
+	selectedIndex := selectedForkTreeTranscriptMessageIndex(node, messages)
+	selectedMessageOffset := 0
+	parts := make([]string, 0, len(messages))
+	contentLine := 0
+	for i := 0; i < len(messages); i++ {
+		message := messages[i]
+		if i > 0 {
+			separator := messageSeparator(messages[i-1], message)
+			parts = append(parts, separator)
+			contentLine += separatorBlankLineCount(separator)
+		}
+		if i == selectedIndex {
+			selectedMessageOffset = contentLine
+		}
+		if message.Role == "view" {
+			rendered := m.renderViewMessage(message)
+			parts = append(parts, rendered)
+			contentLine += renderedLineCount(rendered)
+			continue
+		}
+		if message.Role == "tool" {
+			groups := []*toolGroup{}
+			for i < len(messages) && messages[i].Role == "tool" {
+				if messages[i].ToolGroup != nil {
+					groups = append(groups, messages[i].ToolGroup)
+				}
+				i++
+			}
+			i--
+			rendered := m.renderCollapsedToolGroups(groups, max(20, width))
+			parts = append(parts, rendered)
+			contentLine += renderedLineCount(rendered)
+			continue
+		}
+		if message.Role == "reasoning" {
+			rendered := m.renderReasoningBlock(message, max(20, width))
+			parts = append(parts, rendered)
+			contentLine += renderedLineCount(rendered)
+			continue
+		}
+		rendered := renderMessageWithIcon(message, m.renderForkTreeMessageContent(message, width), messageDisplayNumber(messages, i))
+		parts = append(parts, rendered)
+		contentLine += renderedLineCount(rendered)
+	}
+	return strings.Join(parts, ""), selectedMessageOffset
+}
+
+func (m *model) renderForkTreeMessageContent(message chatMessage, width int) string {
+	rendered, err := renderMessageContentAtWidth(message, max(20, width))
+	if err != nil {
+		return wrap(message.Content, max(20, width))
+	}
+	return rendered
+}
+
+func selectedForkTreeTranscriptMessageIndex(node forkTreeNode, messages []chatMessage) int {
+	if len(messages) == 0 {
+		return 0
+	}
+	target := node.ForkedFromMessageIndex
+	if target < 0 {
+		target = 0
+	}
+	textIndex := 0
+	lastTextMessage := -1
+	for i, message := range messages {
+		if !forkTreePreviewTextMessage(message) {
+			continue
+		}
+		lastTextMessage = i
+		if textIndex >= target {
+			return i
+		}
+		textIndex++
+	}
+	if lastTextMessage >= 0 {
+		return lastTextMessage
+	}
+	return min(target, len(messages)-1)
+}
+
+func forkTreePreviewTextMessage(message chatMessage) bool {
+	role := normalizedForkTreeRole(message.Role)
+	return (role == "user" || role == "assistant") && strings.TrimSpace(message.Content) != ""
 }
 
 func forkTreePreviewLineCount(parts []string) int {
@@ -485,7 +577,6 @@ func forkTreeLineageMessages(node forkTreeNode) []chatMessage {
 	}
 	return messages
 }
-
 func normalizedForkTreeRole(role string) string {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "user":
@@ -524,7 +615,7 @@ func (m model) renderForkTreeModal(height int) string {
 	preview := previewTitle + "\n" + m.forkTree.Preview.View()
 	preview = renderFixedHeight(preview, height)
 
-	treeTitle := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("fork tree") + "  " + mutedSt.Render("current lineage · text messages only")
+	treeTitle := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("fork tree") + "  " + mutedSt.Render("current lineage · full transcript")
 	tree := treeTitle + "\n" + m.renderForkTreeCanvas(treeWidth, paneHeight)
 	tree = renderFixedHeight(tree, height)
 

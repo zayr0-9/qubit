@@ -2065,6 +2065,7 @@ async function buildSessionTreeNodes(focalSessionId = activeSessionId) {
       assistantRole: "",
       assistantContent: "",
       lineageMessages: [],
+      transcriptMessages: [],
       messageNodes: messageNodesBySession.get(session.id) || [],
     };
 
@@ -2089,6 +2090,7 @@ async function buildSessionTreeNodes(focalSessionId = activeSessionId) {
       }
     }
     node.lineageMessages = await lineageTextMessagesForSession(session.id, previewCache);
+    node.transcriptMessages = await transcriptMessagesForSession(session.id, previewCache);
     nodes.push(node);
   }
   return nodes;
@@ -2301,6 +2303,11 @@ async function lineageTextMessagesForSession(sessionId, cache) {
   return transcriptMessagesForUi(messages)
     .map((message) => treeTextMessage(message))
     .filter(Boolean);
+}
+
+async function transcriptMessagesForSession(sessionId, cache) {
+  const messages = await rawSessionMessagesCached(sessionId, cache);
+  return transcriptMessagesForUi(messages);
 }
 
 async function assistantTextPreviewForSession(sessionId, cache) {
