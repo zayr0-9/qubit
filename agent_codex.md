@@ -128,7 +128,7 @@ Codex provider calls are logged as sanitized JSON lines to:
 .qubit\codex-provider-calls.log
 ```
 
-Each line represents one Codex `generate()` call, not one UI message. A single Qubit run can produce multiple Codex calls when tools are involved. Keep entries useful for debugging token/cache behavior by preserving request body, `response.id`, `usage`, final output items, run/session/call identifiers, timings, status, and summary counts. Never log authorization headers, raw access tokens, refresh tokens, ID tokens, API keys, OAuth secrets, or bearer values.
+Each line represents one Codex `generate()` call, not one UI message. A single Qubit run can produce multiple Codex calls when tools are involved. Keep entries useful for debugging token/cache behavior by preserving request body, `response.id`, `usage`, final output items, run/session/call identifiers, timings, status, and summary counts. After each Codex call log append, emit a sanitized `codex.usage` runtime event with normalized usage for that model/tool turn so the TUI can update the compact `ctx ... log ...` status before the overall run finishes. Also persist the final/latest Codex usage for a run as message metadata on the latest generated assistant message so reopened sessions can recover the status from transcript history. Never log authorization headers, raw access tokens, refresh tokens, ID tokens, API keys, OAuth secrets, or bearer values.
 
 ## Validation
 

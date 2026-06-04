@@ -2953,3 +2953,106 @@ func TestForkAndHistoryComposerStateColors(t *testing.T) {
 		t.Fatal("edit composer style should be distinct from fork selector and history styles")
 	}
 }
+
+func TestSlashFavouriteSessionRequestsRuntime(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.session = "sess_active"
+
+	updated, cmd := m.handleSlashCommand("/favourite-session")
+	got := updated.(model)
+
+	if !got.busy {
+		t.Fatal("busy = false, want true while favouriting session")
+	}
+	if got.status != "favouriting session" {
+		t.Fatalf("status = %q, want favouriting session", got.status)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.favourite", "sess_active")
+}
+
+func TestSlashFavouriteSessionWithoutActiveSessionDoesNotSend(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+
+	updated, cmd := m.handleSlashCommand("/favourite-session")
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatal("cmd is non-nil, want no runtime request without active session")
+	}
+	if got.busy {
+		t.Fatal("busy = true, want false without active session")
+	}
+	if len(got.messages) == 0 || !strings.Contains(got.messages[len(got.messages)-1].Content, "No active session") {
+		t.Fatalf("messages = %#v, want no active session notice", got.messages)
+	}
+}
+
+func TestSessionFavouritedEventUpdatesLocalSession(t *testing.T) {
+	m := initialModel(nil)
+	m.busy = true
+	m.session = "sess_active"
+	m.title = "Active"
+	m.sessions = []sessionInfo{{ID: "sess_active", Title: "Active"}}
+
+	m.applySessionFavourited(runtimeEvent{
+		Type:      "session.favourited",
+		SessionID: "sess_active",
+		Session:   &sessionInfo{ID: "sess_active", Title: "Active", FavouritedAt: "2026-06-04T06:00:00Z"},
+	})
+
+	if m.busy {
+		t.Fatal("busy = true, want false after favourite event")
+	}
+	if m.status != "session favourited" {
+		t.Fatalf("status = %q, want session favourited", m.status)
+	}
+	if len(m.sessions) != 1 || m.sessions[0].FavouritedAt != "2026-06-04T06:00:00Z" {
+		t.Fatalf("sessions = %#v, want favourited session metadata", m.sessions)
+	}
+}
+
+func TestSessionPickerFavouritesFirstWithoutDuplicates(t *testing.T) {
+	m := initialModel(nil)
+	m.sessions = []sessionInfo{
+		{ID: "sess_recent", Title: "Recent", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-05T00:00:00Z"},
+		{ID: "sess_fav_old", Title: "Favourite old", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-02T00:00:00Z", FavouritedAt: "2026-01-06T00:00:00Z"},
+		{ID: "sess_fav_new", Title: "Favourite new", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-04T00:00:00Z", FavouritedAt: "2026-01-03T00:00:00Z"},
+		{ID: "sess_old", Title: "Old", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z"},
+		{ID: "sess_fork", Title: "Fork", CreatedAt: "2026-01-07T00:00:00Z", UpdatedAt: "2026-01-07T00:00:00Z", ForkedFromSessionID: "sess_recent", FavouritedAt: "2026-01-07T00:00:00Z"},
+	}
+
+	visible := m.sessionPickerSessions()
+	want := []string{"sess_fav_new", "sess_fav_old", "sess_recent", "sess_old"}
+	if len(visible) != len(want) {
+		t.Fatalf("visible sessions = %#v, want %d sessions", visible, len(want))
+	}
+	seen := map[string]bool{}
+	for i, id := range want {
+		if visible[i].ID != id {
+			t.Fatalf("visible[%d] = %q, want %q; visible=%#v", i, visible[i].ID, id, visible)
+		}
+		if seen[visible[i].ID] {
+			t.Fatalf("duplicate session in visible list: %#v", visible)
+		}
+		seen[visible[i].ID] = true
+	}
+}
+
+func TestSessionPickerSearchKeepsFavouritesFirst(t *testing.T) {
+	m := initialModel(nil)
+	m.sessionSearchQuery = "plan"
+	m.sessions = []sessionInfo{
+		{ID: "sess_recent", Title: "Plan recent", UpdatedAt: "2026-01-05T00:00:00Z"},
+		{ID: "sess_fav", Title: "Plan favourite", UpdatedAt: "2026-01-01T00:00:00Z", FavouritedAt: "2026-01-02T00:00:00Z"},
+		{ID: "sess_other", Title: "Other", UpdatedAt: "2026-01-06T00:00:00Z"},
+	}
+
+	visible := m.sessionPickerSessions()
+	if len(visible) != 2 || visible[0].ID != "sess_fav" || visible[1].ID != "sess_recent" {
+		t.Fatalf("visible = %#v, want favourite search match before recent match", visible)
+	}
+}

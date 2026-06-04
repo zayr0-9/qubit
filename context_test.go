@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestContextStatusForCodexModelIncludesLatestUsageLog(t *testing.T) {
+func TestContextStatusForCodexModelUsesUsageAsContext(t *testing.T) {
 	m := initialModel(nil)
 	m.width = 100
 	m.provider = "codex"
@@ -20,8 +20,46 @@ func TestContextStatusForCodexModelIncludesLatestUsageLog(t *testing.T) {
 	}
 
 	status := plainText(m.renderInputStatus())
-	if !strings.Contains(status, "ctx ") || !strings.Contains(status, "/400k") || !strings.Contains(status, "log in 12.3k/cache 12k/out 678") {
-		t.Fatalf("status = %q, want context usage and latest Codex usage log next to mode/reasoning", status)
+	if !strings.Contains(status, "ctx 13k/400k cache 12k") || strings.Contains(status, "log in") {
+		t.Fatalf("status = %q, want Codex input+output as context with cache mention", status)
+	}
+}
+
+func TestContextStatusUsesLatestMessageCodexUsage(t *testing.T) {
+	m := initialModel(nil)
+	m.maxContext = 400000
+	m.messages = []chatMessage{
+		{Role: "assistant", Content: "older", CodexUsage: &codexUsage{InputTokens: 1000, OutputTokens: 200, Model: "gpt-5.2-codex"}},
+		{Role: "user", Content: "next"},
+		{Role: "assistant", Content: "newer", CodexUsage: &codexUsage{InputTokens: 2000, CachedTokens: 1500, OutputTokens: 300, Model: "gpt-5.2-codex"}},
+	}
+
+	status := plainText(m.renderInputStatus())
+	if !strings.Contains(status, "ctx 2.3k/400k cache 1.5k") || strings.Contains(status, "log in") {
+		t.Fatalf("status = %q, want latest message Codex usage as context", status)
+	}
+}
+
+func TestSessionMessagesRestoresLatestCodexUsage(t *testing.T) {
+	m := model{session: "sess_1"}
+	m.applySessionMessages(runtimeEvent{Type: "session.messages", SessionID: "sess_1", Messages: []chatMessage{
+		{Role: "assistant", Content: "old", CodexUsage: &codexUsage{InputTokens: 1000, Model: "gpt-5.2-codex"}},
+		{Role: "assistant", Content: "new", CodexUsage: &codexUsage{InputTokens: 3000, OutputTokens: 400, Model: "gpt-5.2-codex"}},
+	}})
+
+	if m.lastCodexUsage == nil || m.lastCodexUsage.InputTokens != 3000 || m.lastCodexUsage.OutputTokens != 400 {
+		t.Fatalf("lastCodexUsage = %#v, want latest persisted message usage", m.lastCodexUsage)
+	}
+}
+
+func TestCodexUsageRuntimeEventUpdatesStatus(t *testing.T) {
+	m := model{activeRunID: "run_1", maxContext: 400000}
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "codex.usage", RunID: "run_1", CodexUsage: &codexUsage{InputTokens: 5000, CachedTokens: 4000, OutputTokens: 600, Model: "gpt-5.2-codex"}})
+	got := updated.(model)
+
+	status := plainText(got.renderInputStatus())
+	if !strings.Contains(status, "ctx 5.6k/400k cache 4k") || strings.Contains(status, "log in") {
+		t.Fatalf("status = %q, want live Codex usage as context", status)
 	}
 }
 
@@ -33,7 +71,7 @@ func TestContextStatusHidesCodexUsageForOtherProviders(t *testing.T) {
 	m.lastCodexUsage = &codexUsage{InputTokens: 12000, OutputTokens: 500}
 
 	status := plainText(m.renderInputStatus())
-	if strings.Contains(status, "log in") {
+	if strings.Contains(status, "cache") {
 		t.Fatalf("status = %q, want Codex usage hidden for non-Codex providers", status)
 	}
 }

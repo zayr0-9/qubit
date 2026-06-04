@@ -69,7 +69,7 @@ D:\qubit
   util.go                   Shared helpers
   bin\qubit.exe             Built Windows executable
   .qubit\\sessions.sqlite    hyper-router SQLite transcript store in the terminal launch cwd
-  .qubit\\session-index.json Qubit-owned session index in the terminal launch cwd
+  .qubit\\session-index.json Qubit-owned session index in the terminal launch cwd; may include session metadata such as favouritedAt
   .qubit\\runtime.log        Runtime diagnostic log in the terminal launch cwd
   .qubit\\codex-provider-calls.log
                             JSON-lines Codex provider call log in the terminal launch cwd
@@ -123,6 +123,8 @@ session.new
 session.activate
 session.messages
 session.rename
+session.favourite
+session.favourited
 session.fork
 session.tree
 key.list
@@ -312,7 +314,7 @@ $env:QUBIT_STUB = "1"
     - `QUBIT_DEV_FORK_TREE=1` shows fork-tree session titles, session IDs, and fork parent IDs inside the tree/preview.
 
 - Persist transcripts through hyper-router SQLite storage.
-- Maintain listable session metadata in `.qubit/session-index.json` until hyper-router exposes a suitable public session listing API.
+- Maintain listable session metadata in `.qubit/session-index.json` until hyper-router exposes a suitable public session listing API. Session favourites are stored there as `favouritedAt` metadata.
 - If adding sql.js or packaging behavior, verify WASM resolution carefully.
 
 ## Validation Checklist

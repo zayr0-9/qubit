@@ -18,6 +18,10 @@ interface QubitSqliteStorageOptions {
   filePath: string;
 }
 
+type QubitMessage = Message & {
+  metadata?: Record<string, unknown>;
+};
+
 interface MessageRow {
   id: string;
   session_id: string;
@@ -29,6 +33,7 @@ interface MessageRow {
   name: string | null;
   tool_call_id: string | null;
   tool_calls_json: string | null;
+  metadata_json: string | null;
   fingerprint: string;
 }
 
@@ -65,6 +70,7 @@ export class QubitSqliteStorage implements StorageAdapter {
     this.db = new Database(options.filePath);
     this.configureDatabase();
     this.ensureSchema();
+    this.ensureMessageMetadataColumn();
     this.migrateLegacySessions();
   }
 
@@ -116,6 +122,21 @@ export class QubitSqliteStorage implements StorageAdapter {
              finished_at = excluded.finished_at`,
         )
         .run(record.runId ?? `legacy-${record.sessionId}`, record.sessionId, record.status);
+    }) as SqliteTransaction<[]>;
+
+    tx.default();
+  }
+
+  async attachLatestAssistantMetadata(sessionId: string, metadata: Record<string, unknown>): Promise<void> {
+    const tx = this.db.transaction(() => {
+      const row = this.db
+        .prepare("SELECT id, metadata_json FROM qubit_messages WHERE session_id = ? AND role = 'assistant' ORDER BY ordinal DESC LIMIT 1")
+        .get(sessionId) as Pick<MessageRow, "id" | "metadata_json"> | undefined;
+      if (!row) return;
+      const existing = row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : {};
+      this.db
+        .prepare("UPDATE qubit_messages SET metadata_json = ? WHERE id = ?")
+        .run(JSON.stringify({ ...existing, ...metadata }), row.id);
     }) as SqliteTransaction<[]>;
 
     tx.default();
@@ -306,6 +327,12 @@ export class QubitSqliteStorage implements StorageAdapter {
     `);
   }
 
+  private ensureMessageMetadataColumn(): void {
+    const columns = this.db.prepare("PRAGMA table_info(qubit_messages)").all() as Array<{ name: string }>;
+    if (columns.some((column) => column.name === "metadata_json")) return;
+    this.db.exec("ALTER TABLE qubit_messages ADD COLUMN metadata_json TEXT");
+  }
+
   private migrateLegacySessions(): void {
     const hasLegacySessions = this.db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sessions'")
@@ -366,8 +393,8 @@ export class QubitSqliteStorage implements StorageAdapter {
     const statement = this.db.prepare(
       `INSERT INTO qubit_messages (
          id, session_id, ordinal, role, content, date, reasoning_content, name,
-         tool_call_id, tool_calls_json, fingerprint
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         tool_call_id, tool_calls_json, metadata_json, fingerprint
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     messages
@@ -385,6 +412,7 @@ export class QubitSqliteStorage implements StorageAdapter {
           message.name ?? null,
           message.toolCallId ?? null,
           message.toolCalls ? JSON.stringify(message.toolCalls) : null,
+          this.metadataJson(message),
           this.fingerprintMessage(message, ordinal),
         );
       });
@@ -432,7 +460,8 @@ export class QubitSqliteStorage implements StorageAdapter {
       ...(row.name ? { name: row.name } : {}),
       ...(row.tool_call_id ? { toolCallId: row.tool_call_id } : {}),
       ...(row.tool_calls_json ? { toolCalls: JSON.parse(row.tool_calls_json) as ToolCall[] } : {}),
-    };
+      ...(row.metadata_json ? { metadata: JSON.parse(row.metadata_json) as Record<string, unknown> } : {}),
+    } as QubitMessage;
   }
 
   private messagesEqual(existing: Message[], incoming: Message[]): boolean {
@@ -453,7 +482,18 @@ export class QubitSqliteStorage implements StorageAdapter {
       date: this.serializeDate(message.date),
       toolCallId: message.toolCallId ?? null,
       toolCalls: message.toolCalls ?? null,
+      metadata: this.messageMetadata(message),
     });
+  }
+
+  private messageMetadata(message: Message): Record<string, unknown> | null {
+    const metadata = (message as QubitMessage).metadata;
+    return metadata && typeof metadata === "object" ? metadata : null;
+  }
+
+  private metadataJson(message: Message): string | null {
+    const metadata = this.messageMetadata(message);
+    return metadata ? JSON.stringify(metadata) : null;
   }
 
   private fingerprintMessage(message: Message, ordinal: number): string {

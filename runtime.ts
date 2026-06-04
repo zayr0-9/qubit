@@ -687,6 +687,18 @@ async function handleLine(line) {
     return;
   }
 
+  if (request.type === "session.favourite") {
+    const requestedSessionId = String(request.sessionId || activeSessionId || "");
+    const session = await favouriteSession(requestedSessionId);
+    if (!session) {
+      write({ type: "error", id: request.id, error: `Unknown session: ${request.sessionId || activeSessionId}` });
+      return;
+    }
+    write({ type: "session.favourited", id: request.id, sessionId: session.id, sessionTitle: session.title, session });
+    writeSessionList(request.id);
+    return;
+  }
+
   if (request.type === "chat" && typeof request.input === "string") {
     const responseTarget = currentResponseTarget;
     void handleChatRequest(request, responseTarget).catch((error) => {
@@ -768,6 +780,8 @@ async function handleChatRequest(request, responseTarget = null) {
     const assistant = [...result.messages].reverse().find((message) => message.role === "assistant" && String(message.content || "").trim());
     const fallbackAssistant = [...result.messages].reverse().find((message) => message.role === "assistant");
     const reasoningContent = assistantReasoningContent(result.messages);
+    const codexUsage = await codexUsageForRun(runId);
+    if (codexUsage) await attachLatestAssistantCodexUsage(runSessionId, codexUsage);
     await touchSession(runSessionId, {
       title: titleFromInput(request.input),
       messageCount: result.messages.filter((message) => message.role !== "system").length + generatedImageMessages.length,
@@ -782,9 +796,10 @@ async function handleChatRequest(request, responseTarget = null) {
         status: result.status,
         content: assistant?.content || fallbackAssistant?.content || (generatedImageMessages.length > 0 ? "Generated image saved." : ""),
         reasoningContent,
+        codexUsage,
       }, responseTarget);
     }
-    write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: result.status, codexUsage: await codexUsageForRun(runId) }, responseTarget);
+    write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: result.status, codexUsage }, responseTarget);
   } catch (error) {
     if (controller.signal.aborted || isAbortError(error)) {
       write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: "cancelled", codexUsage: await codexUsageForRun(runId) }, responseTarget);
@@ -1013,7 +1028,7 @@ function createProvider(config) {
         },
         onCallLog: async (event) => {
           await codexCallLog.append(event);
-          rememberLatestCodexUsage(event);
+          emitCodexUsage(event);
         },
       });
     default:
@@ -1737,6 +1752,7 @@ async function loadSessionIndex() {
       ...(typeof session.forkedFromSessionId === "string" ? { forkedFromSessionId: session.forkedFromSessionId } : {}),
       ...(Number.isFinite(session.forkedFromMessageIndex) ? { forkedFromMessageIndex: session.forkedFromMessageIndex } : {}),
       ...(typeof session.forkedAt === "string" ? { forkedAt: session.forkedAt } : {}),
+      ...(typeof session.favouritedAt === "string" ? { favouritedAt: session.favouritedAt } : {}),
     }));
 
   if (normalized.length === 0) {
@@ -1862,6 +1878,16 @@ async function renameSession(sessionId, title) {
   if (trimmed) session.title = trimmed;
   session.updatedAt = new Date().toISOString();
   await saveSessionIndex();
+  return session;
+}
+
+async function favouriteSession(sessionId = activeSessionId) {
+  const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId);
+  if (!session) return null;
+  if (!session.favouritedAt) {
+    session.favouritedAt = new Date().toISOString();
+    await saveSessionIndex();
+  }
   return session;
 }
 
@@ -2402,7 +2428,8 @@ function transcriptMessagesForUi(messages) {
         uiMessages.push(...toolGroupsFromStoredToolCalls(toolCalls, toolResults, consumedToolResults, reconstructedStep));
       }
       const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
-      if (content.trim()) uiMessages.push({ role: "assistant", content, ...(reasoningContent.trim() ? { reasoningContent } : {}) });
+      const codexUsage = normalizeCodexUsage(message.metadata?.codexUsage);
+      if (content.trim()) uiMessages.push({ role: "assistant", content, ...(reasoningContent.trim() ? { reasoningContent } : {}), ...(codexUsage ? { codexUsage } : {}) });
       continue;
     }
 
@@ -2522,11 +2549,22 @@ function titleFromInput(input) {
   return cleaned.length > sessionTitleMaxChars ? `${cleaned.slice(0, sessionTitleMaxChars - 3)}...` : cleaned;
 }
 
-function rememberLatestCodexUsage(event) {
+function emitCodexUsage(event) {
   if (!event || event.provider !== "codex" || !event.runId) return;
-  const usage = normalizeCodexUsage(event.usage);
+  const usage = normalizeCodexUsage(event.usage, event);
   if (!usage) return;
   latestCodexUsageByRun.set(event.runId, usage);
+  write({
+    type: "codex.usage",
+    runId: event.runId,
+    sessionId: event.sessionId,
+    codexUsage: usage,
+  }, targetForRunEvent(event));
+}
+
+async function attachLatestAssistantCodexUsage(sessionId, codexUsage) {
+  if (!sessionId || !codexUsage || !storage.attachLatestAssistantMetadata) return;
+  await storage.attachLatestAssistantMetadata(sessionId, { codexUsage });
 }
 
 async function codexUsageForRun(runId) {
@@ -2575,7 +2613,7 @@ function parseJsonLine(line) {
   }
 }
 
-function normalizeCodexUsage(usage) {
+function normalizeCodexUsage(usage, event = null) {
   if (!usage || typeof usage !== "object") return undefined;
   const inputTokens = numberField(usage, ["input_tokens", "inputTokens", "prompt_tokens", "promptTokens"]);
   const outputTokens = numberField(usage, ["output_tokens", "outputTokens", "completion_tokens", "completionTokens"]);
@@ -2583,7 +2621,18 @@ function normalizeCodexUsage(usage) {
   const cachedTokens = numberField(usage?.input_tokens_details, ["cached_tokens", "cachedTokens"])
     || numberField(usage?.prompt_tokens_details, ["cached_tokens", "cachedTokens"]);
   if (inputTokens <= 0 && outputTokens <= 0 && totalTokens <= 0 && cachedTokens <= 0) return undefined;
-  return { inputTokens, cachedTokens, outputTokens, totalTokens };
+  return {
+    inputTokens,
+    cachedTokens,
+    outputTokens,
+    totalTokens,
+    ...(event?.callId ? { callId: event.callId } : {}),
+    ...(event?.responseId ? { responseId: event.responseId } : {}),
+    ...(event?.model ? { model: event.model } : {}),
+    ...(event?.status ? { status: event.status } : {}),
+    ...(event?.durationMs ? { durationMs: event.durationMs } : {}),
+    ...(event?.finishedAt ? { finishedAt: event.finishedAt } : {}),
+  };
 }
 
 function numberField(source, keys) {

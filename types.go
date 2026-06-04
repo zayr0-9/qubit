@@ -9,19 +9,20 @@ import (
 )
 
 type chatMessage struct {
-	Role             string     `json:"role"`
-	Content          string     `json:"content"`
-	ReasoningContent string     `json:"reasoningContent,omitempty"`
-	ViewType         string     `json:"viewType,omitempty"`
-	Title            string     `json:"title,omitempty"`
-	Path             string     `json:"path,omitempty"`
-	URL              string     `json:"url,omitempty"`
-	MimeType         string     `json:"mimeType,omitempty"`
-	SizeBytes        int        `json:"sizeBytes,omitempty"`
-	ToolGroup        *toolGroup `json:"toolGroup,omitempty"`
-	LocalOnly        bool       `json:"localOnly,omitempty"`
-	MessageKind      string     `json:"messageKind,omitempty"`
-	Expanded         bool       `json:"expanded,omitempty"`
+	Role             string      `json:"role"`
+	Content          string      `json:"content"`
+	ReasoningContent string      `json:"reasoningContent,omitempty"`
+	ViewType         string      `json:"viewType,omitempty"`
+	Title            string      `json:"title,omitempty"`
+	Path             string      `json:"path,omitempty"`
+	URL              string      `json:"url,omitempty"`
+	MimeType         string      `json:"mimeType,omitempty"`
+	SizeBytes        int         `json:"sizeBytes,omitempty"`
+	ToolGroup        *toolGroup  `json:"toolGroup,omitempty"`
+	CodexUsage       *codexUsage `json:"codexUsage,omitempty"`
+	LocalOnly        bool        `json:"localOnly,omitempty"`
+	MessageKind      string      `json:"messageKind,omitempty"`
+	Expanded         bool        `json:"expanded,omitempty"`
 }
 
 const (
@@ -78,6 +79,7 @@ type sessionInfo struct {
 	ForkedFromSessionID    string `json:"forkedFromSessionId,omitempty"`
 	ForkedFromMessageIndex int    `json:"forkedFromMessageIndex,omitempty"`
 	ForkedAt               string `json:"forkedAt,omitempty"`
+	FavouritedAt           string `json:"favouritedAt,omitempty"`
 }
 
 type apiKeyInfo struct {
@@ -345,10 +347,16 @@ type runtimeEvent struct {
 }
 
 type codexUsage struct {
-	InputTokens  int `json:"inputTokens,omitempty"`
-	CachedTokens int `json:"cachedTokens,omitempty"`
-	OutputTokens int `json:"outputTokens,omitempty"`
-	TotalTokens  int `json:"totalTokens,omitempty"`
+	InputTokens  int    `json:"inputTokens,omitempty"`
+	CachedTokens int    `json:"cachedTokens,omitempty"`
+	OutputTokens int    `json:"outputTokens,omitempty"`
+	TotalTokens  int    `json:"totalTokens,omitempty"`
+	CallID       string `json:"callId,omitempty"`
+	ResponseID   string `json:"responseId,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Status       string `json:"status,omitempty"`
+	DurationMs   int    `json:"durationMs,omitempty"`
+	FinishedAt   string `json:"finishedAt,omitempty"`
 }
 
 type runtimeMsg runtimeEvent

@@ -45,7 +45,7 @@ Qubit's terminal interface should stay clean, minimal, and calm. Prefer readable
 ## Context Status
 
 - The compact input status row may show approximate context usage next to mode/reasoning (for example `plan · medium · ctx 2.1k/400k`). Keep it terse and foreground-only.
-- Context usage is currently an MVP estimate using 1 token = 4 characters and includes visible chat messages, surfaced reasoning blocks, and tool-call full-context character counts when available. Tool-call preview truncation is visual only and should not reduce the status estimate. When Codex usage is available from the latest run log, append it tersely beside `ctx` (for example `ctx 2.1k/400k log in 12k/cache 8k/out 900`).
+- Context usage is currently an MVP estimate using 1 token = 4 characters and includes visible chat messages, surfaced reasoning blocks, and tool-call full-context character counts when available. Tool-call preview truncation is visual only and should not reduce the status estimate. When Codex usage is available from the latest live usage event or persisted assistant-message metadata, prefer the provider usage over the estimate: show input+output as `ctx` and append cache tersely when present (for example `ctx 12.9k/400k cache 8k`).
 
 ## Transcript Mouse Links
 

@@ -442,6 +442,11 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		}
 		m.applyAssistantEvent(ev)
 		return m, tea.Batch(waitRuntimeEvent(m.runtime), fakeStreamTick())
+	case "codex.usage":
+		if !m.acceptRunScopedEvent(ev) {
+			return m, waitRuntimeEvent(m.runtime)
+		}
+		m.applyCodexUsage(ev.CodexUsage)
 	case "run_finished":
 		if !m.acceptRunScopedEvent(ev) {
 			return m, waitRuntimeEvent(m.runtime)
@@ -548,6 +553,8 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.applySessionMessages(ev)
 	case "session.deleted":
 		m.applySessionDeleted(ev)
+	case "session.favourited":
+		m.applySessionFavourited(ev)
 	case "session.renamed":
 		m.busy = false
 		if ev.SessionID != "" {
@@ -666,7 +673,8 @@ func (m *model) applyAssistantEvent(ev runtimeEvent) {
 		content = "(empty response)"
 	}
 	m.applyFinalReasoningContent(ev)
-	m.messages = append(m.messages, chatMessage{Role: "assistant", Content: "", ReasoningContent: ev.ReasoningContent})
+	m.applyCodexUsage(ev.CodexUsage)
+	m.messages = append(m.messages, chatMessage{Role: "assistant", Content: "", ReasoningContent: ev.ReasoningContent, CodexUsage: ev.CodexUsage})
 	m.activeReasoningRunID = ""
 	m.activeReasoningIndex = -1
 	m.activeReasoningStart = -1
@@ -903,7 +911,11 @@ func mergeSessionActivity(local []sessionInfo, incoming []sessionInfo) []session
 	seen := make(map[string]bool, len(incoming))
 	for _, session := range incoming {
 		seen[session.ID] = true
-		if localSession, ok := localByID[session.ID]; ok && sessionRecentTimestamp(localSession) > sessionRecentTimestamp(session) {
+		localSession, hasLocal := localByID[session.ID]
+		if hasLocal && session.FavouritedAt == "" {
+			session.FavouritedAt = localSession.FavouritedAt
+		}
+		if hasLocal && sessionRecentTimestamp(localSession) > sessionRecentTimestamp(session) {
 			if localSession.UpdatedAt != "" {
 				session.UpdatedAt = localSession.UpdatedAt
 			}
@@ -922,6 +934,38 @@ func mergeSessionActivity(local []sessionInfo, incoming []sessionInfo) []session
 		}
 	}
 	return merged
+}
+
+func (m *model) applySessionFavourited(ev runtimeEvent) {
+	m.busy = false
+	m.status = "session favourited"
+	session := ev.Session
+	if session == nil && ev.SessionID != "" {
+		fallbackSession := sessionInfo{ID: ev.SessionID, Title: ev.SessionTitle, FavouritedAt: time.Now().UTC().Format("2006-01-02T15:04:05.000Z")}
+		session = &fallbackSession
+	}
+	if session != nil {
+		if session.FavouritedAt == "" {
+			session.FavouritedAt = time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+		}
+		m.upsertSessionInfo(*session)
+		if session.ID == m.session && session.Title != "" {
+			m.title = session.Title
+		}
+	}
+}
+
+func (m *model) upsertSessionInfo(session sessionInfo) {
+	if session.ID == "" {
+		return
+	}
+	for i := range m.sessions {
+		if m.sessions[i].ID == session.ID {
+			m.sessions[i] = session
+			return
+		}
+	}
+	m.sessions = append(m.sessions, session)
 }
 
 func shouldReplaceSessionTitle(title string) bool {
@@ -976,8 +1020,10 @@ func (m *model) applySessionMessages(ev runtimeEvent) {
 	m.autoScroll = true
 	if len(ev.Messages) == 0 {
 		m.messages = []chatMessage{{Role: "assistant", Content: "No messages in this session yet."}}
+		m.lastCodexUsage = nil
 	} else {
 		m.messages = ev.Messages
+		m.lastCodexUsage = latestCodexUsageFromMessages(m.messages)
 	}
 	m.layout()
 	m.refreshViewport()

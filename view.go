@@ -456,16 +456,21 @@ func renderSessionPickerRow(session sessionInfo, active bool, width int, statsWi
 	if active {
 		activeMarker = "•"
 	}
+	favouriteMarker := " "
+	if strings.TrimSpace(session.FavouritedAt) != "" {
+		favouriteMarker = "★"
+	}
+	prefix := activeMarker + " " + favouriteMarker
 	stats := formatSessionPickerStats(session, forkCount)
 	statsWidth = max(statsWidth, lipgloss.Width(stats))
-	titleWidth := max(1, width-lipgloss.Width(activeMarker)-statsWidth-3)
-	if titleWidth+lipgloss.Width(activeMarker)+statsWidth+3 > width {
-		stats = oneLine(stats, max(1, width-lipgloss.Width(activeMarker)-4))
+	titleWidth := max(1, width-lipgloss.Width(prefix)-statsWidth-3)
+	if titleWidth+lipgloss.Width(prefix)+statsWidth+3 > width {
+		stats = oneLine(stats, max(1, width-lipgloss.Width(prefix)-4))
 		statsWidth = lipgloss.Width(stats)
-		titleWidth = max(1, width-lipgloss.Width(activeMarker)-statsWidth-3)
+		titleWidth = max(1, width-lipgloss.Width(prefix)-statsWidth-3)
 	}
 	title := oneLine(session.Title, titleWidth)
-	return fmt.Sprintf("%s %-*s %*s", activeMarker, titleWidth, title, statsWidth, stats)
+	return fmt.Sprintf("%s %-*s %*s", prefix, titleWidth, title, statsWidth, stats)
 }
 
 func formatSessionPickerStats(session sessionInfo, forkCount int) string {

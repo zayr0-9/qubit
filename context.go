@@ -13,39 +13,48 @@ func (m model) contextStatusText() string {
 	if maxTokens <= 0 {
 		return ""
 	}
+	if usage := m.codexUsageForStatus(); usage != nil {
+		usedTokens := usage.InputTokens + usage.OutputTokens
+		if usedTokens <= 0 {
+			usedTokens = usage.TotalTokens
+		}
+		if usedTokens > 0 {
+			status := fmt.Sprintf("ctx %s/%s", formatTokenCount(usedTokens), formatTokenCount(maxTokens))
+			if usage.CachedTokens > 0 {
+				status += fmt.Sprintf(" cache %s", formatTokenCount(usage.CachedTokens))
+			}
+			return status
+		}
+	}
 	usedTokens := estimateContextTokens(m.messages)
-	status := fmt.Sprintf("ctx %s/%s", formatTokenCount(usedTokens), formatTokenCount(maxTokens))
-	if usage := m.codexUsageStatusText(); usage != "" {
-		status += " " + usage
-	}
-	return status
+	return fmt.Sprintf("ctx %s/%s", formatTokenCount(usedTokens), formatTokenCount(maxTokens))
 }
 
-func (m model) codexUsageStatusText() string {
-	if m.lastCodexUsage == nil || !isCodexProvider(m.activeProvider, m.provider) {
-		return ""
+func (m model) codexUsageForStatus() *codexUsage {
+	usage := m.lastCodexUsage
+	if usage == nil {
+		usage = latestCodexUsageFromMessages(m.messages)
 	}
-	parts := []string{}
-	if m.lastCodexUsage.InputTokens > 0 {
-		parts = append(parts, fmt.Sprintf("in %s", formatTokenCount(m.lastCodexUsage.InputTokens)))
+	if usage == nil || !shouldShowCodexUsage(m.activeProvider, m.provider, usage) {
+		return nil
 	}
-	if m.lastCodexUsage.CachedTokens > 0 {
-		parts = append(parts, fmt.Sprintf("cache %s", formatTokenCount(m.lastCodexUsage.CachedTokens)))
-	}
-	if m.lastCodexUsage.OutputTokens > 0 {
-		parts = append(parts, fmt.Sprintf("out %s", formatTokenCount(m.lastCodexUsage.OutputTokens)))
-	}
-	if len(parts) == 0 && m.lastCodexUsage.TotalTokens > 0 {
-		parts = append(parts, fmt.Sprintf("total %s", formatTokenCount(m.lastCodexUsage.TotalTokens)))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "log " + strings.Join(parts, "/")
+	return usage
 }
 
-func isCodexProvider(activeProvider, provider string) bool {
-	return strings.EqualFold(activeProvider, "codex") || strings.EqualFold(provider, "codex")
+func shouldShowCodexUsage(activeProvider, provider string, usage *codexUsage) bool {
+	if usage == nil {
+		return false
+	}
+	return strings.EqualFold(activeProvider, "codex") || strings.EqualFold(provider, "codex") || strings.Contains(strings.ToLower(usage.Model), "codex")
+}
+
+func latestCodexUsageFromMessages(messages []chatMessage) *codexUsage {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].CodexUsage != nil {
+			return messages[i].CodexUsage
+		}
+	}
+	return nil
 }
 
 func (m model) activeModelMaxContext() int {

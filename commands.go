@@ -15,6 +15,7 @@ var slashCommands = []slashCommand{
 	{Name: "fork", Usage: "/fork [title|message-number]", Description: "Fork here or edit a numbered user message", NeedsArg: false},
 	{Name: "tree", Usage: "/tree", Description: "Open the fork tree", NeedsArg: false, OpensOnSelect: true},
 	{Name: "sessions", Usage: "/sessions", Description: "Open the session picker", NeedsArg: false, OpensOnSelect: true},
+	{Name: "favourite-session", Usage: "/favourite-session", Description: "Favourite the current session", NeedsArg: false},
 	{Name: "keys", Usage: "/keys", Description: "Manage provider API keys", NeedsArg: false, OpensOnSelect: true},
 	{Name: "models", Usage: "/models", Description: "Choose the active model", NeedsArg: false, OpensOnSelect: true},
 	{Name: "providers", Usage: "/providers", Description: "Choose the active provider", NeedsArg: false, OpensOnSelect: true},
@@ -170,7 +171,8 @@ func (m model) openSessionDeleteConfirm() (tea.Model, tea.Cmd) {
 }
 
 func (m model) sessionPickerSessions() []sessionInfo {
-	visible := make([]sessionInfo, 0, len(m.sessions))
+	favourites := make([]sessionInfo, 0, len(m.sessions))
+	recent := make([]sessionInfo, 0, len(m.sessions))
 	query := strings.ToLower(strings.TrimSpace(m.sessionSearchQuery))
 	for _, session := range m.sessions {
 		if session.ForkedFromSessionID != "" {
@@ -179,17 +181,26 @@ func (m model) sessionPickerSessions() []sessionInfo {
 		if query != "" && !strings.Contains(strings.ToLower(session.Title), query) {
 			continue
 		}
-		visible = append(visible, session)
+		if strings.TrimSpace(session.FavouritedAt) != "" {
+			favourites = append(favourites, session)
+		} else {
+			recent = append(recent, session)
+		}
 	}
-	sort.SliceStable(visible, func(i, j int) bool {
-		left := sessionRecentTimestamp(visible[i])
-		right := sessionRecentTimestamp(visible[j])
+	sortSessionsByRecentActivity(favourites)
+	sortSessionsByRecentActivity(recent)
+	return append(favourites, recent...)
+}
+
+func sortSessionsByRecentActivity(sessions []sessionInfo) {
+	sort.SliceStable(sessions, func(i, j int) bool {
+		left := sessionRecentTimestamp(sessions[i])
+		right := sessionRecentTimestamp(sessions[j])
 		if left == right {
 			return false
 		}
 		return left > right
 	})
-	return visible
 }
 
 func sessionRecentTimestamp(session sessionInfo) string {
@@ -273,6 +284,14 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.busy = true
 		m.status = "loading sessions"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.list"})
+	case "favourite-session", "favorite-session", "favourite", "favorite":
+		if strings.TrimSpace(m.session) == "" {
+			m.appendSystem("No active session to favourite.")
+			return m, nil
+		}
+		m.busy = true
+		m.status = "favouriting session"
+		return m, sendRuntime(m.runtime, map[string]any{"type": "session.favourite", "sessionId": m.session})
 	case "keys", "key":
 		return m.openKeyPicker()
 	case "models", "model", "list":
@@ -318,7 +337,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title|message-number] - fork current chat or edit a numbered user message\n/tree - open the fork tree\n/sessions - open the session picker\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal keyboard and appearance setup\n/permission <plan|edit|allow-all> - switch tool permission mode\n/reasoning <none|low|medium|high> - set model reasoning effort\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title|message-number] - fork current chat or edit a numbered user message\n/tree - open the fork tree\n/sessions - open the session picker\n/favourite-session - favourite the current session\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal keyboard and appearance setup\n/permission <plan|edit|allow-all> - switch tool permission mode\n/reasoning <none|low|medium|high> - set model reasoning effort\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
