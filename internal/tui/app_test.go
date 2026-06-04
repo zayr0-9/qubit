@@ -3103,3 +3103,15 @@ func TestChatPasteReplacesSelectedComposerText(t *testing.T) {
 		t.Fatalf("composer value = %q, want pasted", got.composer.Value())
 	}
 }
+
+func TestHiddenSessionsIgnoredBySessionPicker(t *testing.T) {
+	m := initialModel(nil)
+	m.sessions = []sessionInfo{
+		{ID: "visible", Title: "Visible", CreatedAt: "2026-01-02T00:00:00Z"},
+		{ID: "hidden", Title: "Hidden", CreatedAt: "2026-01-03T00:00:00Z", Hidden: true, Kind: "subagent"},
+	}
+	sessions := m.sessionPickerSessions()
+	if len(sessions) != 1 || sessions[0].ID != "visible" {
+		t.Fatalf("sessions = %#v, want only visible session", sessions)
+	}
+}

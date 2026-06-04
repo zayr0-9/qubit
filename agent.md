@@ -107,7 +107,7 @@ D:\qubit
   %APPDATA%\Qubit or ~/.config/qubit
                                        User-global Qubit config directory, overrideable with QUBIT_CONFIG_DIR
   <config>\theme.json                  User-global selected `/theme` palette
-  <config>\settings.json               User-global non-secret app defaults, including default provider and per-provider default models
+  <config>\settings.json               User-global non-secret app defaults, including default provider, per-provider default models, and the global subagent provider/model
   .qubit\todos\*.md                    Project todo lists managed by todoMd
   .qubit\plans\*.md                    Project plans managed by planMd
 ```
@@ -168,6 +168,9 @@ run_finished
 plan.view
 plan.clarification.request
 plan.clarification.response
+subagent.config
+subagent.provider.use
+subagent.model.use
 error
 shutdown
 chat
@@ -267,7 +270,9 @@ internal/tui/storage/
   Project-local input history JSON store.
 ```
 
+
 Future extraction should proceed incrementally from `internal/tui` into subpackages such as `internal/tui/features/...` only when boundaries are clear and tests can move with the extracted code. Keep app-level Tea command adapters and model-bound behavior in `internal/tui`; keep leaf packages free of broad model/business logic. Do not add unrelated logic to `internal/tui/app.go` or `internal/tui/view.go`; prefer the focused files above or a new cohesive file/component when a feature has its own state, update/render rules, tests, or lifecycle. Avoid tiny abstraction files that only add indirection.
+
 
 ### Go Style
 
@@ -329,6 +334,7 @@ Follow standard Go conventions:
 - Slash commands that open interactive UI directly from the palette should mark `slashCommand.OpensOnSelect` so Enter/Tab clears the composer and opens the UI instead of inserting command text.
 - Reusable modal selector lists use `modalState.Options` plus `OptionCursor`: Up/down moves the option cursor, left/right or tab/shift+tab moves actions, Enter resolves the selected action, and Esc cancels selector-style modals.
 - `/models` should open the model selector modal backed by runtime `model.list`/`model.use` protocol data, not a hardcoded demo list. The model selector offers Use now and Set default actions; Set default sends `model.use` with `persistDefault: true` so the runtime stores a non-secret per-provider default model in user-global `<config>/settings.json`.
+- `/subagents` opens the subagent provider/model selector backed by runtime `subagent.config`, `subagent.provider.use`, and `subagent.model.use` protocol data. The selected subagent provider/model is stored in `<config>/settings.json` under `subagent` and must not mutate the main active provider/model.
 - `/sessions` should open an interactive picker, not print repeated lists into chat.
 - Session picker results should be sorted by most recent activity (`updatedAt`, falling back to `createdAt`) so chats with new messages surface above merely newer-created sessions.
 - Session switching should happen through the interactive picker. Do not add a `/use` slash command unless explicitly requested.
@@ -346,7 +352,7 @@ Follow standard Go conventions:
   - `d` to delete stored keychain keys after a confirmation modal, while blocking deletion of env keys.
   - Esc close/cancel.
 - API key entry must never render raw secret text. Pasted or typed keys should be displayed only as mask bullets, and tests should cover paste -> save flows, not only programmatic insertion.
-- Plan/edit mode maps the UI's permission mode to runtime prompt mode: plan uses ask-before-gated-tools behavior and the `prompts/plan.md` system prompt addendum; edit uses always-allow gated-tool behavior and the `prompts/edit.md` system prompt addendum. Keep the Markdown files as the editable source for these prompt addenda. In plan mode, `planMd` can use `action: "clarify"` to ask one or more user clarification questions before the final plan; Go renders these in the bottom overlay above the input, always includes a final manual-entry option, and returns all answers to the model as the tool result.
+- Plan/edit mode maps the UI's permission mode to runtime prompt mode: plan uses ask-before-gated-tools behavior and the `prompts/plan.md` system prompt addendum; edit uses always-allow gated-tool behavior and the `prompts/edit.md` system prompt addendum. Subagent runs use `prompts/subagent.md` inside hidden child sessions. Keep the Markdown files as the editable source for these prompt addenda. In plan mode, `planMd` can use `action: "clarify"` to ask one or more user clarification questions before the final plan; Go renders these in the bottom overlay above the input, always includes a final manual-entry option, and returns all answers to the model as the tool result.
 - Cwd blocking is enabled by default for model-callable filesystem/search/shell tools. `/cwd-remove-block` allows subsequent runs in the current TUI session to access paths outside the launch cwd, and `/cwd-enable-block` restores the block. Render this state beside the plan/edit/allow mode below the input text area.
 - Assistant responses may be frontend-simulated streamed: the runtime can send a complete `assistant` event, and the Go UI may progressively reveal it. During a running chat, Esc sends `chat.cancel` with the active `runId` so the Node runtime can abort the hyper-router model call; any assistant text already visible in the Go UI is preserved. If the full `assistant` event already arrived and only the frontend reveal is still streaming, Esc stops that reveal while keeping the visible partial text. Keep fake reveal streaming as terminal UX logic; true provider token streaming should be added explicitly to the protocol when needed.
 - Agent-done notifications are Go-side UI lifecycle concerns. Fire run-complete notifications only after `run_finished` has arrived and any frontend-simulated assistant streaming has fully drained; do not notify on partial assistant events, aborts, stale run IDs, or session loads. Keep notification delivery behind the `notifier` interface in `notifications.go` so Windows/macOS/Linux implementations can be added without changing streaming lifecycle logic.

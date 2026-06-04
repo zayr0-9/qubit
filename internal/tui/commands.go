@@ -20,6 +20,7 @@ var slashCommands = []slashCommand{
 	{Name: "keys", Usage: "/keys", Description: "Manage provider API keys", NeedsArg: false, OpensOnSelect: true},
 	{Name: "models", Usage: "/models", Description: "Choose the active model", NeedsArg: false, OpensOnSelect: true},
 	{Name: "providers", Usage: "/providers", Description: "Choose the active provider", NeedsArg: false, OpensOnSelect: true},
+	{Name: "subagents", Usage: "/subagents", Description: "Choose the default subagent model", NeedsArg: false, OpensOnSelect: true},
 	{Name: "codex-login", Usage: "/codex-login", Description: "Sign in to ChatGPT Codex", NeedsArg: false},
 	{Name: "codex-status", Usage: "/codex-status", Description: "Show ChatGPT Codex sign-in status", NeedsArg: false},
 	{Name: "codex-logout", Usage: "/codex-logout", Description: "Sign out of ChatGPT Codex", NeedsArg: false},
@@ -176,6 +177,9 @@ func (m model) sessionPickerSessions() []sessionInfo {
 	recent := make([]sessionInfo, 0, len(m.sessions))
 	query := strings.ToLower(strings.TrimSpace(m.sessionSearchQuery))
 	for _, session := range m.sessions {
+		if session.Hidden {
+			continue
+		}
 		if session.ForkedFromSessionID != "" {
 			continue
 		}
@@ -304,6 +308,11 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		return m, sendRuntime(m.runtime, map[string]any{"type": "model.list"})
 	case "providers", "provider":
 		return m.openProviderSelectorModal(), nil
+	case "subagents", "subagent":
+		m.mode = modeModal
+		m.busy = true
+		m.status = "loading subagent models"
+		return m, sendRuntime(m.runtime, map[string]any{"type": "subagent.config"})
 	case "codex-login", "codexlogin":
 		m.busy = true
 		m.status = "starting Codex login"
@@ -630,7 +639,7 @@ func (m model) showSlashPalette() bool {
 
 func slashCommandRunsDuringActiveRun(cmd string) bool {
 	switch strings.ToLower(strings.TrimSpace(cmd)) {
-	case "help", "h", "permission", "permissions", "perm", "cwd-remove-block", "cwd-enable-block", "cwd-unblock", "cwd-block", "cwd-open", "cwd-close", "theme", "themes", "colors", "color", "permission-test", "modal-test", "md-editor", "md", "docs":
+	case "help", "h", "permission", "permissions", "perm", "cwd-remove-block", "cwd-enable-block", "cwd-unblock", "cwd-block", "cwd-open", "cwd-close", "theme", "themes", "colors", "color", "permission-test", "modal-test", "md-editor", "md", "docs", "subagents", "subagent":
 		return true
 	default:
 		return false

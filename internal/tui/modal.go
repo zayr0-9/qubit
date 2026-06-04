@@ -145,6 +145,75 @@ func (m model) openModelSelectorModal(models []modelInfo) model {
 	return m
 }
 
+func (m model) openSubagentModelSelectorModal(models []modelInfo) model {
+	m.previousMode = modeChat
+	m.mode = modeModal
+	m.subagentModels = models
+	options := make([]modalOption, 0, len(models))
+	activeIndex := 0
+	for i, info := range models {
+		label := fallback(info.Name, info.ID)
+		if info.Active || info.ID == m.subagentModel {
+			activeIndex = i
+		}
+		options = append(options, modalOption{ID: info.ID, Label: label, Description: info.Description, Active: info.Active || info.ID == m.subagentModel})
+	}
+	if len(options) == 0 {
+		options = []modalOption{{ID: fallback(m.subagentModel, m.model), Label: fallback(m.subagentModel, m.model), Description: "Current subagent model"}}
+	}
+	title := "Choose subagent model"
+	if m.subagentProvider != "" {
+		title = fmt.Sprintf("Choose %s subagent model", m.subagentProvider)
+	}
+	m.modal = &modalState{
+		ID:          "subagent_model_selector",
+		Kind:        modalKindCustom,
+		Title:       title,
+		Description: "Select the model hidden subagents should use. This does not change the main chat model.",
+		Options:     options,
+		Actions: []modalAction{
+			{ID: "select", Label: "Use model", Style: "primary", Default: true},
+			{ID: "provider", Label: "Change provider"},
+			{ID: "cancel", Label: "Cancel"},
+		},
+		OptionCursor: activeIndex,
+		Payload:      map[string]any{"action": "subagent.model.select"},
+	}
+	m.busy = false
+	m.status = "choose subagent model"
+	return m
+}
+
+func (m model) openSubagentProviderSelectorModal() model {
+	m.previousMode = modeChat
+	m.mode = modeModal
+	providers := apiKeyProviderOptions()
+	options := make([]modalOption, 0, len(providers))
+	activeIndex := 0
+	for i, provider := range providers {
+		if provider.ID == m.subagentProvider {
+			activeIndex = i
+		}
+		options = append(options, modalOption{ID: provider.ID, Label: provider.Label, Description: provider.Description, Active: provider.ID == m.subagentProvider})
+	}
+	m.modal = &modalState{
+		ID:           "subagent_provider_selector",
+		Kind:         modalKindCustom,
+		Title:        "Choose subagent provider",
+		Description:  "Select the provider hidden subagents should use. This does not change the main chat provider.",
+		Options:      options,
+		OptionCursor: activeIndex,
+		Actions: []modalAction{
+			{ID: "select", Label: "Use provider", Style: "primary", Default: true},
+			{ID: "cancel", Label: "Cancel"},
+		},
+		Payload: map[string]any{"action": "subagent.provider.select"},
+	}
+	m.busy = false
+	m.status = "choose subagent provider"
+	return m
+}
+
 func (m model) updateModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.modal == nil {
 		m.mode = modeChat
@@ -326,6 +395,31 @@ func (m model) resolveModalAction(actionID string) (tea.Model, tea.Cmd) {
 			return m, sendRuntime(m.runtime, payload)
 		}
 		m.status = "provider selection cancelled"
+		return m, nil
+	}
+
+	if modal.Payload["action"] == "subagent.model.select" {
+		if actionID == "select" {
+			selected := modalSelectedOption(modal)
+			m.busy = true
+			m.status = "switching subagent model"
+			return m, sendRuntime(m.runtime, map[string]any{"type": "subagent.model.use", "model": selected.ID})
+		}
+		if actionID == "provider" {
+			return m.openSubagentProviderSelectorModal(), nil
+		}
+		m.status = "subagent selection cancelled"
+		return m, nil
+	}
+
+	if modal.Payload["action"] == "subagent.provider.select" {
+		if actionID == "select" {
+			selected := modalSelectedOption(modal)
+			m.busy = true
+			m.status = "switching subagent provider"
+			return m, sendRuntime(m.runtime, map[string]any{"type": "subagent.provider.use", "provider": selected.ID})
+		}
+		m.status = "subagent provider selection cancelled"
 		return m, nil
 	}
 

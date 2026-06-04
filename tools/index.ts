@@ -10,6 +10,7 @@ import { powershellTool } from './powershell.js'
 import { readFileContinuationTool, readFileTool } from './readFile.js'
 import { readFilesTool } from './readFiles.js'
 import { ripgrepTool } from './ripgrep.js'
+import { subagentTool } from './subagent.js'
 import { todoMdTool } from './todoMd.js'
 
 const baseQubitTools: AnyToolDefinition[] = [
@@ -26,6 +27,7 @@ const baseQubitTools: AnyToolDefinition[] = [
   deleteFileTool,
   todoMdTool,
   planMdTool,
+  subagentTool,
 ]
 
 export const multiCallTool = createMultiCallTool(baseQubitTools)

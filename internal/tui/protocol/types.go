@@ -66,6 +66,8 @@ type SessionInfo struct {
 	ForkedFromMessageIndex int    `json:"forkedFromMessageIndex,omitempty"`
 	ForkedAt               string `json:"forkedAt,omitempty"`
 	FavouritedAt           string `json:"favouritedAt,omitempty"`
+	Hidden                 bool   `json:"hidden,omitempty"`
+	Kind                   string `json:"kind,omitempty"`
 }
 
 type ApiKeyInfo struct {
@@ -156,9 +158,12 @@ type RuntimeEvent struct {
 	Questions        []PlanClarificationQuestion `json:"questions,omitempty"`
 	Answers          []PlanClarificationAnswer   `json:"answers,omitempty"`
 	Provider         string                      `json:"provider,omitempty"`
+	Providers        []ModelInfo                 `json:"providers,omitempty"`
 	ActiveProvider   string                      `json:"activeProvider,omitempty"`
 	ActiveKeyAlias   string                      `json:"activeKeyAlias,omitempty"`
 	Model            string                      `json:"model,omitempty"`
+	SubagentProvider string                      `json:"subagentProvider,omitempty"`
+	SubagentModel    string                      `json:"subagentModel,omitempty"`
 	Keys             []ApiKeyInfo                `json:"keys,omitempty"`
 	Models           []ModelInfo                 `json:"models,omitempty"`
 	ForkTreeNodes    []ForkTreeNode              `json:"nodes,omitempty"`

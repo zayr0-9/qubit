@@ -20,8 +20,9 @@ import { AmazonBedrockVAIProvider } from "@hyper-labs/hyper-router/providers/ama
 import { OpenRouterProvider } from "@hyper-labs/hyper-router/providers/openrouter";
 import { qubitTools } from "./tools/index.js";
 import { isPathInProjectPlansDirectory } from "./tools/editFile.js";
-import { setPlanClarificationRequester, setPlanViewEmitter } from "./tools/planMd.js";
+import { setHiddenRunChecker, setPlanClarificationRequester, setPlanViewEmitter } from "./tools/planMd.js";
 import { setMultiCallLifecycleEmitter, setMultiCallPermissionRequester } from "./tools/multiCall.js";
+import { setSubagentExecutor } from "./tools/subagent.js";
 import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
 import { clearRunCwdBlockEnabled, setRunCwdBlockEnabled } from "./utils/toolAccessPolicy.js";
 import { CodexCallLogWriter, CodexResponsesProvider, QubitCodexTokenStore, cancelCodexLogin, startCodexLogin } from "./runtime/codex/index.js";
@@ -48,6 +49,7 @@ const defaultModePrompts = {
   plan: "You are in plan mode: reason carefully and propose changes before editing.",
   edit: "You are in edit mode: implement changes directly and validate them.",
 };
+const defaultSubagentPrompt = "You are a delegated Qubit subagent. Complete the delegated task independently, use tools when helpful, and return concise findings/results to the calling agent. Do not ask the user directly unless the task truly cannot proceed.";
 const defaultSessionId = process.env.QUBIT_SESSION_ID || "qubit-default";
 function resolveConfigDir() {
   if (process.env.QUBIT_CONFIG_DIR) return process.env.QUBIT_CONFIG_DIR;
@@ -97,6 +99,7 @@ const providerAliasMap = new Map(Object.entries(providerDefinitions).flatMap(([n
 const providerNames = Object.keys(providerDefinitions);
 let settings = await loadSettings();
 const modePrompts = await loadModePrompts();
+const subagentPrompt = await loadPromptFile("subagent", defaultSubagentPrompt);
 const defaultProviderName = normalizeProvider(process.env.QUBIT_PROVIDER || settings.defaultProvider || "glm");
 let activeProviderName = defaultProviderName;
 let model = defaultModelForProvider(activeProviderName);
@@ -174,10 +177,18 @@ try {
   keytarLoadError = error;
 }
 
-function createQubitAgent(mode = "plan") {
+function createQubitAgent(modeOrOptions = "plan") {
+  if (modeOrOptions && typeof modeOrOptions === "object") {
+    return defineAgent({
+      name: modeOrOptions.name || "qubit-chat",
+      instructions: modeOrOptions.instructions || instructionsForMode(modeOrOptions.mode || "plan"),
+      model: modeOrOptions.model || model,
+      tools: modeOrOptions.tools || qubitTools,
+    });
+  }
   return defineAgent({
     name: "qubit-chat",
-    instructions: instructionsForMode(mode),
+    instructions: instructionsForMode(modeOrOptions),
     model,
     tools: qubitTools,
   });
@@ -204,15 +215,17 @@ function normalizeReasoningLevel(value) {
   throw new Error("Reasoning level must be none, low, medium, or high.");
 }
 
+async function loadPromptFile(name, fallback) {
+  try {
+    const content = (await readFile(join(promptsDir, `${name}.md`), "utf8")).trim();
+    return content || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 async function loadModePrompts() {
-  const entries = await Promise.all(Object.keys(defaultModePrompts).map(async (mode) => {
-    try {
-      const content = (await readFile(join(promptsDir, `${mode}.md`), "utf8")).trim();
-      return [mode, content || defaultModePrompts[mode]];
-    } catch {
-      return [mode, defaultModePrompts[mode]];
-    }
-  }));
+  const entries = await Promise.all(Object.keys(defaultModePrompts).map(async (mode) => [mode, await loadPromptFile(mode, defaultModePrompts[mode])]));
   return Object.fromEntries(entries);
 }
 
@@ -224,8 +237,14 @@ const codexCallLog = new CodexCallLogWriter(codexCallLogPath);
 const pendingPermissions = new Map();
 const pendingPlanClarifications = new Map();
 const activeRuns = new Map();
+const hiddenRuns = new Map();
 const latestCodexUsageByRun = new Map();
+function isHiddenRunId(runId) {
+  return Boolean(runId && hiddenRuns.has(runId));
+}
+
 function targetForRunEvent(event) {
+  if (isHiddenRunId(event?.runId)) return null;
   if (event?.runId && activeRuns.has(event.runId)) return activeRuns.get(event.runId).target || null;
   if (event?.sessionId) {
     const active = [...activeRuns.values()].find((run) => run.sessionId === event.sessionId);
@@ -259,6 +278,7 @@ async function requestToolPermission(request) {
 
 async function shouldAutoAllowToolPermission(request) {
   const metadata = request?.metadata || {};
+  if (isHiddenRunId(request?.runId)) return true;
   if (metadata.planModeAutoAllowProjectPlansOnly !== true) return false;
   if (runtimeState?.promptMode !== "plan") return false;
   if (request?.toolName !== "editFile") return false;
@@ -269,8 +289,10 @@ async function shouldAutoAllowToolPermission(request) {
   return await isPathInProjectPlansDirectory(filePath, typeof args.cwd === "string" ? args.cwd : undefined);
 }
 
+setHiddenRunChecker(isHiddenRunId);
 setMultiCallPermissionRequester(requestToolPermission);
 setMultiCallLifecycleEmitter((event) => {
+  if (isHiddenRunId(event.runId)) return;
   const target = targetForRunEvent(event);
   if (event.type === "start") {
     write({
@@ -303,10 +325,12 @@ setMultiCallLifecycleEmitter((event) => {
   }, target);
 });
 setPlanViewEmitter((event) => {
+  if (isHiddenRunId(event.runId)) return;
   const target = targetForRunEvent(event);
   write({ type: "plan.view", sessionId: event.sessionId, runId: event.runId, step: event.step, name: event.name, path: event.path, cwd: event.cwd, content: event.content }, target);
 });
 setPlanClarificationRequester(async (request) => {
+  if (isHiddenRunId(request.runId)) return { cancelled: true, answers: [] };
   const target = targetForRunEvent(request);
   write({ type: "plan.clarification.request", id: request.id, sessionId: request.sessionId, runId: request.runId, step: request.step, toolCallId: request.toolCallId, questions: request.questions }, target);
   return await new Promise((resolve) => {
@@ -314,10 +338,13 @@ setPlanClarificationRequester(async (request) => {
   });
 });
 
+setSubagentExecutor(runSubagentTool);
+
 const hooks = {
   requestToolPermission,
 
   async onToolCallStart(event) {
+    if (isHiddenRunId(event.runId)) return;
     const target = targetForRunEvent(event);
     write({
       type: "tool.call.start",
@@ -326,12 +353,13 @@ const hooks = {
       step: event.step,
       toolCallId: event.toolCallId,
       toolName: event.toolName,
-      status: event.status,
+      status: runtimeToolCallStatus(event.toolName, event.status, event.result),
       args: summarizeToolArgs(event.toolName, event.args),
       startedAt: event.startedAt,
     }, target);
   },
   async onToolCallFinish(event) {
+    if (isHiddenRunId(event.runId)) return;
     const target = targetForRunEvent(event);
     write({
       type: "tool.call.finish",
@@ -340,7 +368,7 @@ const hooks = {
       step: event.step,
       toolCallId: event.toolCallId,
       toolName: event.toolName,
-      status: event.status,
+      status: runtimeToolCallStatus(event.toolName, event.status, event.result),
       args: summarizeToolArgs(event.toolName, event.args),
       result: summarizeToolResult(event.toolName, event.result),
       contextChars: toolCallContextChars(event.toolName, event.args, event.result),
@@ -374,6 +402,8 @@ function readyMessage(id) {
     storagePath,
     indexPath,
     workspaceCwd: getDefaultToolCwd(),
+    subagentProvider: settings.subagent.provider,
+    subagentModel: settings.subagent.model,
   };
 }
 
@@ -565,6 +595,21 @@ async function handleLine(line) {
     return;
   }
 
+  if (request.type === "subagent.config") {
+    await writeSubagentConfig(request.id);
+    return;
+  }
+
+  if (request.type === "subagent.provider.use") {
+    await setSubagentProvider(request.id, request.provider);
+    return;
+  }
+
+  if (request.type === "subagent.model.use") {
+    await setSubagentModel(request.id, request.model);
+    return;
+  }
+
   if (request.type === "provider.use") {
     await switchProvider(request.id, request.provider, request.persistDefault === true);
     return;
@@ -718,6 +763,10 @@ async function handleLine(line) {
     const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId);
     if (!session) {
       write({ type: "error", id: request.id, error: `Unknown session: ${sessionId}` });
+      return;
+    }
+    if (session.hidden === true) {
+      write({ type: "error", id: request.id, error: `Hidden subagent session is not available in the TUI: ${sessionId}` });
       return;
     }
 
@@ -883,6 +932,146 @@ async function handleChatRequest(request, responseTarget = null) {
   }
 }
 
+async function runSubagentTool(args, context) {
+  const parentRunId = context?.runId || "";
+  const parentRun = activeRuns.get(parentRunId) || hiddenRuns.get(parentRunId);
+  const parentSessionId = context?.sessionId || parentRun?.sessionId || activeSessionId;
+  const parentHidden = hiddenRuns.get(parentRunId);
+  const depth = (parentHidden?.depth || 0) + 1;
+  const maxDepth = 2;
+  if (depth > maxDepth) {
+    return { success: false, message: `Subagent recursion depth limit (${maxDepth}) reached.`, completed: 0, failed: args.tasks.length, stoppedEarly: true, results: args.tasks.map((task, index) => ({ index, name: task.name || "", status: "failed", error: `Subagent recursion depth limit (${maxDepth}) reached.` })) };
+  }
+
+  const executionMode = args.executionMode || "parallel";
+  const stopOnError = args.stopOnError ?? executionMode === "linear";
+  const providerName = subagentProviderName();
+  const selectedModel = subagentModelName(providerName);
+  const startedAll = Date.now();
+
+  const runOne = async (task, index) => runSubagentTask({ task, index, context, parentRun, parentSessionId, parentRunId, depth, providerName, selectedModel });
+  const results = [];
+  let stoppedEarly = false;
+  if (executionMode === "linear") {
+    for (const [index, task] of args.tasks.entries()) {
+      const result = await runOne(task, index);
+      results.push(result);
+      if (result.status !== "completed" && stopOnError && index < args.tasks.length - 1) {
+        stoppedEarly = true;
+        break;
+      }
+    }
+  } else {
+    results.push(...await Promise.all(args.tasks.map((task, index) => runOne(task, index))));
+  }
+
+  const completed = results.filter((result) => result.status === "completed").length;
+  const failed = results.length - completed + (stoppedEarly ? args.tasks.length - results.length : 0);
+  return {
+    success: failed === 0,
+    message: failed === 0 ? `Completed ${completed} subagent task(s).` : `Completed ${completed} subagent task(s) with ${failed} failure(s).`,
+    executionMode,
+    provider: providerName,
+    model: selectedModel,
+    completed,
+    failed,
+    stoppedEarly,
+    durationMs: Math.max(0, Date.now() - startedAll),
+    results,
+  };
+}
+
+async function runSubagentTask({ task, index, context, parentRun, parentSessionId, parentRunId, depth, providerName, selectedModel }) {
+  const startedAtMs = Date.now();
+  const runId = createRunId();
+  let childSession;
+  try {
+    const runtimeStateForChild = await createRuntimeStateFor({
+      providerName,
+      model: selectedModel,
+      instructions: [baseInstructions, subagentPrompt].filter(Boolean).join("\n\n"),
+      promptMode: "edit",
+      requireRealProvider: true,
+      agentName: "qubit-subagent",
+    });
+    childSession = await createHiddenSubagentSession({
+      title: task.name || titleFromInput(task.prompt),
+      parentSessionId,
+      parentRunId,
+      parentToolCallId: context?.toolCallId || "",
+      parentStep: context?.step,
+      provider: providerName,
+      model: selectedModel,
+    });
+
+    const cwdBlockEnabled = parentRun?.cwdBlockEnabled !== false;
+    hiddenRuns.set(runId, { runId, parentRunId, parentSessionId, sessionId: childSession.id, depth, autoAllowPermissions: true, cwdBlockEnabled, runtime: runtimeStateForChild.runtime });
+    setRunCwdBlockEnabled(runId, cwdBlockEnabled);
+    const result = await runtimeStateForChild.runtime.run({
+      runId,
+      signal: context?.signal,
+      sessionId: childSession.id,
+      input: task.prompt,
+      maxSteps: 400,
+      metadata: { workspaceCwd: getDefaultToolCwd(), subagent: true, parentRunId },
+    });
+
+    const assistant = [...result.messages].reverse().find((message) => message.role === "assistant" && String(message.content || "").trim());
+    const fallbackAssistant = [...result.messages].reverse().find((message) => message.role === "assistant");
+    const content = assistant?.content || fallbackAssistant?.content || "";
+    const durationMs = Math.max(0, Date.now() - startedAtMs);
+    await touchHiddenSession(childSession.id, { messageCount: result.messages.filter((message) => message.role !== "system").length, provider: providerName, model: selectedModel });
+    if (result.status !== "completed" && !String(content).trim()) {
+      return subagentTaskFailure(index, task, childSession.id, runId, providerName, selectedModel, durationMs, `Subagent finished with status ${result.status}.`);
+    }
+    return {
+      index,
+      name: task.name || "",
+      status: result.status === "completed" ? "completed" : "failed",
+      provider: providerName,
+      model: selectedModel,
+      content: previewText(content, 6000),
+      truncated: String(content).length > 6000,
+      hiddenSessionId: childSession.id,
+      runId,
+      durationMs,
+      ...(result.status !== "completed" ? { error: `Subagent finished with status ${result.status}.` } : {}),
+    };
+  } catch (error) {
+    const durationMs = Math.max(0, Date.now() - startedAtMs);
+    const errorMessage = redactSecrets(error instanceof Error ? error.message : String(error));
+    return subagentTaskFailure(index, task, childSession?.id || "", runId, providerName, selectedModel, durationMs, errorMessage);
+  } finally {
+    hiddenRuns.delete(runId);
+    clearRunCwdBlockEnabled(runId);
+    latestCodexUsageByRun.delete(runId);
+  }
+}
+
+function subagentTaskFailure(index, task, hiddenSessionId, runId, providerName, selectedModel, durationMs, error) {
+  return {
+    index,
+    name: task?.name || "",
+    status: "failed",
+    provider: providerName,
+    model: selectedModel,
+    ...(hiddenSessionId ? { hiddenSessionId } : {}),
+    runId,
+    durationMs,
+    error: previewText(error, 2000),
+  };
+}
+
+async function touchHiddenSession(sessionId, patch = {}) {
+  const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId && candidate.hidden === true);
+  if (!session) return;
+  if (Number.isFinite(patch.messageCount)) session.messageCount = patch.messageCount;
+  if (patch.provider) session.provider = patch.provider;
+  if (patch.model) session.model = patch.model;
+  session.updatedAt = new Date().toISOString();
+  await saveSessionIndex();
+}
+
 async function persistGeneratedImages(sessionId, runId, generatedImages, responseTarget = null) {
   if (!Array.isArray(generatedImages) || generatedImages.length === 0) return [];
   const saved = [];
@@ -994,6 +1183,30 @@ function defaultModelForProvider(provider) {
   return firstEnvValue(providerDefinitions[normalizedProvider].modelEnvKeys) || settings.defaultModels?.[normalizedProvider] || providerDefinitions[normalizedProvider].defaultModel;
 }
 
+function configuredModelForProvider(provider, configuredModel) {
+  const normalizedProvider = normalizeProvider(provider || defaultProviderName);
+  if (configuredModel) {
+    try {
+      return normalizeModel(configuredModel);
+    } catch {
+      // Repair invalid persisted model below.
+    }
+  }
+  return settings.defaultModels?.[normalizedProvider] || providerDefinitions[normalizedProvider].defaultModel;
+}
+
+function subagentProviderName() {
+  try {
+    return normalizeProvider(settings.subagent?.provider || defaultProviderName);
+  } catch {
+    return defaultProviderName;
+  }
+}
+
+function subagentModelName(provider = subagentProviderName()) {
+  return configuredModelForProvider(provider, settings.subagent?.model);
+}
+
 function activeModelMaxContext() {
   const models = providerModelLists[activeProviderName] || [];
   const active = models.find((candidate) => candidate.id === model);
@@ -1019,11 +1232,24 @@ function handlePlanClarificationResponse(request) {
 }
 
 async function createRuntimeState(promptMode = "plan") {
+  return await createRuntimeStateFor({
+    providerName: activeProviderName,
+    model,
+    instructions: instructionsForMode(promptMode),
+    promptMode,
+    requireRealProvider: false,
+    agentName: "qubit-chat",
+  });
+}
+
+async function createRuntimeStateFor({ providerName, model: modelName, instructions, promptMode = "plan", requireRealProvider = false, agentName = "qubit-chat" }) {
   const normalizedPromptMode = normalizePromptMode(promptMode);
-  const providerConfig = await resolveActiveProviderConfig(activeProviderName);
+  const normalizedProvider = normalizeProvider(providerName || defaultProviderName);
+  const normalizedModel = normalizeModel(modelName || defaultModelForProvider(normalizedProvider));
+  const providerConfig = await resolveProviderConfig(normalizedProvider, { requireRealProvider });
   const provider = createProvider(providerConfig);
   const runtime = createRuntime({
-    agent: createQubitAgent(normalizedPromptMode),
+    agent: createQubitAgent({ name: agentName, instructions, model: normalizedModel, tools: qubitTools }),
     provider,
     storage,
     toolPermission: {
@@ -1031,7 +1257,7 @@ async function createRuntimeState(promptMode = "plan") {
     },
     hooks,
   });
-  return { runtime, promptMode: normalizedPromptMode, ...providerConfig };
+  return { runtime, promptMode: normalizedPromptMode, model: normalizedModel, ...providerConfig };
 }
 
 function providerReasoningOptions() {
@@ -1108,6 +1334,10 @@ function createProvider(config) {
 }
 
 async function resolveActiveProviderConfig(provider = defaultProviderName) {
+  return await resolveProviderConfig(provider, { requireRealProvider: false });
+}
+
+async function resolveProviderConfig(provider = defaultProviderName, options = {}) {
   if (process.env.QUBIT_STUB === "1") {
     return { providerName: "stub", keyAlias: "stub", keySource: "stub", apiKey: undefined };
   }
@@ -1117,6 +1347,7 @@ async function resolveActiveProviderConfig(provider = defaultProviderName) {
     if (process.env.CODEX_ACCESS_TOKEN) return { providerName: "codex", keyAlias: "env:CODEX_ACCESS_TOKEN", keySource: "env", apiKey: process.env.CODEX_ACCESS_TOKEN };
     const status = await codexTokenStore.status();
     if (status.active) return { providerName: "codex", keyAlias: "chatgpt", keySource: status.storage || "keychain", apiKey: undefined };
+    if (options.requireRealProvider) throw new Error(missingProviderKeyMessage(normalizedProvider));
     return { providerName: "codex", keyAlias: "not-signed-in", keySource: "oauth", apiKey: undefined };
   }
   const activeAlias = apiKeyIndex.active?.[normalizedProvider];
@@ -1142,7 +1373,17 @@ async function resolveActiveProviderConfig(provider = defaultProviderName) {
     return { providerName: normalizedProvider, keyAlias: envAlias, keySource: "env", apiKey: process.env[envKey] };
   }
 
+  if (options.requireRealProvider) {
+    throw new Error(missingProviderKeyMessage(normalizedProvider));
+  }
   return { providerName: "stub", keyAlias: "stub", keySource: "stub", apiKey: undefined };
+}
+
+function missingProviderKeyMessage(provider) {
+  const normalizedProvider = normalizeProvider(provider);
+  if (normalizedProvider === "codex") return "ChatGPT Codex is not signed in. Run /codex-login or set CODEX_ACCESS_TOKEN.";
+  const envKeys = (providerDefinitions[normalizedProvider].envKeys || []).join("/");
+  return `Missing API key for ${normalizedProvider}. Set ${envKeys} or add a key with /keys.`;
 }
 
 async function loadSettings() {
@@ -1185,10 +1426,28 @@ async function loadSettings() {
     reasoningLevel = "medium";
   }
 
-  const normalized = { version: 1, defaultProvider, defaultModels, reasoningLevel };
+  const subagent = normalizeSubagentSettings(parsed?.subagent, defaultProvider, defaultModels);
+  const normalized = { version: 1, defaultProvider, defaultModels, reasoningLevel, subagent };
   await saveSettings(normalized);
   return normalized;
 }
+function normalizeSubagentSettings(rawSubagent, defaultProvider, defaultModels = {}) {
+  let provider = defaultProvider || "glm";
+  try {
+    provider = normalizeProvider(rawSubagent?.provider || provider);
+  } catch {
+    provider = defaultProvider || "glm";
+  }
+  const fallbackModel = defaultModels?.[provider] || providerDefinitions[provider].defaultModel;
+  let subagentModel = fallbackModel;
+  try {
+    subagentModel = normalizeModel(rawSubagent?.model || fallbackModel);
+  } catch {
+    subagentModel = fallbackModel;
+  }
+  return { provider, model: subagentModel };
+}
+
 async function saveSettings(nextSettings = settings) {
   await mkdir(configDir, { recursive: true });
   await writeFile(settingsPath, `${JSON.stringify(nextSettings, null, 2)}\n`, { mode: 0o600 });
@@ -1285,13 +1544,18 @@ async function listApiKeys() {
 
 async function listModels() {
   const activeProvider = runtimeState?.providerName === "stub" ? activeProviderName : runtimeState?.providerName || activeProviderName;
-  const knownModels = activeProvider === "openrouter"
+  return await listModelsForProvider(activeProvider, model);
+}
+
+async function listModelsForProvider(provider, selectedModel) {
+  const normalizedProvider = normalizeProvider(provider);
+  const knownModels = normalizedProvider === "openrouter"
     ? await listOpenRouterModels()
-    : providerModelLists[activeProvider] || [];
-  const known = knownModels.some((candidate) => candidate.id === model)
+    : providerModelLists[normalizedProvider] || [];
+  const known = knownModels.some((candidate) => candidate.id === selectedModel)
     ? knownModels
-    : [{ id: model, name: model, description: "Configured model" }, ...knownModels];
-  return known.map((candidate) => ({ ...candidate, active: candidate.id === model }));
+    : [{ id: selectedModel, name: selectedModel, description: "Configured model" }, ...knownModels];
+  return known.map((candidate) => ({ ...candidate, active: candidate.id === selectedModel }));
 }
 
 async function listOpenRouterModels() {
@@ -1357,6 +1621,45 @@ async function resolveProviderApiKey(provider) {
   }
   const envKey = firstProviderEnvKey(normalizedProvider);
   return envKey ? process.env[envKey] || "" : "";
+}
+
+async function writeSubagentConfig(id, status = "") {
+  const provider = subagentProviderName();
+  const selectedModel = subagentModelName(provider);
+  settings.subagent = { provider, model: selectedModel };
+  write({
+    type: "subagent.config",
+    id,
+    subagentProvider: provider,
+    subagentModel: selectedModel,
+    providers: providerNames.map((name) => ({ id: name, name, active: name === provider })),
+    models: await listModelsForProvider(provider, selectedModel),
+    ...(status ? { status } : {}),
+  });
+}
+
+async function setSubagentProvider(id, provider) {
+  try {
+    const normalizedProvider = normalizeProvider(provider);
+    const selectedModel = configuredModelForProvider(normalizedProvider, undefined);
+    settings.subagent = { provider: normalizedProvider, model: selectedModel };
+    await saveSettings();
+    await writeSubagentConfig(id, `Subagent: ${normalizedProvider} / ${selectedModel}.`);
+  } catch (error) {
+    write({ type: "error", id, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function setSubagentModel(id, nextModel) {
+  try {
+    const provider = subagentProviderName();
+    const selectedModel = normalizeModel(nextModel);
+    settings.subagent = { provider, model: selectedModel };
+    await saveSettings();
+    await writeSubagentConfig(id, `Subagent: ${provider} / ${selectedModel}.`);
+  } catch (error) {
+    write({ type: "error", id, error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 async function switchProvider(id, provider, persistDefault = false) {
@@ -1668,6 +1971,15 @@ function contextCharCount(value) {
   return [...redactSecrets(text || "")].length;
 }
 
+function runtimeToolCallStatus(toolName, status, result) {
+  if (toolName === "subagent") {
+    const payload = resultPayload(result);
+    const data = plainObject(payload);
+    if (data.success === false || Number(data.failed || 0) > 0) return "failed";
+  }
+  return status;
+}
+
 function resultPayload(result) {
   if (!result || typeof result !== "object") return result;
   if (result.data !== undefined) return result.data;
@@ -1702,6 +2014,8 @@ function summarizeToolArgs(toolName, args) {
         const tool = typeof call?.tool === "string" ? call.tool : "";
         return { tool, args: tool && tool !== "multiCall" ? summarizeToolArgs(tool, call.args || {}) : compactObject(call.args || {}, ["stopOnError"]) };
       }).slice(0, 20) : undefined };
+    case "subagent":
+      return { ...compactObject(source, ["executionMode", "stopOnError"]), taskCount: Array.isArray(source.tasks) ? source.tasks.length : 0, tasks: Array.isArray(source.tasks) ? source.tasks.slice(0, 8).map((task) => ({ name: String(task?.name || ""), promptPreview: previewText(task?.prompt, 500) })) : undefined };
     case "deleteFile":
       return compactObject(source, ["path", "cwd", "allowedExtensions", "operationMode"]);
     case "todoMd":
@@ -1738,6 +2052,8 @@ function toolCallContextChars(toolName, args, result) {
         return total + toolCallContextChars(nestedTool, nestedArgs, { ok: item?.ok, data: nestedPayload, error: item?.error });
       }, 0) : 0;
     }
+    case "subagent":
+      return Array.isArray(data.results) ? data.results.reduce((total, item) => total + contextCharCount(item?.content) + contextCharCount(item?.error), 0) : contextCharCount(data);
     default:
       return contextCharCount(sourceArgs) + contextCharCount(payload);
   }
@@ -1774,6 +2090,8 @@ function summarizeToolResult(toolName, result) {
         const nestedPayload = item.data !== undefined ? item.data : item.output;
         return { ...compactObject(item, ["index", "tool", "ok", "permission", "error"]), result: summarizeToolResult(item.tool, { ok: item.ok, data: nestedPayload, error: item.error }) };
       }) : undefined };
+    case "subagent":
+      return { ...summary, ...compactObject(data, ["success", "message", "executionMode", "provider", "model", "completed", "failed", "stoppedEarly", "durationMs"]), results: Array.isArray(data.results) ? data.results.slice(0, 8).map((item) => ({ ...compactObject(item, ["index", "name", "status", "provider", "model", "durationMs", "truncated"]), contentPreview: previewText(item?.content, 1600), error: previewText(item?.error, 1200), ...(process.env.QUBIT_DEV_TOOL_DETAILS === "1" || process.env.QUBIT_DEV === "1" ? compactObject(item, ["hiddenSessionId", "runId"]) : {}) })) : undefined };
     case "todoMd":
       return { ...summary, ...compactObject(data, ["id", "created", "exists", "success", "message", "modifiedAt"]), content: previewText(data.content, 1600), contentPreview: previewText(data.content, 1600) };
     case "planMd":
@@ -1824,15 +2142,26 @@ async function loadSessionIndex() {
       ...(Number.isFinite(session.forkedFromMessageIndex) ? { forkedFromMessageIndex: session.forkedFromMessageIndex } : {}),
       ...(typeof session.forkedAt === "string" ? { forkedAt: session.forkedAt } : {}),
       ...(typeof session.favouritedAt === "string" ? { favouritedAt: session.favouritedAt } : {}),
+      ...(session.hidden === true ? { hidden: true } : {}),
+      ...(typeof session.kind === "string" ? { kind: session.kind } : {}),
+      ...(typeof session.parentSessionId === "string" ? { parentSessionId: session.parentSessionId } : {}),
+      ...(typeof session.parentRunId === "string" ? { parentRunId: session.parentRunId } : {}),
+      ...(typeof session.parentToolCallId === "string" ? { parentToolCallId: session.parentToolCallId } : {}),
+      ...(Number.isFinite(session.parentStep) ? { parentStep: session.parentStep } : {}),
     }));
 
   if (normalized.length === 0) {
     normalized = [newSession(defaultSessionId, "Default chat", now)];
   }
 
-  const active = parsed?.activeSessionId && normalized.some((session) => session.id === parsed.activeSessionId)
+  const visibleNormalized = normalized.filter((session) => session.hidden !== true);
+  if (visibleNormalized.length === 0) {
+    normalized.unshift(newSession(defaultSessionId, "Default chat", now));
+    visibleNormalized.unshift(normalized[0]);
+  }
+  const active = parsed?.activeSessionId && visibleNormalized.some((session) => session.id === parsed.activeSessionId)
     ? parsed.activeSessionId
-    : normalized[0].id;
+    : visibleNormalized[0].id;
 
   const index = { version: 1, activeSessionId: active, sessions: normalized };
   await saveSessionIndex(index);
@@ -1860,8 +2189,28 @@ async function createSession(options = {}) {
   const title = String(options.title || "New chat").trim() || "New chat";
   const session = newSession(createSessionId(), title);
   sessionIndex.sessions.unshift(session);
-  sessionIndex.activeSessionId = session.id;
-  activeSessionId = session.id;
+  if (options.hidden !== true) {
+    sessionIndex.activeSessionId = session.id;
+    activeSessionId = session.id;
+  }
+  await saveSessionIndex();
+  return session;
+}
+
+async function createHiddenSubagentSession(options = {}) {
+  const now = new Date().toISOString();
+  const session = {
+    ...newSession(createSubagentSessionId(), String(options.title || "Subagent").trim() || "Subagent", now),
+    hidden: true,
+    kind: "subagent",
+    parentSessionId: options.parentSessionId || "",
+    parentRunId: options.parentRunId || "",
+    parentToolCallId: options.parentToolCallId || "",
+    parentStep: Number.isFinite(options.parentStep) ? options.parentStep : 0,
+    provider: options.provider || subagentProviderName(),
+    model: options.model || subagentModelName(options.provider),
+  };
+  sessionIndex.sessions.unshift(session);
   await saveSessionIndex();
   return session;
 }
@@ -1913,13 +2262,13 @@ async function forkSession({ sourceSessionId, messageIndex, title, includeUiMess
 }
 
 async function ensureSession(sessionId) {
-  if (sessionIndex.sessions.some((session) => session.id === sessionId)) return;
+  if (sessionIndex.sessions.some((session) => session.id === sessionId && session.hidden !== true)) return;
   sessionIndex.sessions.unshift(newSession(sessionId, sessionId === defaultSessionId ? "Default chat" : "Imported chat"));
   await saveSessionIndex();
 }
 
 async function activateSession(sessionId) {
-  const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId);
+  const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId && candidate.hidden !== true);
   if (!session) return null;
   sessionIndex.activeSessionId = session.id;
   activeSessionId = session.id;
@@ -1928,13 +2277,15 @@ async function activateSession(sessionId) {
 }
 
 async function deleteSession(sessionId) {
-  const index = sessionIndex.sessions.findIndex((candidate) => candidate.id === sessionId);
+  const index = sessionIndex.sessions.findIndex((candidate) => candidate.id === sessionId && candidate.hidden !== true);
   if (index < 0) return null;
-  if (sessionIndex.sessions.length <= 1) throw new Error("Cannot delete the only session.");
+  const visibleSessions = sessionIndex.sessions.filter((session) => session.hidden !== true);
+  if (visibleSessions.length <= 1) throw new Error("Cannot delete the only session.");
   const [deleted] = sessionIndex.sessions.splice(index, 1);
   if (storage.deleteSession) await storage.deleteSession(sessionId);
   if (activeSessionId === sessionId || sessionIndex.activeSessionId === sessionId) {
-    const next = sessionIndex.sessions[Math.min(index, sessionIndex.sessions.length - 1)] || sessionIndex.sessions[0];
+    const nextVisible = sessionIndex.sessions.filter((session) => session.hidden !== true);
+    const next = nextVisible[Math.min(index, nextVisible.length - 1)] || nextVisible[0];
     activeSessionId = next.id;
     sessionIndex.activeSessionId = next.id;
   }
@@ -1943,7 +2294,7 @@ async function deleteSession(sessionId) {
 }
 
 async function renameSession(sessionId, title) {
-  const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId);
+  const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId && candidate.hidden !== true);
   if (!session) return null;
   const trimmed = title.trim();
   if (trimmed) session.title = trimmed;
@@ -1953,7 +2304,7 @@ async function renameSession(sessionId, title) {
 }
 
 async function favouriteSession(sessionId = activeSessionId) {
-  const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId);
+  const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId && candidate.hidden !== true);
   if (!session) return null;
   if (!session.favouritedAt) {
     session.favouritedAt = new Date().toISOString();
@@ -1963,7 +2314,7 @@ async function favouriteSession(sessionId = activeSessionId) {
 }
 
 async function touchSession(sessionId, patch = {}) {
-  const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId);
+  const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId && candidate.hidden !== true);
   if (!session) return;
   if (patch.title && (!session.title || session.title === "New chat" || session.title === "Default chat" || session.title === "Untitled chat")) {
     session.title = patch.title;
@@ -1980,16 +2331,17 @@ async function touchSession(sessionId, patch = {}) {
 }
 
 function activeSession() {
-  return sessionIndex.sessions.find((session) => session.id === activeSessionId) || sessionIndex.sessions[0];
+  return sessionIndex.sessions.find((session) => session.id === activeSessionId && session.hidden !== true) || sessionIndex.sessions.find((session) => session.hidden !== true) || sessionIndex.sessions[0];
 }
 
 function writeSessionList(id) {
+  const visibleSessions = sessionIndex.sessions.filter((session) => session.hidden !== true);
   write({
     type: "session.list",
     id,
-    sessionId: activeSessionId,
+    sessionId: activeSession()?.id || activeSessionId,
     sessionTitle: activeSession()?.title,
-    sessions: sessionsByRecentActivity(sessionIndex.sessions),
+    sessions: sessionsByRecentActivity(visibleSessions),
   });
 }
 
@@ -2046,7 +2398,8 @@ async function planViewMessagesForToolGroup(group) {
 
 async function buildSessionTreeNodes(focalSessionId = activeSessionId) {
   const previewCache = new Map();
-  const sessions = relatedForkSessions(sessionIndex.sessions, focalSessionId);
+  const sessions = relatedForkSessions(sessionIndex.sessions.filter((session) => session.hidden !== true), focalSessionId);
+  if (sessions.length === 0) return [];
   const messageNodesBySession = await buildMessageTreeNodesForSessions(sessions, previewCache);
   const nodes = [];
   for (const session of sessions) {
@@ -2237,7 +2590,8 @@ function compareSessionsForTree(a, b) {
 }
 
 function relatedForkSessions(sessions, focalSessionId = activeSessionId) {
-  if (!Array.isArray(sessions) || sessions.length === 0) return [];
+  sessions = Array.isArray(sessions) ? sessions.filter((session) => session?.hidden !== true) : [];
+  if (sessions.length === 0) return [];
 
   const idToSession = new Map();
   for (const session of sessions) {
@@ -2608,6 +2962,10 @@ function createSessionId() {
   return `sess_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function createSubagentSessionId() {
+  return `subagent_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function createRunId() {
   return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -2632,6 +2990,7 @@ function emitCodexUsage(event) {
   const usage = normalizeCodexUsage(event.usage, event);
   if (!usage) return;
   latestCodexUsageByRun.set(event.runId, usage);
+  if (isHiddenRunId(event.runId)) return;
   write({
     type: "codex.usage",
     runId: event.runId,
@@ -2721,3 +3080,4 @@ function numberField(source, keys) {
   }
   return 0;
 }
+

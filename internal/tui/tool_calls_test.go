@@ -502,3 +502,37 @@ func TestReasoningBlockUsesReasoningThemeColorAndSparkleIcon(t *testing.T) {
 		t.Fatalf("rendered reasoning missing default reasoning ANSI color: %q", rendered)
 	}
 }
+
+func TestSubagentToolGroupLabelAndDetails(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 120
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{{Role: "user", Content: "delegate"}}
+	m.applyToolCallFinish(runtimeEvent{
+		Type:       "tool.call.finish",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "sub_1",
+		ToolName:   "subagent",
+		Status:     "failed",
+		Result: map[string]any{
+			"completed": float64(1),
+			"failed":    float64(1),
+			"results": []any{
+				map[string]any{"index": float64(0), "name": "inspect", "status": "completed", "content": "found the issue"},
+				map[string]any{"index": float64(1), "name": "edit", "status": "failed", "error": "missing key", "hiddenSessionId": "subagent_secret"},
+			},
+		},
+	})
+	m.messages[1].ToolGroup.Expanded = true
+	m.refreshViewport()
+	viewport := plainText(m.viewport.View())
+	if !strings.Contains(viewport, "Ran 2 subagents") || !strings.Contains(viewport, "found the issue") || !strings.Contains(viewport, "missing key") {
+		t.Fatalf("viewport = %q, want subagent label and result/error previews", viewport)
+	}
+	if strings.Contains(viewport, "subagent_secret") {
+		t.Fatalf("viewport = %q, hidden session id should be hidden by default", viewport)
+	}
+}

@@ -467,6 +467,27 @@ func accentSt() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(accent).Bold(true)
 }
 
+func (m *model) applySubagentConfig(ev runtimeEvent) {
+	if ev.SubagentProvider != "" {
+		m.subagentProvider = ev.SubagentProvider
+	}
+	if ev.SubagentModel != "" {
+		m.subagentModel = ev.SubagentModel
+	}
+	if len(ev.Models) > 0 {
+		m.subagentModels = ev.Models
+	}
+	if len(ev.Providers) > 0 {
+		m.subagentProviders = ev.Providers
+	}
+	m.busy = false
+	m.status = "ready"
+	m.err = ""
+	if ev.Status != "" {
+		m.appendSystem(ev.Status)
+	}
+}
+
 func (m *model) applyModelUpdated(ev runtimeEvent) {
 	if ev.Model != "" {
 		m.model = ev.Model

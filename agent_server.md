@@ -109,6 +109,8 @@ Chat requests must not occupy the singleton server's global request queue for th
 
 `activeRuns` should retain enough run-local metadata for runtime-owned views that are requested while a run is in flight. In particular, keep the submitted user `input` with the active run and overlay it onto session tree raw-message snapshots, because hyper-router may not persist the user message until the run finishes. This keeps `/tree` snapshots consistent with the chat UI during streaming without broadcasting local UI state.
 
+Hidden subagent child runs are tracked separately from visible TUI runs. They persist transcripts under hidden session-index entries, borrow the parent run's cwd-blocking/permission context, and must not emit `run_started`, `assistant`, `run_finished`, `tool.call.*`, `plan.view`, or clarification events to attached TUIs. The parent `subagent` tool lifecycle remains visible as the only user-facing activity for those delegated runs.
+
 Do not broadcast local navigation responses such as `session.activated` and `session.messages`; that causes every TUI to mirror one TUI's selected session.
 
 ## Client Attachment Behavior

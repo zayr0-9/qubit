@@ -493,3 +493,55 @@ func TestPermissionModalAllowAllEnablesSessionAutoAllow(t *testing.T) {
 		t.Fatalf("payload = %#v, want allow response for perm_all", payload)
 	}
 }
+
+func TestSlashSubagentsRequestsConfig(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.composer.SetValue("/subagents")
+
+	updated, cmd := m.acceptSlashSelection()
+	got := updated.(model)
+	if got.mode != modeModal || !got.busy {
+		t.Fatalf("mode=%v busy=%v, want loading modal state", got.mode, got.busy)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "subagent.config", "")
+}
+
+func TestSubagentModelSelectorSendsSubagentModelUse(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := model{mode: modeChat, runtime: rt, subagentProvider: "openai", subagentModel: "gpt-5.2"}.openSubagentModelSelectorModal([]modelInfo{
+		{ID: "gpt-5.2", Name: "GPT-5.2", Active: true},
+		{ID: "gpt-5-mini", Name: "GPT-5 mini"},
+	})
+	updated, _ := m.updateModal(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = updated.(model)
+	updated, cmd := m.updateModal(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(model)
+	if got.mode != modeChat || got.modal != nil || !got.busy {
+		t.Fatalf("mode=%v modal=%#v busy=%v, want closed busy", got.mode, got.modal, got.busy)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "subagent.model.use", "")
+	if payload["model"] != "gpt-5-mini" {
+		t.Fatalf("model = %#v, want gpt-5-mini", payload["model"])
+	}
+}
+
+func TestSubagentProviderSelectorSendsSubagentProviderUse(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.subagentProvider = "codex"
+	m = m.openSubagentProviderSelectorModal()
+	updated, cmd := m.updateModal(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(model)
+	if got.mode != modeChat || got.modal != nil || !got.busy {
+		t.Fatalf("mode=%v modal=%#v busy=%v, want closed busy", got.mode, got.modal, got.busy)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "subagent.provider.use", "")
+	if payload["provider"] != "codex" {
+		t.Fatalf("provider = %#v, want codex", payload["provider"])
+	}
+}

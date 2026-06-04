@@ -113,8 +113,19 @@ export type PlanViewEvent = {
   step?: number
 }
 
+export type HiddenRunChecker = (runId?: string) => boolean
+
 let planViewEmitter: ((event: PlanViewEvent) => void | Promise<void>) | null = null
 let planClarificationRequester: PlanClarificationRequester | null = null
+let hiddenRunChecker: HiddenRunChecker | null = null
+
+export function setHiddenRunChecker(checker: HiddenRunChecker | null): void {
+  hiddenRunChecker = checker
+}
+
+function isHiddenRun(runId?: string): boolean {
+  return Boolean(runId && hiddenRunChecker?.(runId))
+}
 
 export function setPlanViewEmitter(emitter: ((event: PlanViewEvent) => void | Promise<void>) | null): void {
   planViewEmitter = emitter
@@ -321,8 +332,10 @@ export async function displayPlan(name: string, cwd?: string, context?: AgentCon
   const filePath = path.join(dir, `${normalized}${PLAN_FILE_EXTENSION}`)
   try {
     const content = await fs.promises.readFile(filePath, 'utf8')
-    await planViewEmitter?.({ name: normalized, path: filePath, cwd, content, sessionId: context?.sessionId, runId: context?.runId, step: context?.step })
-    return { displayed: true, exists: true, name: normalized, path: filePath, message: `Displayed plan "${normalized}" in the chat view.` }
+    if (!isHiddenRun(context?.runId)) {
+      await planViewEmitter?.({ name: normalized, path: filePath, cwd, content, sessionId: context?.sessionId, runId: context?.runId, step: context?.step })
+    }
+    return { displayed: true, exists: true, name: normalized, path: filePath, message: isHiddenRun(context?.runId) ? `Displayed plan "${normalized}" in hidden subagent transcript.` : `Displayed plan "${normalized}" in the chat view.` }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return { displayed: false, exists: false, name: normalized, message: `Plan "${normalized}" does not exist` }
@@ -333,6 +346,9 @@ export async function displayPlan(name: string, cwd?: string, context?: AgentCon
 
 export async function clarifyPlan(questions: PlanClarificationQuestion[] | undefined, context?: AgentContext): Promise<PlanClarificationResult> {
   const normalizedQuestions = normalizePlanClarificationQuestions(questions)
+  if (isHiddenRun(context?.runId)) {
+    return { clarified: false, cancelled: true, questions: normalizedQuestions.length, answers: [] }
+  }
   if (!planClarificationRequester) {
     throw new Error('Plan clarification requester is not configured')
   }

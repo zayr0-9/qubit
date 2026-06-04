@@ -22,6 +22,8 @@ type model struct {
 	pendingDeleteSession  sessionInfo
 	apiKeys               []apiKeyInfo
 	models                []modelInfo
+	subagentModels        []modelInfo
+	subagentProviders     []modelInfo
 	busy                  bool
 	ready                 bool
 	keyboardEnhanced      bool
@@ -31,6 +33,8 @@ type model struct {
 	model                 string
 	maxContext            int
 	reasoningLevel        reasoningLevel
+	subagentProvider      string
+	subagentModel         string
 	session               string
 	title                 string
 	status                string

@@ -99,3 +99,25 @@ func TestProviderSelectorModal(t *testing.T) {
 		t.Fatalf("selected provider = %q, want codex", got.modal.Options[got.modal.OptionCursor].ID)
 	}
 }
+
+func TestSubagentConfigUpdatesStateAndOpensSelector(t *testing.T) {
+	m := initialModel(nil)
+	m.busy = true
+
+	updated, _ := m.updateRuntime(runtimeEvent{
+		Type:             "subagent.config",
+		SubagentProvider: "openai",
+		SubagentModel:    "gpt-5.2",
+		Models: []modelInfo{
+			{ID: "gpt-5.2", Name: "GPT-5.2", Active: true},
+			{ID: "gpt-5-mini", Name: "GPT-5 mini"},
+		},
+	})
+	got := updated.(model)
+	if got.subagentProvider != "openai" || got.subagentModel != "gpt-5.2" {
+		t.Fatalf("subagent provider/model = %q/%q, want openai/gpt-5.2", got.subagentProvider, got.subagentModel)
+	}
+	if got.modal == nil || got.modal.ID != "subagent_model_selector" {
+		t.Fatalf("modal = %#v, want subagent model selector", got.modal)
+	}
+}

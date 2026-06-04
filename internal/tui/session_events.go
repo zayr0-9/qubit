@@ -62,7 +62,13 @@ func (m model) latestUserMessageTitle() string {
 
 func mergeSessionActivity(local []sessionInfo, incoming []sessionInfo) []sessionInfo {
 	if len(local) == 0 {
-		return incoming
+		filtered := incoming[:0]
+		for _, session := range incoming {
+			if !session.Hidden {
+				filtered = append(filtered, session)
+			}
+		}
+		return filtered
 	}
 	localByID := make(map[string]sessionInfo, len(local))
 	for _, session := range local {
@@ -73,6 +79,9 @@ func mergeSessionActivity(local []sessionInfo, incoming []sessionInfo) []session
 	merged := make([]sessionInfo, 0, max(len(local), len(incoming)))
 	seen := make(map[string]bool, len(incoming))
 	for _, session := range incoming {
+		if session.Hidden {
+			continue
+		}
 		seen[session.ID] = true
 		localSession, hasLocal := localByID[session.ID]
 		if hasLocal && session.FavouritedAt == "" {
@@ -92,7 +101,7 @@ func mergeSessionActivity(local []sessionInfo, incoming []sessionInfo) []session
 		merged = append(merged, session)
 	}
 	for _, session := range local {
-		if session.ID != "" && !seen[session.ID] {
+		if session.ID != "" && !session.Hidden && !seen[session.ID] {
 			merged = append(merged, session)
 		}
 	}

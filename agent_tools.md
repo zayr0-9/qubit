@@ -79,7 +79,10 @@ todoMd
 
 planMd
   Manages Markdown plans stored in the project .qubit/plans directory.
-  Supports create/list/read/edit/display/clarify actions and is always-allowed so planning can create/update/display plans or ask clarifying questions without opening a permission modal. The clarify action emits a plan.clarification.request event so Go can collect one or more user answers in the bottom overlay above the input and return them as the tool result. The display action emits a UI-only plan.view event so Go can render the selected Markdown plan in chat without sending that content as a model message. On transcript reload, stored planMd display tool calls are hydrated back into UI-only plan preview messages from the current plan file so displayed plans remain visible after restarting Qubit.
+  Supports create/list/read/edit/display/clarify actions and is always-allowed so planning can create/update/display plans or ask clarifying questions without opening a permission modal. The clarify action emits a plan.clarification.request event so Go can collect one or more user answers in the bottom overlay above the input and return them as the tool result. The display action emits a UI-only plan.view event so Go can render the selected Markdown plan in chat without sending that content as a model message. On transcript reload, stored planMd display tool calls are hydrated back into UI-only plan preview messages from the current plan file so displayed plans remain visible after restarting Qubit. In hidden subagent runs, display/clarify must not emit UI events or wait for user input; clarify returns a safe cancelled result.
+
+subagent
+  Delegates one or more tasks to hidden persisted Qubit child sessions. Supports parallel and linear execution, uses `prompts/subagent.md`, and permission mode ask for the parent tool call. Once the parent call is allowed, hidden child runs auto-borrow gated tool permission while preserving never-deny tools. Child run internals are not rendered in Go; the parent sees only the subagent tool lifecycle and result summary.
 ```
 
 ## Important Files
@@ -128,6 +131,10 @@ tools/planMd.ts
   planMd
     Markdown plan implementation and tool definition.
     Stores plan files in project .qubit/plans, can emit UI-only plan.view events for displayed plans, and can request plan-mode clarifications through plan.clarification.request/response.
+
+tools/subagent.ts
+  subagent
+    Tool definition and validation for delegated hidden subagent runs. Runtime installs the executor from `runtime.ts` with `setSubagentExecutor(...)`.
 utils/qubitProject.ts
   Resolves Qubit-owned internal paths under the active project .qubit directory for project-scoped stores that should not be blocked by normal cwd file-tool containment.
 
@@ -344,7 +351,7 @@ tool.call.finish
 
 Runtime summary helpers must keep these events user-relevant and bounded. Do not send unbounded file contents, stdout/stderr, edit replacements, or raw tool payloads over stdout. Summaries should include paths, commands, counts, success/error messages, and capped previews with obvious secrets redacted.
 
-The Go UI groups tool calls by `(step, toolName)` and renders them as expandable tool rows in the chat transcript. Collapsed rows show compact summaries such as `Read 2 files` or `Searched 3 times · 12 matches`; clicking a row expands per-call details. When expanding a `multiCall` row, the details should list each nested tool invocation as its own row using the summarized nested args/results, not just the outer multiCall wrapper payload. `session.messages` reconstructs persisted tool groups from Hyper Router assistant `toolCalls` plus matching `role: "tool"` messages so session reloads preserve tool-call UI rows instead of dropping tool activity.
+The Go UI groups tool calls by `(step, toolName)` and renders them as expandable tool rows in the chat transcript. Collapsed rows show compact summaries such as `Read 2 files`, `Searched 3 times · 12 matches`, or `Ran 2 subagents`; clicking a row expands per-call details. When expanding a `multiCall` row, the details should list each nested tool invocation as its own row using the summarized nested args/results, not just the outer multiCall wrapper payload. When expanding a `subagent` row, details show per-task status and bounded response/error previews while hiding hidden session/run IDs unless developer details are enabled. `session.messages` reconstructs persisted tool groups from Hyper Router assistant `toolCalls` plus matching `role: "tool"` messages so session reloads preserve tool-call UI rows instead of dropping tool activity.
 
 ## Testing Expectations
 
@@ -355,7 +362,7 @@ pnpm run check:runtime
 go test ./...
 ```
 
-When changing `multiCall`, test read-only chains, gated nested tools in both plan and edit permission modes, stopOnError behavior, and unknown/nested multiCall rejection.
+When changing `multiCall`, test read-only chains, gated nested tools in both plan and edit permission modes, stopOnError behavior, and unknown/nested multiCall rejection. When changing `subagent`, test argument validation, executor injection, hidden-run permission borrowing/suppression, linear stop-on-error, parallel all-results behavior, and Go tool-row summaries.
 
 When changing path handling, also test representative cases where available:
 

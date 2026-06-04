@@ -19,6 +19,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.model = ev.Model
 		m.maxContext = ev.MaxContext
 		m.reasoningLevel = normalizeReasoningLevel(ev.ReasoningLevel)
+		m.applySubagentConfig(ev)
 		if ev.WorkspaceCwd != "" {
 			m.runtime.launchCwd = ev.WorkspaceCwd
 		}
@@ -112,6 +113,9 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m = m.openModelSelectorModal(ev.Models)
 	case "model.updated":
 		m.applyModelUpdated(ev)
+	case "subagent.config":
+		m.applySubagentConfig(ev)
+		m = m.openSubagentModelSelectorModal(ev.Models)
 	case "reasoning.updated":
 		m.applyReasoningUpdated(ev)
 	case "key.updated":

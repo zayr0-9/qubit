@@ -301,6 +301,8 @@ func (m *model) toolKindStyle(toolName string) lipgloss.Style {
 		return toolWriteSt
 	case "planMd":
 		return toolWriteSt
+	case "subagent":
+		return toolOtherSt
 	case "bash", "powershell":
 		return toolShellSt
 	default:
@@ -348,6 +350,12 @@ func toolGroupLabel(group *toolGroup) string {
 			nested = count
 		}
 		return fmt.Sprintf("Ran %d tool %s", nested, plural(nested, "call", "calls"))
+	case "subagent":
+		subagents := toolGroupSubagentCount(group)
+		if subagents <= 0 {
+			subagents = count
+		}
+		return fmt.Sprintf("Ran %d %s", subagents, plural(subagents, "subagent", "subagents"))
 	case "deleteFile":
 		return fmt.Sprintf("Deleted %d %s", count, plural(count, "file", "files"))
 	case "todoMd":
@@ -388,6 +396,24 @@ func toolGroupFileCount(group *toolGroup) int {
 		}
 	}
 	return files
+}
+
+func toolGroupSubagentCount(group *toolGroup) int {
+	total := 0
+	for _, call := range group.Calls {
+		if n, ok := numberValue(call.Result, "completed"); ok {
+			total += n
+		}
+		if n, ok := numberValue(call.Result, "failed"); ok {
+			total += n
+		}
+		if total == 0 {
+			if tasks, ok := call.Args["tasks"].([]any); ok {
+				total += len(tasks)
+			}
+		}
+	}
+	return total
 }
 
 func toolGroupNestedCallCount(group *toolGroup) int {
@@ -436,6 +462,11 @@ func (m *model) renderToolGroupDetails(group *toolGroup, width int) string {
 	calls := append([]toolCallUI(nil), group.Calls...)
 	if group != nil && group.Name == "multiCall" {
 		if nested := multiCallNestedToolCalls(group); len(nested) > 0 {
+			calls = nested
+		}
+	}
+	if group != nil && group.Name == "subagent" {
+		if nested := subagentTaskToolCalls(group); len(nested) > 0 {
 			calls = nested
 		}
 	}
@@ -514,6 +545,7 @@ func toolCallDetailLines(call toolCallUI, width int) []string {
 		}
 	}
 	appendPreview("preview", "contentPreview")
+	appendPreview("response", "content")
 	appendPreview("stdout", "stdoutPreview")
 	appendPreview("stderr", "stderrPreview")
 	appendPreview("error", "error")
@@ -521,6 +553,45 @@ func toolCallDetailLines(call toolCallUI, width int) []string {
 		lines = append(lines, "no details")
 	}
 	return lines
+}
+
+func subagentTaskToolCalls(group *toolGroup) []toolCallUI {
+	if group == nil {
+		return nil
+	}
+	var tasks []toolCallUI
+	for _, call := range group.Calls {
+		results := arrayValue(call.Result, "results")
+		for i, item := range results {
+			result := mapFromArray(results, i)
+			if result == nil {
+				if mapped, ok := item.(map[string]any); ok {
+					result = mapped
+				}
+			}
+			if result == nil {
+				continue
+			}
+			status := stringValue(result, "status")
+			if status == "" {
+				status = "failed"
+			}
+			name := stringValue(result, "name")
+			if name == "" {
+				name = fmt.Sprintf("task %d", i+1)
+			}
+			tasks = append(tasks, toolCallUI{
+				ID:         fmt.Sprintf("%s-subagent-%d", call.ID, i),
+				Name:       name,
+				Step:       call.Step,
+				Status:     status,
+				Args:       map[string]any{"name": name},
+				Result:     result,
+				DurationMs: numberValueOrDefault(result, "durationMs", 0),
+			})
+		}
+	}
+	return tasks
 }
 
 func multiCallNestedToolCalls(group *toolGroup) []toolCallUI {
