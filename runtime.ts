@@ -3,6 +3,7 @@
 import readline from "node:readline";
 import net from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import os from "node:os";
@@ -219,6 +220,7 @@ const codexCallLog = new CodexCallLogWriter(codexCallLogPath);
 
 const pendingPermissions = new Map();
 const activeRuns = new Map();
+const latestCodexUsageByRun = new Map();
 function targetForRunEvent(event) {
   if (event?.runId && activeRuns.has(event.runId)) return activeRuns.get(event.runId).target || null;
   if (event?.sessionId) {
@@ -779,10 +781,10 @@ async function handleChatRequest(request, responseTarget = null) {
         reasoningContent,
       }, responseTarget);
     }
-    write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: result.status }, responseTarget);
+    write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: result.status, codexUsage: await codexUsageForRun(runId) }, responseTarget);
   } catch (error) {
     if (controller.signal.aborted || isAbortError(error)) {
-      write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: "cancelled" }, responseTarget);
+      write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: "cancelled", codexUsage: await codexUsageForRun(runId) }, responseTarget);
     } else {
       write({
         type: "error",
@@ -794,6 +796,7 @@ async function handleChatRequest(request, responseTarget = null) {
     }
   } finally {
     activeRuns.delete(runId);
+    latestCodexUsageByRun.delete(runId);
   }
 }
 
@@ -1004,7 +1007,10 @@ function createProvider(config) {
             content: event.delta,
           }, targetForRunEvent(event));
         },
-        onCallLog: (event) => codexCallLog.append(event),
+        onCallLog: async (event) => {
+          await codexCallLog.append(event);
+          rememberLatestCodexUsage(event);
+        },
       });
     default:
       throw new Error(`Unsupported provider: ${config.providerName}`);
@@ -2510,4 +2516,77 @@ function titleFromInput(input) {
   const cleaned = input.replace(/\s+/g, " ").trim();
   if (!cleaned) return "New chat";
   return cleaned.length > sessionTitleMaxChars ? `${cleaned.slice(0, sessionTitleMaxChars - 3)}...` : cleaned;
+}
+
+function rememberLatestCodexUsage(event) {
+  if (!event || event.provider !== "codex" || !event.runId) return;
+  const usage = normalizeCodexUsage(event.usage);
+  if (!usage) return;
+  latestCodexUsageByRun.set(event.runId, usage);
+}
+
+async function codexUsageForRun(runId) {
+  if (!runId) return undefined;
+  const remembered = latestCodexUsageByRun.get(runId);
+  if (remembered) return remembered;
+  return await latestCodexUsageFromLog(runId);
+}
+
+async function latestCodexUsageFromLog(runId) {
+  try {
+    const line = await findLatestJsonLine(codexCallLogPath, (entry) => entry?.provider === "codex" && entry?.runId === runId);
+    return normalizeCodexUsage(line?.usage);
+  } catch {
+    return undefined;
+  }
+}
+
+async function findLatestJsonLine(filePath, predicate) {
+  const stream = createReadStream(filePath, { encoding: "utf8" });
+  let carry = "";
+  let latest;
+  for await (const chunk of stream) {
+    carry += chunk;
+    const lines = carry.split(/\r?\n/);
+    carry = lines.pop() || "";
+    for (const line of lines) {
+      const parsed = parseJsonLine(line);
+      if (parsed && predicate(parsed)) latest = parsed;
+    }
+  }
+  if (carry) {
+    const parsed = parseJsonLine(carry);
+    if (parsed && predicate(parsed)) latest = parsed;
+  }
+  return latest;
+}
+
+function parseJsonLine(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return undefined;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeCodexUsage(usage) {
+  if (!usage || typeof usage !== "object") return undefined;
+  const inputTokens = numberField(usage, ["input_tokens", "inputTokens", "prompt_tokens", "promptTokens"]);
+  const outputTokens = numberField(usage, ["output_tokens", "outputTokens", "completion_tokens", "completionTokens"]);
+  const totalTokens = numberField(usage, ["total_tokens", "totalTokens"]);
+  const cachedTokens = numberField(usage?.input_tokens_details, ["cached_tokens", "cachedTokens"])
+    || numberField(usage?.prompt_tokens_details, ["cached_tokens", "cachedTokens"]);
+  if (inputTokens <= 0 && outputTokens <= 0 && totalTokens <= 0 && cachedTokens <= 0) return undefined;
+  return { inputTokens, cachedTokens, outputTokens, totalTokens };
+}
+
+function numberField(source, keys) {
+  if (!source || typeof source !== "object") return 0;
+  for (const key of keys) {
+    const value = Number(source[key]);
+    if (Number.isFinite(value) && value > 0) return Math.round(value);
+  }
+  return 0;
 }

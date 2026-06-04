@@ -45,4 +45,10 @@ Qubit's terminal interface should stay clean, minimal, and calm. Prefer readable
 ## Context Status
 
 - The compact input status row may show approximate context usage next to mode/reasoning (for example `plan · medium · ctx 2.1k/400k`). Keep it terse and foreground-only.
-- Context usage is currently an MVP estimate using 1 token = 4 characters and includes visible chat messages, surfaced reasoning blocks, and tool-call full-context character counts when available. Tool-call preview truncation is visual only and should not reduce the status estimate.
+- Context usage is currently an MVP estimate using 1 token = 4 characters and includes visible chat messages, surfaced reasoning blocks, and tool-call full-context character counts when available. Tool-call preview truncation is visual only and should not reduce the status estimate. When Codex usage is available from the latest run log, append it tersely beside `ctx` (for example `ctx 2.1k/400k log in 12k/cache 8k/out 900`).
+
+## Transcript Mouse Links
+
+- Qubit owns transcript link opening through app-generated hitboxes over rendered transcript text, not terminal-native URL detection. Build hitboxes from ANSI-stripped rendered lines and display-cell coordinates so Unicode prefixes align correctly.
+- Open links only on Ctrl+left-click release when no drag occurred. Plain clicks continue to feed transcript selection/tool/reasoning toggles, and Ctrl+drag must remain text selection rather than browser launch.
+- Footer/help copy should say Ctrl+click opens links only when the terminal forwards the mouse event, because some terminals intercept Ctrl+click URLs before Bubble Tea receives them.

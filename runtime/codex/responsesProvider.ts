@@ -111,6 +111,7 @@ export class CodexResponsesProvider implements ModelProvider {
         ...(parsed.usage !== undefined ? { usage: parsed.usage } : {}),
         ...(parsed.outputItems?.length ? { outputItems: parsed.outputItems } : {}),
         result: {
+          contextMessageCount: input.messages.length,
           contentChars: parsed.content.length,
           reasoningChars: parsed.reasoningContent?.length || 0,
           toolCallCount: parsed.toolCalls.length,

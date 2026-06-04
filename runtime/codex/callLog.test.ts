@@ -41,5 +41,6 @@ describe("CodexCallLogWriter", () => {
     assert.equal(parsed.usage.input_tokens, 20);
     assert.equal(parsed.usage.input_tokens_details.cached_tokens, 12);
     assert.equal(parsed.usage.output_tokens, 8);
+    assert.equal(parsed.result, undefined);
   });
 });

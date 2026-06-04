@@ -131,6 +131,7 @@ describe("CodexResponsesProvider", () => {
       { type: "message", content: [{ type: "output_text", text: "Logged." }] },
     ]);
     assert.deepEqual(logs[0].result, {
+      contextMessageCount: 1,
       contentChars: 7,
       reasoningChars: 0,
       toolCallCount: 0,

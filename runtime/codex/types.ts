@@ -141,6 +141,7 @@ export interface CodexProviderCallLogEvent {
   usage?: unknown;
   outputItems?: unknown[];
   result?: {
+    contextMessageCount?: number;
     contentChars: number;
     reasoningChars: number;
     toolCallCount: number;

@@ -14,7 +14,38 @@ func (m model) contextStatusText() string {
 		return ""
 	}
 	usedTokens := estimateContextTokens(m.messages)
-	return fmt.Sprintf("ctx %s/%s", formatTokenCount(usedTokens), formatTokenCount(maxTokens))
+	status := fmt.Sprintf("ctx %s/%s", formatTokenCount(usedTokens), formatTokenCount(maxTokens))
+	if usage := m.codexUsageStatusText(); usage != "" {
+		status += " " + usage
+	}
+	return status
+}
+
+func (m model) codexUsageStatusText() string {
+	if m.lastCodexUsage == nil || !isCodexProvider(m.activeProvider, m.provider) {
+		return ""
+	}
+	parts := []string{}
+	if m.lastCodexUsage.InputTokens > 0 {
+		parts = append(parts, fmt.Sprintf("in %s", formatTokenCount(m.lastCodexUsage.InputTokens)))
+	}
+	if m.lastCodexUsage.CachedTokens > 0 {
+		parts = append(parts, fmt.Sprintf("cache %s", formatTokenCount(m.lastCodexUsage.CachedTokens)))
+	}
+	if m.lastCodexUsage.OutputTokens > 0 {
+		parts = append(parts, fmt.Sprintf("out %s", formatTokenCount(m.lastCodexUsage.OutputTokens)))
+	}
+	if len(parts) == 0 && m.lastCodexUsage.TotalTokens > 0 {
+		parts = append(parts, fmt.Sprintf("total %s", formatTokenCount(m.lastCodexUsage.TotalTokens)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "log " + strings.Join(parts, "/")
+}
+
+func isCodexProvider(activeProvider, provider string) bool {
+	return strings.EqualFold(activeProvider, "codex") || strings.EqualFold(provider, "codex")
 }
 
 func (m model) activeModelMaxContext() int {
@@ -70,8 +101,8 @@ func toolGroupContextText(group *toolGroup) string {
 func formatTokenCount(tokens int) string {
 	if tokens >= 1000 {
 		value := float64(tokens) / 1000
-		formatted := fmt.Sprintf("%.1fk", value)
-		return strings.TrimSuffix(formatted, ".0k") + "k"
+		formatted := fmt.Sprintf("%.1f", value)
+		return strings.TrimSuffix(formatted, ".0") + "k"
 	}
 	return fmt.Sprintf("%d", tokens)
 }

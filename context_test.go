@@ -5,11 +5,14 @@ import (
 	"testing"
 )
 
-func TestContextStatusForCodexModel(t *testing.T) {
+func TestContextStatusForCodexModelIncludesLatestUsageLog(t *testing.T) {
 	m := initialModel(nil)
 	m.width = 100
+	m.provider = "codex"
+	m.activeProvider = "codex"
 	m.model = "gpt-5.2-codex"
 	m.maxContext = 400000
+	m.lastCodexUsage = &codexUsage{InputTokens: 12345, CachedTokens: 12000, OutputTokens: 678}
 	m.messages = []chatMessage{
 		{Role: "user", Content: strings.Repeat("a", 400)},
 		{Role: "reasoning", Content: strings.Repeat("r", 40)},
@@ -17,8 +20,21 @@ func TestContextStatusForCodexModel(t *testing.T) {
 	}
 
 	status := plainText(m.renderInputStatus())
-	if !strings.Contains(status, "ctx ") || !strings.Contains(status, "/400k") {
-		t.Fatalf("status = %q, want context usage next to mode/reasoning", status)
+	if !strings.Contains(status, "ctx ") || !strings.Contains(status, "/400k") || !strings.Contains(status, "log in 12.3k/cache 12k/out 678") {
+		t.Fatalf("status = %q, want context usage and latest Codex usage log next to mode/reasoning", status)
+	}
+}
+
+func TestContextStatusHidesCodexUsageForOtherProviders(t *testing.T) {
+	m := initialModel(nil)
+	m.provider = "openai"
+	m.activeProvider = "openai"
+	m.maxContext = 128000
+	m.lastCodexUsage = &codexUsage{InputTokens: 12000, OutputTokens: 500}
+
+	status := plainText(m.renderInputStatus())
+	if strings.Contains(status, "log in") {
+		t.Fatalf("status = %q, want Codex usage hidden for non-Codex providers", status)
 	}
 }
 
