@@ -23,15 +23,15 @@ func (m model) View() tea.View {
 	status := m.renderInputStatus()
 	footer := m.renderFooter()
 	preOverlayBottomHeight := lipgloss.Height(queuedStatus) + lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
-	todoOverlay := m.renderTodoOverlay(max(0, min(maxTodoOverlayRows+2, m.height-preOverlayBottomHeight-4)))
-	bottomHeight := preOverlayBottomHeight + lipgloss.Height(todoOverlay)
+	bottomOverlay := m.renderBottomOverlay(max(0, min(maxBottomOverlayRows(m), m.height-preOverlayBottomHeight-4)))
+	bottomHeight := preOverlayBottomHeight + lipgloss.Height(bottomOverlay)
 	mainHeight := max(0, m.height-bottomHeight)
 	content := appStyle.Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
 			renderFixedHeight(m.renderMainArea(mainHeight), mainHeight),
 			queuedStatus,
-			todoOverlay,
+			bottomOverlay,
 			input,
 			status,
 			footer,
@@ -110,6 +110,20 @@ func (m model) renderMainArea(height int) string {
 		return lipgloss.JoinVertical(lipgloss.Left, header, chat, m.renderFileMentionModal(fileHeight))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, chat)
+}
+
+func maxBottomOverlayRows(m model) int {
+	if m.hasPlanClarification() {
+		return maxPlanClarificationOverlayRows
+	}
+	return maxTodoOverlayRows + 2
+}
+
+func (m model) renderBottomOverlay(maxHeight int) string {
+	if m.hasPlanClarification() {
+		return m.renderPlanClarificationOverlay(maxHeight)
+	}
+	return m.renderTodoOverlay(maxHeight)
 }
 
 func (m model) renderInput() string {
@@ -194,6 +208,9 @@ func (m model) renderFooter() string {
 		footer = "selection | ctrl+c copy | ctrl+x cut | type replace | backspace/delete remove | esc clear"
 	} else if m.transcriptSelection.Active {
 		footer = "transcript selection | ctrl+c copy | esc clear | wheel extends"
+	}
+	if m.hasPlanClarification() {
+		return footerStyle.Width(m.width).Render(mutedSt.Render("up/down choose | enter answer/next | type when manual selected | esc cancel"))
 	}
 	if m.messageEdit.Active {
 		footer = "enter fork/reroll | ctrl+j newline | esc cancel edit"

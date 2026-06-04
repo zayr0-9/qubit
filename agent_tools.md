@@ -79,7 +79,7 @@ todoMd
 
 planMd
   Manages Markdown plans stored in the project .qubit/plans directory.
-  Supports create/list/read/edit/display actions and is always-allowed so planning can create/update/display Markdown plans without opening a permission modal. The display action emits a UI-only plan.view event so Go can render the selected Markdown plan in chat without sending that content as a model message. On transcript reload, stored planMd display tool calls are hydrated back into UI-only plan preview messages from the current plan file so displayed plans remain visible after restarting Qubit.
+  Supports create/list/read/edit/display/clarify actions and is always-allowed so planning can create/update/display plans or ask clarifying questions without opening a permission modal. The clarify action emits a plan.clarification.request event so Go can collect one or more user answers in the bottom overlay above the input and return them as the tool result. The display action emits a UI-only plan.view event so Go can render the selected Markdown plan in chat without sending that content as a model message. On transcript reload, stored planMd display tool calls are hydrated back into UI-only plan preview messages from the current plan file so displayed plans remain visible after restarting Qubit.
 ```
 
 ## Important Files
@@ -125,9 +125,9 @@ tools/todoMd.ts
   Stores todo files in project .qubit/todos without Electron dependencies.
 
 tools/planMd.ts
-  Markdown plan implementation and tool definition.
-  Stores plan files in project .qubit/plans and can emit UI-only plan.view events for displayed plans.
-
+  planMd
+    Markdown plan implementation and tool definition.
+    Stores plan files in project .qubit/plans, can emit UI-only plan.view events for displayed plans, and can request plan-mode clarifications through plan.clarification.request/response.
 utils/qubitProject.ts
   Resolves Qubit-owned internal paths under the active project .qubit directory for project-scoped stores that should not be blocked by normal cwd file-tool containment.
 

@@ -105,11 +105,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.PasteMsg:
+		if m.hasPlanClarification() {
+			return m.updatePlanClarificationPaste(msg.String()), nil
+		}
 		if m.mode == modeThemeEntry {
 			return m.updateThemeEntryTeaPaste(msg), nil
 		}
 		return m.updateKeyEntryTeaPaste(msg), nil
 	case composerPasteMsg:
+		if m.hasPlanClarification() {
+			if msg.err == nil {
+				return m.updatePlanClarificationPaste(msg.text), nil
+			}
+			return m, nil
+		}
 		if m.mode == modeThemeEntry {
 			return m.updateThemeEntryPaste(msg), nil
 		}
@@ -124,6 +133,9 @@ func (m model) inputSpinnerActive() bool {
 }
 
 func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.hasPlanClarification() {
+		return m.updatePlanClarificationKey(msg)
+	}
 	if m.mode == modeModal {
 		return m.updateModal(msg)
 	}
@@ -520,6 +532,11 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 			return m, waitRuntimeEvent(m.runtime)
 		}
 		m.applyPlanView(ev)
+	case "plan.clarification.request":
+		if !m.acceptRunScopedEvent(ev) {
+			return m, waitRuntimeEvent(m.runtime)
+		}
+		m = m.openPlanClarification(ev)
 	case "generated.image":
 		m.applyGeneratedImage(ev)
 	case "session.created":
@@ -1082,8 +1099,8 @@ func (m *model) layout() {
 	footer := m.renderFooter()
 	header := m.renderHeader()
 	preOverlayBottomHeight := 1 + lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
-	todoOverlay := m.renderTodoOverlay(max(0, min(maxTodoOverlayRows+2, m.height-preOverlayBottomHeight-4)))
-	bottomHeight := preOverlayBottomHeight + lipgloss.Height(todoOverlay)
+	bottomOverlay := m.renderBottomOverlay(max(0, min(maxBottomOverlayRows(*m), m.height-preOverlayBottomHeight-4)))
+	bottomHeight := preOverlayBottomHeight + lipgloss.Height(bottomOverlay)
 	mainHeight := max(1, m.height-bottomHeight)
 	bodyHeight := max(1, mainHeight-lipgloss.Height(header))
 	m.chatTopY = lipgloss.Height(header)

@@ -19,7 +19,7 @@ import { OpenAIProvider } from "@hyper-labs/hyper-router/providers/openai-vai";
 import { AmazonBedrockVAIProvider } from "@hyper-labs/hyper-router/providers/amazon-bedrock-vai";
 import { OpenRouterProvider } from "@hyper-labs/hyper-router/providers/openrouter";
 import { qubitTools } from "./tools/index.js";
-import { setPlanViewEmitter } from "./tools/planMd.js";
+import { setPlanClarificationRequester, setPlanViewEmitter } from "./tools/planMd.js";
 import { setMultiCallLifecycleEmitter, setMultiCallPermissionRequester } from "./tools/multiCall.js";
 import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
 import { clearRunCwdBlockEnabled, setRunCwdBlockEnabled } from "./utils/toolAccessPolicy.js";
@@ -220,6 +220,7 @@ const storage = new QubitSqliteStorage({
 const codexCallLog = new CodexCallLogWriter(codexCallLogPath);
 
 const pendingPermissions = new Map();
+const pendingPlanClarifications = new Map();
 const activeRuns = new Map();
 const latestCodexUsageByRun = new Map();
 function targetForRunEvent(event) {
@@ -288,6 +289,13 @@ setMultiCallLifecycleEmitter((event) => {
 setPlanViewEmitter((event) => {
   const target = targetForRunEvent(event);
   write({ type: "plan.view", sessionId: event.sessionId, runId: event.runId, step: event.step, name: event.name, path: event.path, cwd: event.cwd, content: event.content }, target);
+});
+setPlanClarificationRequester(async (request) => {
+  const target = targetForRunEvent(request);
+  write({ type: "plan.clarification.request", id: request.id, sessionId: request.sessionId, runId: request.runId, step: request.step, toolCallId: request.toolCallId, questions: request.questions }, target);
+  return await new Promise((resolve) => {
+    pendingPlanClarifications.set(request.id, resolve);
+  });
 });
 
 const hooks = {
@@ -464,6 +472,11 @@ function handleImmediateLine(line) {
     return true;
   }
 
+  if (request.type === "plan.clarification.response") {
+    handlePlanClarificationResponse(request);
+    return true;
+  }
+
   if (request.type === "chat.cancel") {
     handleCancelRequest(request);
     return true;
@@ -493,6 +506,11 @@ async function handleLine(line) {
 
   if (request.type === "tool.permission.response") {
     handlePermissionResponse(request);
+    return;
+  }
+
+  if (request.type === "plan.clarification.response") {
+    handlePlanClarificationResponse(request);
     return;
   }
 
@@ -945,6 +963,13 @@ function handlePermissionResponse(request) {
       ? { type: "allow" }
       : { type: "deny", reason: request.reason || "Denied by user." },
   );
+}
+
+function handlePlanClarificationResponse(request) {
+  const resolve = pendingPlanClarifications.get(request.id);
+  if (!resolve) return;
+  pendingPlanClarifications.delete(request.id);
+  resolve(request.cancelled ? { cancelled: true, answers: [] } : { answers: Array.isArray(request.answers) ? request.answers : [] });
 }
 
 async function createRuntimeState(promptMode = "plan") {
@@ -1636,7 +1661,7 @@ function summarizeToolArgs(toolName, args) {
     case "todoMd":
       return { ...compactObject(source, ["action", "name", "cwd", "search"]), contentPreview: previewText(source.content, 600), replacementPreview: previewText(source.replacement, 600) };
     case "planMd":
-      return { ...compactObject(source, ["action", "name", "cwd", "search"]), contentPreview: previewText(source.content, 600), replacementPreview: previewText(source.replacement, 600) };
+      return { ...compactObject(source, ["action", "name", "cwd", "search"]), questionCount: Array.isArray(source.questions) ? source.questions.length : undefined, contentPreview: previewText(source.content, 600), replacementPreview: previewText(source.replacement, 600) };
     default:
       return JSON.parse(JSON.stringify(source, (_key, value) => typeof value === "string" ? previewText(value, 1000) : value));
   }
@@ -1706,7 +1731,7 @@ function summarizeToolResult(toolName, result) {
     case "todoMd":
       return { ...summary, ...compactObject(data, ["id", "created", "exists", "success", "message", "modifiedAt"]), content: previewText(data.content, 1600), contentPreview: previewText(data.content, 1600) };
     case "planMd":
-      return { ...summary, ...compactObject(data, ["name", "created", "exists", "success", "message", "modifiedAt", "displayed", "path"]), planCount: Array.isArray(payload) ? payload.length : undefined, contentPreview: data.displayed ? undefined : previewText(data.content, 1600) };
+      return { ...summary, ...compactObject(data, ["name", "created", "exists", "success", "message", "modifiedAt", "displayed", "path", "clarified", "cancelled", "questions"]), answerCount: Array.isArray(data.answers) ? data.answers.length : undefined, planCount: Array.isArray(payload) ? payload.length : undefined, contentPreview: data.displayed || data.clarified ? undefined : previewText(data.content, 1600) };
     default:
       return { ...summary, payloadPreview: previewText(payload, 2400) };
   }

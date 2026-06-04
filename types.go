@@ -234,6 +234,43 @@ type modalOption struct {
 	Active      bool
 }
 
+type planClarificationOption struct {
+	ID          string `json:"id,omitempty"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	Manual      bool   `json:"manual,omitempty"`
+}
+
+type planClarificationQuestion struct {
+	ID          string                    `json:"id,omitempty"`
+	Question    string                    `json:"question,omitempty"`
+	Description string                    `json:"description,omitempty"`
+	Options     []planClarificationOption `json:"options,omitempty"`
+}
+
+type planClarificationAnswer struct {
+	QuestionID          string `json:"questionId,omitempty"`
+	Question            string `json:"question,omitempty"`
+	SelectedOptionID    string `json:"selectedOptionId,omitempty"`
+	SelectedOptionLabel string `json:"selectedOptionLabel,omitempty"`
+	Manual              bool   `json:"manual,omitempty"`
+	Answer              string `json:"answer,omitempty"`
+}
+
+type planClarificationState struct {
+	Active       bool
+	RequestID    string
+	SessionID    string
+	RunID        string
+	Step         int
+	ToolCallID   string
+	Questions    []planClarificationQuestion
+	Answers      []planClarificationAnswer
+	Index        int
+	OptionCursor int
+	Manual       composerModel
+}
+
 type modalState struct {
 	ID           string
 	Kind         modalKind
@@ -295,55 +332,57 @@ type forkTreeState struct {
 }
 
 type runtimeEvent struct {
-	Type             string         `json:"type"`
-	ID               string         `json:"id,omitempty"`
-	SessionID        string         `json:"sessionId,omitempty"`
-	RunID            string         `json:"runId,omitempty"`
-	SessionTitle     string         `json:"sessionTitle,omitempty"`
-	Session          *sessionInfo   `json:"session,omitempty"`
-	Sessions         []sessionInfo  `json:"sessions,omitempty"`
-	Messages         []chatMessage  `json:"messages,omitempty"`
-	Provider         string         `json:"provider,omitempty"`
-	ActiveProvider   string         `json:"activeProvider,omitempty"`
-	ActiveKeyAlias   string         `json:"activeKeyAlias,omitempty"`
-	Model            string         `json:"model,omitempty"`
-	Keys             []apiKeyInfo   `json:"keys,omitempty"`
-	Models           []modelInfo    `json:"models,omitempty"`
-	ForkTreeNodes    []forkTreeNode `json:"nodes,omitempty"`
-	StoragePath      string         `json:"storagePath,omitempty"`
-	IndexPath        string         `json:"indexPath,omitempty"`
-	WorkspaceCwd     string         `json:"workspaceCwd,omitempty"`
-	AuthURL          string         `json:"authUrl,omitempty"`
-	LocalPort        int            `json:"localPort,omitempty"`
-	AccountEmail     string         `json:"accountEmail,omitempty"`
-	AccountID        string         `json:"accountId,omitempty"`
-	Storage          string         `json:"storage,omitempty"`
-	Active           bool           `json:"active,omitempty"`
-	Status           string         `json:"status,omitempty"`
-	Content          string         `json:"content,omitempty"`
-	Name             string         `json:"name,omitempty"`
-	Path             string         `json:"path,omitempty"`
-	URL              string         `json:"url,omitempty"`
-	MimeType         string         `json:"mimeType,omitempty"`
-	SizeBytes        int            `json:"sizeBytes,omitempty"`
-	Cwd              string         `json:"cwd,omitempty"`
-	ReasoningContent string         `json:"reasoningContent,omitempty"`
-	ReasoningLevel   string         `json:"reasoningLevel,omitempty"`
-	MaxContext       int            `json:"maxContext,omitempty"`
-	Step             int            `json:"step,omitempty"`
-	ToolCallID       string         `json:"toolCallId,omitempty"`
-	ToolName         string         `json:"toolName,omitempty"`
-	Args             map[string]any `json:"args,omitempty"`
-	Result           map[string]any `json:"result,omitempty"`
-	ContextChars     int            `json:"contextChars,omitempty"`
-	CodexUsage       *codexUsage    `json:"codexUsage,omitempty"`
-	StartedAt        string         `json:"startedAt,omitempty"`
-	FinishedAt       string         `json:"finishedAt,omitempty"`
-	DurationMs       int            `json:"durationMs,omitempty"`
-	Description      string         `json:"description,omitempty"`
-	Metadata         map[string]any `json:"metadata,omitempty"`
-	InputSchema      map[string]any `json:"inputSchema,omitempty"`
-	Error            string         `json:"error,omitempty"`
+	Type             string                      `json:"type"`
+	ID               string                      `json:"id,omitempty"`
+	SessionID        string                      `json:"sessionId,omitempty"`
+	RunID            string                      `json:"runId,omitempty"`
+	SessionTitle     string                      `json:"sessionTitle,omitempty"`
+	Session          *sessionInfo                `json:"session,omitempty"`
+	Sessions         []sessionInfo               `json:"sessions,omitempty"`
+	Messages         []chatMessage               `json:"messages,omitempty"`
+	Questions        []planClarificationQuestion `json:"questions,omitempty"`
+	Answers          []planClarificationAnswer   `json:"answers,omitempty"`
+	Provider         string                      `json:"provider,omitempty"`
+	ActiveProvider   string                      `json:"activeProvider,omitempty"`
+	ActiveKeyAlias   string                      `json:"activeKeyAlias,omitempty"`
+	Model            string                      `json:"model,omitempty"`
+	Keys             []apiKeyInfo                `json:"keys,omitempty"`
+	Models           []modelInfo                 `json:"models,omitempty"`
+	ForkTreeNodes    []forkTreeNode              `json:"nodes,omitempty"`
+	StoragePath      string                      `json:"storagePath,omitempty"`
+	IndexPath        string                      `json:"indexPath,omitempty"`
+	WorkspaceCwd     string                      `json:"workspaceCwd,omitempty"`
+	AuthURL          string                      `json:"authUrl,omitempty"`
+	LocalPort        int                         `json:"localPort,omitempty"`
+	AccountEmail     string                      `json:"accountEmail,omitempty"`
+	AccountID        string                      `json:"accountId,omitempty"`
+	Storage          string                      `json:"storage,omitempty"`
+	Active           bool                        `json:"active,omitempty"`
+	Status           string                      `json:"status,omitempty"`
+	Content          string                      `json:"content,omitempty"`
+	Name             string                      `json:"name,omitempty"`
+	Path             string                      `json:"path,omitempty"`
+	URL              string                      `json:"url,omitempty"`
+	MimeType         string                      `json:"mimeType,omitempty"`
+	SizeBytes        int                         `json:"sizeBytes,omitempty"`
+	Cwd              string                      `json:"cwd,omitempty"`
+	ReasoningContent string                      `json:"reasoningContent,omitempty"`
+	ReasoningLevel   string                      `json:"reasoningLevel,omitempty"`
+	MaxContext       int                         `json:"maxContext,omitempty"`
+	Step             int                         `json:"step,omitempty"`
+	ToolCallID       string                      `json:"toolCallId,omitempty"`
+	ToolName         string                      `json:"toolName,omitempty"`
+	Args             map[string]any              `json:"args,omitempty"`
+	Result           map[string]any              `json:"result,omitempty"`
+	ContextChars     int                         `json:"contextChars,omitempty"`
+	CodexUsage       *codexUsage                 `json:"codexUsage,omitempty"`
+	StartedAt        string                      `json:"startedAt,omitempty"`
+	FinishedAt       string                      `json:"finishedAt,omitempty"`
+	DurationMs       int                         `json:"durationMs,omitempty"`
+	Description      string                      `json:"description,omitempty"`
+	Metadata         map[string]any              `json:"metadata,omitempty"`
+	InputSchema      map[string]any              `json:"inputSchema,omitempty"`
+	Error            string                      `json:"error,omitempty"`
 }
 
 type codexUsage struct {
@@ -477,6 +516,7 @@ type model struct {
 	slashCursor                int
 	fileMention                fileMentionState
 	modal                      *modalState
+	planClarification          planClarificationState
 	keyEntry                   *keyEntryState
 	themeEntry                 *themeEntryState
 	forkTree                   forkTreeState
