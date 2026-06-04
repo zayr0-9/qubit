@@ -156,14 +156,22 @@ func (m model) updateMdEditorPaste(msg composerPasteMsg) model {
 }
 
 func (m model) insertMdEditorPaste(text string) model {
-	if m.mdEditor.View != mdEditorEdit || text == "" {
+	if text == "" {
 		return m
 	}
-	m.layoutMdEditorComposer()
-	m.mdEditor.Editor.InsertString(normalizeInputNewlines(text))
-	m.updateMdEditorDirty()
-	m.layoutMdEditorComposer()
-	m.mdEditor.Status = "pasted"
+	switch m.mdEditor.View {
+	case mdEditorEdit:
+		m.layoutMdEditorComposer()
+		m.mdEditor.Editor.InsertString(normalizeInputNewlines(text))
+		m.updateMdEditorDirty()
+		m.layoutMdEditorComposer()
+		m.mdEditor.Status = "pasted"
+	case mdEditorRename:
+		m.layoutMdEditorComposer()
+		m.mdEditor.Rename.InsertString(strings.TrimSpace(normalizeInputNewlines(text)))
+		m.layoutMdEditorComposer()
+		m.mdEditor.Status = "pasted"
+	}
 	return m
 }
 

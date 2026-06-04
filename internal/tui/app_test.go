@@ -3056,3 +3056,58 @@ func TestSessionPickerSearchKeepsFavouritesFirst(t *testing.T) {
 		t.Fatalf("visible = %#v, want favourite search match before recent match", visible)
 	}
 }
+
+func TestChatPasteMsgInsertsIntoComposer(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 24
+	m.layout()
+
+	updated, cmd := m.Update(tea.PasteMsg{Content: "hello\r\nworld"})
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatal("paste returned command, want nil")
+	}
+	if got.composer.Value() != "hello\nworld" {
+		t.Fatalf("composer value = %q, want normalized multiline paste", got.composer.Value())
+	}
+	if got.composer.Height() < 2 {
+		t.Fatalf("composer height = %d, want multiline paste to grow input", got.composer.Height())
+	}
+}
+
+func TestChatCtrlVPasteMsgInsertsIntoComposer(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 24
+	m.layout()
+
+	updated, cmd := m.Update(composerPasteMsg{Text: "from clipboard"})
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatal("composer paste returned command, want nil")
+	}
+	if got.composer.Value() != "from clipboard" {
+		t.Fatalf("composer value = %q, want clipboard text", got.composer.Value())
+	}
+}
+
+func TestChatPasteReplacesSelectedComposerText(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 24
+	m.composer.SetValue("replace me")
+	m.composer.SelectAll()
+
+	updated, _ := m.Update(tea.PasteMsg{Content: "pasted"})
+	got := updated.(model)
+
+	if got.composer.HasSelection() {
+		t.Fatal("composer selection still active after paste")
+	}
+	if got.composer.Value() != "pasted" {
+		t.Fatalf("composer value = %q, want pasted", got.composer.Value())
+	}
+}

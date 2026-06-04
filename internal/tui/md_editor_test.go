@@ -249,3 +249,26 @@ func TestMdEditorUpFromBottomVisibleLineDoesNotScrollPrematurely(t *testing.T) {
 		t.Fatalf("scrollLine after one up = %d, want %d; cursor should move within visible box before scrolling", got.mdEditor.Editor.ScrollLine(), bottomScroll)
 	}
 }
+
+func TestMdEditorRenamePasteInsertsIntoRenameInput(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.mode = modeMdEditor
+	m.mdEditor = newMdEditorState()
+	m.applyMdRead(runtimeEvent{Type: "md.read", File: &mdFileInfo{Section: "plans", Name: "launch", Path: `D:\\repo\\.qubit\\plans\\launch.md`}, Content: "# Launch"})
+	m = m.openMdEditorRename()
+	m.mdEditor.Rename.Reset()
+
+	m = m.updateMdEditorTeaPaste(tea.PasteMsg{Content: "renamed doc\r\n"})
+
+	if m.mdEditor.View != mdEditorRename {
+		t.Fatalf("view = %q, want rename", m.mdEditor.View)
+	}
+	if got := m.mdEditor.Rename.Value(); got != "renamed doc" {
+		t.Fatalf("rename value = %q, want pasted rename", got)
+	}
+	if got := m.mdEditor.Editor.Value(); got != "# Launch" {
+		t.Fatalf("editor body changed to %q, want unchanged", got)
+	}
+}

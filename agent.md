@@ -37,6 +37,9 @@ Agents must also update the relevant category context files when a change affect
 agent_design.md
   Mandatory when working on terminal UI design, visual styling, layout, colors, borders, spacing, or rendering behavior.
 
+agent_input.md
+  Mandatory when working on Go TUI keyboard routing, composer behavior, paste/clipboard flows, mouse capture, mouse wheel routing, transcript selection, terminal keyboard setup, or text input areas.
+
 agent_tools.md
   Mandatory when working on model-callable tools, tool registration, runtime tool permissions, or shared filesystem/path infrastructure.
 
@@ -301,25 +304,8 @@ Follow standard Go conventions:
 - All side effects should happen through `tea.Cmd` where possible.
 - Maintain value semantics for the model unless pointer mutation is clearer for local helpers.
 - Use `tea.Batch` for multiple commands.
-- The chat composer uses Qubit's custom `composerModel` adapter in `internal/tui/composer.go`, backed by `internal/tui/components/composer`, not `textarea.Model` or `textinput.Model`. Preserve multiline input, source-index-based cursor/selection state, internal wrapping, max-height scrolling, and inline selection rendering.
-- Do not post-process rendered ANSI text to implement composer selection/highlighting. Selection must be tracked before rendering with source indices so the chevron/prompt is never highlighted and selection stays behind input characters only.
-- The composer prompt/chevron renders only on the first visible input row. Wrapped/continuation rows should use prompt-width spaces for alignment, not repeated chevrons.
-- Plain Enter sends the current chat message. Modified Enter (`Shift+Enter` when available, and `Alt+Enter` when the terminal does not reserve it) inserts a literal newline and must not submit. `Ctrl+J` is the reliable terminal fallback for inserting a newline.
-- Composer keyboard behavior should remain editor-like: arrows/Home/End move in the composer; `Ctrl+Left/Right` and Alt fallbacks move by word; `Ctrl+Home/End` move to input begin/end; `Ctrl+A` selects all; `Shift+Arrow` selects when the terminal reports those keys; `Ctrl+Shift+Left/Right` selects by word when supported; `Ctrl+C` copies selected composer text and quits only when no composer selection exists; Esc clears selection before quitting.
-- Recalculate layout after composer changes so the input area can grow/shrink up to its max height and the chat viewport height adjusts. When composer content exceeds max height, scroll inside the composer instead of expanding the app layout past the footer.
+- Input, paste, mouse, and transcript-selection behavior is covered by `agent_input.md`; read it before changing those areas. In short: preserve the custom composer, route paste to the focused input surface, keep app-contained wheel scrolling/selection semantics, recalculate layout after composer changes, and avoid full Markdown re-renders during mouse/viewport churn.
 - Recalculate layout before refreshing/replacing chat viewport content on transcript-load paths such as `session.messages`. A loaded long conversation must not render with stale viewport dimensions from the loading placeholder or previous screen state; otherwise a large blank gap can appear above the input until the next composer edit triggers layout. The safe order is update messages/state -> `m.layout()` -> `m.refreshViewport()`.
-- Keep scrolling app-contained: Qubit runs in Bubble Tea alt-screen and captures cell-motion mouse events so mouse wheel scrolls only the chat message viewport, not the whole terminal above the Qubit title/header:
-
-```go
-view.AltScreen = true
-view.MouseMode = tea.MouseModeCellMotion
-```
-
-- `MouseModeCellMotion` is the accepted tradeoff for contained wheel scrolling: it enables click/release/wheel plus drag events, but common terminals will not support normal drag-to-select text while the app is capturing mouse events. Do not upgrade to `MouseModeAllMotion` unless passive movement events are explicitly needed.
-- Mouse wheel handling should route to the visible interactive surface. In chat mode, wheel up disables auto-scroll and wheel down resumes auto-scroll only when the chat viewport reaches bottom; `PgUp`/`PgDn` should keep matching this chat behavior. In picker/modal/list modes, wheel should move the visible list cursor or list viewport instead of scrolling the hidden chat viewport.
-- Qubit owns chat transcript mouse selection while mouse capture is enabled: drag in the chat viewport to select rendered transcript text, use wheel/edge-drag to keep scrolling while selecting, press `Ctrl+C` to copy the transcript selection, and press `Esc` to clear it. Composer selection remains separate and has copy priority when active. Selection drag updates must repaint from cached rendered transcript content instead of running the full Markdown/render-cache refresh path on every mouse motion. Terminal-native modifier overrides such as Shift-drag may still work in some terminals, but they are a fallback rather than the primary selection path.
-- If chat scroll appears to work only after pressing `PgUp`/`PgDn`, inspect whether viewport auto-scroll/layout refresh is forcing `GotoBottom()`. Preserve viewport offset after generic viewport updates, content refreshes, and resize/layout, and only resume auto-scroll when the user submits a new message or explicitly reaches/jumps to the bottom.
-- Avoid full layout or full Markdown re-rendering on every generic viewport update or stream tick. Cache rendered historical message content by role/content/width, and do not cache the actively streaming partial message.
 
 ### Runtime Client Standards
 
@@ -346,7 +332,6 @@ view.MouseMode = tea.MouseModeCellMotion
 - `/sessions` should open an interactive picker, not print repeated lists into chat.
 - Session picker results should be sorted by most recent activity (`updatedAt`, falling back to `createdAt`) so chats with new messages surface above merely newer-created sessions.
 - Session switching should happen through the interactive picker. Do not add a `/use` slash command unless explicitly requested.
-- `/terminal-setup` should patch Windows Terminal `settings.json` to map Shift+Enter to an enhanced keyboard escape sequence. It must be idempotent, create a timestamped backup before writing, remove the common misplaced top-level `command`/`keys` mistake, and report the settings/backup paths. It must not change non-Windows Terminal files.
 - Session picker should support:
   - Up/down selection
   - Enter activation
@@ -361,7 +346,6 @@ view.MouseMode = tea.MouseModeCellMotion
   - `d` to delete stored keychain keys after a confirmation modal, while blocking deletion of env keys.
   - Esc close/cancel.
 - API key entry must never render raw secret text. Pasted or typed keys should be displayed only as mask bullets, and tests should cover paste -> save flows, not only programmatic insertion.
-- Preserve normal terminal selection/copy behavior by keeping mouse capture disabled unless richer mouse interaction is explicitly requested.
 - Plan/edit mode maps the UI's permission mode to runtime prompt mode: plan uses ask-before-gated-tools behavior and the `prompts/plan.md` system prompt addendum; edit uses always-allow gated-tool behavior and the `prompts/edit.md` system prompt addendum. Keep the Markdown files as the editable source for these prompt addenda. In plan mode, `planMd` can use `action: "clarify"` to ask one or more user clarification questions before the final plan; Go renders these in the bottom overlay above the input, always includes a final manual-entry option, and returns all answers to the model as the tool result.
 - Cwd blocking is enabled by default for model-callable filesystem/search/shell tools. `/cwd-remove-block` allows subsequent runs in the current TUI session to access paths outside the launch cwd, and `/cwd-enable-block` restores the block. Render this state beside the plan/edit/allow mode below the input text area.
 - Assistant responses may be frontend-simulated streamed: the runtime can send a complete `assistant` event, and the Go UI may progressively reveal it. During a running chat, Esc sends `chat.cancel` with the active `runId` so the Node runtime can abort the hyper-router model call; any assistant text already visible in the Go UI is preserved. If the full `assistant` event already arrived and only the frontend reveal is still streaming, Esc stops that reveal while keeping the visible partial text. Keep fake reveal streaming as terminal UX logic; true provider token streaming should be added explicitly to the protocol when needed.

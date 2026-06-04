@@ -170,21 +170,75 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) updateComposerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	handled, cmd := m.composer.UpdateKey(msg)
 	if handled {
-		m.inputHistoryActive = false
-		m.inputHistoryIndex = len(m.inputHistory)
-		if m.showFileMentionPalette() {
-			m.ensureFileMentionIndex()
-			matches := m.filteredFileMentionEntries()
-			if len(matches) == 0 {
-				m.fileMention.Cursor = 0
-			} else if m.fileMention.Cursor >= len(matches) {
-				m.fileMention.Cursor = 0
-			}
-		}
-		m.layout()
+		m.afterComposerEdit()
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m model) updateTeaPaste(msg tea.PasteMsg) model {
+	if m.hasPlanClarification() {
+		return m.updatePlanClarificationPaste(msg.Content)
+	}
+	if m.mode == modeMdEditor {
+		return m.updateMdEditorTeaPaste(msg)
+	}
+	if m.mode == modeThemeEntry {
+		return m.updateThemeEntryTeaPaste(msg)
+	}
+	if m.mode == modeKeyEntry {
+		return m.updateKeyEntryTeaPaste(msg)
+	}
+	if m.mode != modeChat {
+		return m
+	}
+	return m.insertComposerPaste(msg.Content)
+}
+
+func (m model) updateComposerPaste(msg composerPasteMsg) model {
+	if msg.Err != nil {
+		return m
+	}
+	if m.hasPlanClarification() {
+		return m.updatePlanClarificationPaste(msg.Text)
+	}
+	if m.mode == modeMdEditor {
+		return m.updateMdEditorPaste(msg)
+	}
+	if m.mode == modeThemeEntry {
+		return m.updateThemeEntryPaste(msg)
+	}
+	if m.mode == modeKeyEntry {
+		return m.updateKeyEntryPaste(msg)
+	}
+	if m.mode != modeChat {
+		return m
+	}
+	return m.insertComposerPaste(msg.Text)
+}
+
+func (m model) insertComposerPaste(text string) model {
+	if text == "" {
+		return m
+	}
+	m.composer.InsertString(text)
+	m.afterComposerEdit()
+	return m
+}
+
+func (m *model) afterComposerEdit() {
+	m.inputHistoryActive = false
+	m.inputHistoryIndex = len(m.inputHistory)
+	if m.showFileMentionPalette() {
+		m.ensureFileMentionIndex()
+		matches := m.filteredFileMentionEntries()
+		if len(matches) == 0 {
+			m.fileMention.Cursor = 0
+		} else if m.fileMention.Cursor >= len(matches) {
+			m.fileMention.Cursor = 0
+		}
+	}
+	m.layout()
 }
 
 func (m model) insertInputNewline() (tea.Model, tea.Cmd) {
