@@ -156,7 +156,7 @@ func (m model) permissionModeBadge() string {
 }
 
 func (m model) renderFooter() string {
-	footer := "enter send | drag select transcript | ctrl+c copy/quit | esc clear | wheel/pgup/pgdn scroll"
+	footer := "enter send | drag select transcript | ctrl+click open link if forwarded | ctrl+c copy/quit | esc clear"
 	if m.keyboardEnhanced {
 		footer = "enter send | shift+enter newline | shift+arrows select | ctrl+shift+left/right words | ctrl+a all | ctrl+c copy/quit"
 	}
@@ -464,6 +464,7 @@ func pluralLabel(count int, singular string, plural string) string {
 func (m *model) refreshViewport() {
 	previousYOffset := m.viewport.YOffset()
 	m.toolHitboxes = nil
+	m.linkHitboxes = nil
 	m.transcriptLines = nil
 	var b strings.Builder
 	contentLine := 0
@@ -516,6 +517,7 @@ func (m *model) refreshViewport() {
 	content := b.String()
 	m.transcriptContent = content
 	m.transcriptLines = transcriptRenderLines(content)
+	m.linkHitboxes = transcriptLinkHitboxes(m.transcriptLines)
 	m.repaintTranscriptSelection()
 	m.restoreViewportPosition(previousYOffset)
 }
@@ -540,7 +542,6 @@ func messageSeparator(prev chatMessage, next chatMessage) string {
 	}
 	return "\n\n"
 }
-
 func separatorBlankLineCount(separator string) int {
 	newlines := strings.Count(separator, "\n")
 	if newlines == 0 {

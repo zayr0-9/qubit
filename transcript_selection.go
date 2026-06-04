@@ -9,7 +9,10 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-var ansiSequenceRE = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+var (
+	ansiSequenceRE = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+	urlRE          = regexp.MustCompile(`https?://[^\s<>"')\]]+`)
+)
 
 type transcriptSelectedLineRange struct {
 	Line     int
@@ -18,6 +21,9 @@ type transcriptSelectedLineRange struct {
 }
 
 func (m model) updateMouseWheelRouted(msg tea.MouseWheelMsg) tea.Model {
+	if updated, ok := m.updateTodoOverlayMouseWheel(msg); ok {
+		return updated
+	}
 	if m.transcriptSelection.Active && m.mode == modeChat {
 		return m.updateChatMouseWheel(msg)
 	}
@@ -105,6 +111,9 @@ func (m model) updateThemeEntryMouseWheel(msg tea.MouseWheelMsg) model {
 
 func (m model) updateMouseClick(msg tea.MouseClickMsg) tea.Model {
 	mouse := msg.Mouse()
+	if updated, ok := m.updateTodoOverlayMouseClick(mouse); ok {
+		return updated
+	}
 	if m.mode != modeChat || mouse.Button != tea.MouseLeft {
 		return m
 	}
@@ -147,16 +156,27 @@ func (m model) updateMouseMotion(msg tea.MouseMotionMsg) tea.Model {
 	return m
 }
 
-func (m model) updateMouseRelease(msg tea.MouseReleaseMsg) tea.Model {
-	if m.mode != modeChat || !m.transcriptSelection.Active {
-		return m
-	}
+func (m model) updateMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
 	mouse := msg.Mouse()
+	if updated, ok := m.updateTodoOverlayMouseRelease(mouse); ok {
+		return updated, nil
+	}
+	if m.mode != modeChat || !m.transcriptSelection.Active {
+		return m, nil
+	}
 	if !m.transcriptSelection.Dragging {
+		if mouse.Mod&tea.ModCtrl != 0 {
+			if url, ok := m.linkAtMouse(mouse); ok {
+				m.transcriptSelection = transcriptSelectionState{}
+				m.status = "opening link"
+				m.repaintTranscriptSelection()
+				return m, openBrowserCmd(url)
+			}
+		}
 		m.transcriptSelection = transcriptSelectionState{}
 		m.status = "ready"
 		m.repaintTranscriptSelection()
-		return m.toggleHitboxAtMouse(mouse)
+		return m.toggleHitboxAtMouse(mouse), nil
 	}
 	if m.transcriptSelectedText() == "" {
 		m.transcriptSelection = transcriptSelectionState{}
@@ -165,7 +185,20 @@ func (m model) updateMouseRelease(msg tea.MouseReleaseMsg) tea.Model {
 		m.status = "transcript selection"
 	}
 	m.repaintTranscriptSelection()
-	return m
+	return m, nil
+}
+
+func (m model) linkAtMouse(mouse tea.Mouse) (string, bool) {
+	if mouse.Button != tea.MouseLeft || mouse.Y < m.chatTopY || mouse.Y >= m.chatTopY+m.viewport.Height() {
+		return "", false
+	}
+	line := m.viewport.YOffset() + mouse.Y - m.chatTopY
+	for _, hitbox := range m.linkHitboxes {
+		if hitbox.Line == line && mouse.X >= hitbox.StartX && mouse.X <= hitbox.EndX {
+			return hitbox.URL, true
+		}
+	}
+	return "", false
 }
 
 func (m model) toggleHitboxAtMouse(mouse tea.Mouse) model {
@@ -349,6 +382,24 @@ func transcriptRenderLines(content string) []transcriptRenderLine {
 		out[i] = transcriptRenderLine{Text: stripANSI(line), Selectable: strings.TrimSpace(stripANSI(line)) != ""}
 	}
 	return out
+}
+
+func transcriptLinkHitboxes(lines []transcriptRenderLine) []linkHitbox {
+	var boxes []linkHitbox
+	for lineIndex, line := range lines {
+		matches := urlRE.FindAllStringIndex(line.Text, -1)
+		for _, match := range matches {
+			raw := line.Text[match[0]:match[1]]
+			url := strings.TrimRight(raw, ".,;:!?")
+			if url == "" {
+				continue
+			}
+			startX := runewidth.StringWidth(line.Text[:match[0]])
+			endX := startX + runewidth.StringWidth(url) - 1
+			boxes = append(boxes, linkHitbox{URL: url, Line: lineIndex, StartX: startX, EndX: endX})
+		}
+	}
+	return boxes
 }
 
 func stripANSI(s string) string {

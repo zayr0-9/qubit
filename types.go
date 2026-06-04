@@ -333,6 +333,7 @@ type runtimeEvent struct {
 	Args             map[string]any `json:"args,omitempty"`
 	Result           map[string]any `json:"result,omitempty"`
 	ContextChars     int            `json:"contextChars,omitempty"`
+	CodexUsage       *codexUsage    `json:"codexUsage,omitempty"`
 	StartedAt        string         `json:"startedAt,omitempty"`
 	FinishedAt       string         `json:"finishedAt,omitempty"`
 	DurationMs       int            `json:"durationMs,omitempty"`
@@ -340,6 +341,13 @@ type runtimeEvent struct {
 	Metadata         map[string]any `json:"metadata,omitempty"`
 	InputSchema      map[string]any `json:"inputSchema,omitempty"`
 	Error            string         `json:"error,omitempty"`
+}
+
+type codexUsage struct {
+	InputTokens  int `json:"inputTokens,omitempty"`
+	CachedTokens int `json:"cachedTokens,omitempty"`
+	OutputTokens int `json:"outputTokens,omitempty"`
+	TotalTokens  int `json:"totalTokens,omitempty"`
 }
 
 type runtimeMsg runtimeEvent
@@ -372,6 +380,23 @@ type transcriptSelectionState struct {
 type transcriptRenderLine struct {
 	Text       string
 	Selectable bool
+}
+
+type linkHitbox struct {
+	URL    string
+	Line   int
+	StartX int
+	EndX   int
+}
+
+type todoOverlayBounds struct {
+	Visible      bool
+	HeaderStartY int
+	HeaderEndY   int
+	StartY       int
+	EndY         int
+	StartX       int
+	EndX         int
 }
 
 type runtimeClient struct {
@@ -431,25 +456,31 @@ type model struct {
 	inputHistoryActive    bool
 	forkSelector          forkSelectorState
 	messageEdit           messageEditState
+	lastCodexUsage        *codexUsage
 
-	mode                uiMode
-	previousMode        uiMode
-	sessionCursor       int
-	sessionSearchMode   bool
-	sessionSearchQuery  string
-	apiKeyCursor        int
-	slashCursor         int
-	fileMention         fileMentionState
-	modal               *modalState
-	keyEntry            *keyEntryState
-	themeEntry          *themeEntryState
-	forkTree            forkTreeState
-	autoScroll          bool
-	toolHitboxes        []toolHitbox
-	chatTopY            int
-	transcriptSelection transcriptSelectionState
-	transcriptLines     []transcriptRenderLine
-	transcriptContent   string
+	mode                       uiMode
+	previousMode               uiMode
+	sessionCursor              int
+	sessionSearchMode          bool
+	sessionSearchQuery         string
+	apiKeyCursor               int
+	slashCursor                int
+	fileMention                fileMentionState
+	modal                      *modalState
+	keyEntry                   *keyEntryState
+	themeEntry                 *themeEntryState
+	forkTree                   forkTreeState
+	autoScroll                 bool
+	toolHitboxes               []toolHitbox
+	linkHitboxes               []linkHitbox
+	todoOverlayExpanded        bool
+	todoOverlayScroll          int
+	todoOverlayKey             string
+	todoOverlayMouseDownHeader bool
+	chatTopY                   int
+	transcriptSelection        transcriptSelectionState
+	transcriptLines            []transcriptRenderLine
+	transcriptContent          string
 
 	toolCallRevealing          bool
 	toolCallRevealMessageIndex int

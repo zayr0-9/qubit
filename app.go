@@ -75,7 +75,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMotionMsg:
 		return m.updateMouseMotion(msg), nil
 	case tea.MouseReleaseMsg:
-		return m.updateMouseRelease(msg), nil
+		return m.updateMouseRelease(msg)
 	case runtimeMsg:
 		return m.updateRuntime(runtimeEvent(msg))
 	case runtimeErrMsg:
@@ -448,6 +448,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		if ev.SessionID != "" {
 			m.session = ev.SessionID
 		}
+		m.applyCodexUsage(ev.CodexUsage)
 		finishStatus := ev.Status
 		if finishStatus == "" {
 			finishStatus = "ready"
@@ -573,6 +574,13 @@ func (m model) acceptRunScopedEvent(ev runtimeEvent) bool {
 		return true
 	}
 	return m.activeRunID != "" && ev.RunID == m.activeRunID
+}
+
+func (m *model) applyCodexUsage(usage *codexUsage) {
+	if usage == nil {
+		return
+	}
+	m.lastCodexUsage = usage
 }
 
 func (m *model) applyCodexEvent(ev runtimeEvent) {
@@ -1020,6 +1028,7 @@ func (m *model) layout() {
 	inputW := max(10, m.width-6)
 	promptW := lipgloss.Width(m.inputPrompt())
 	m.composer.SetWidth(max(1, inputW-promptW))
+	m.syncTodoOverlayState()
 
 	input := m.renderInput()
 	status := m.renderInputStatus()

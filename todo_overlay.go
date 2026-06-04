@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -44,7 +45,23 @@ func (m model) renderTodoOverlay(maxHeight int) string {
 	if !ok {
 		return ""
 	}
-	return renderTodoOverlaySnapshot(snapshot, m.width, maxHeight)
+	return renderTodoOverlaySnapshot(snapshot, m.width, maxHeight, m.todoOverlayExpanded, m.todoOverlayScroll)
+}
+
+func (m model) todoOverlaySnapshot() (todoOverlaySnapshot, string, bool) {
+	call, ok := latestTodoToolCall(m.messages)
+	if !ok {
+		return todoOverlaySnapshot{}, "", false
+	}
+	snapshot, ok := todoOverlaySnapshotFromCall(call)
+	if !ok {
+		return todoOverlaySnapshot{}, "", false
+	}
+	return snapshot, todoOverlayKey(call, snapshot), true
+}
+
+func todoOverlayKey(call toolCallUI, snapshot todoOverlaySnapshot) string {
+	return strings.Join([]string{call.ID, snapshot.Name, snapshot.Action, fmt.Sprint(snapshot.Completed), fmt.Sprint(snapshot.Total), snapshot.Message, snapshot.Err}, "|")
 }
 
 func latestTodoToolCall(messages []chatMessage) (toolCallUI, bool) {
@@ -199,30 +216,54 @@ func parseTodoCheckboxLine(line string) (string, bool, bool) {
 	}
 	return text, state == 'x' || state == 'X', true
 }
-
-func renderTodoOverlaySnapshot(snapshot todoOverlaySnapshot, width int, maxHeight int) string {
+func renderTodoOverlaySnapshot(snapshot todoOverlaySnapshot, width int, maxHeight int, expanded bool, scroll int) string {
 	panelWidth := min(max(44, width-8), 96)
 	contentWidth := max(20, panelWidth-6)
+	header := renderTodoOverlayHeader(snapshot, contentWidth)
+	if !expanded {
+		return inputStyle.Width(width).Render(header)
+	}
+
 	rowBudget := min(maxTodoOverlayRows, max(1, maxHeight-2))
+	bodyRows := renderTodoOverlayBodyRows(snapshot, contentWidth)
+	capacity := max(0, rowBudget-1)
+	bodyRows, scroll = sliceTodoOverlayRows(bodyRows, capacity, scroll)
 
-	lines := []string{renderTodoOverlayHeader(snapshot, contentWidth)}
-	if snapshot.Err != "" {
-		lines = append(lines, errSt.Render("! "+oneLine(snapshot.Err, contentWidth-2)))
-	} else if snapshot.Action == "list" {
-		lines = append(lines, renderTodoOverlayListRows(snapshot.Lists, contentWidth, rowBudget-1)...)
-	} else if len(snapshot.Items) > 0 {
-		lines = append(lines, renderTodoOverlayItemRows(snapshot.Items, contentWidth, rowBudget-1)...)
-	} else if snapshot.Message != "" {
-		lines = append(lines, mutedSt.Render(oneLine(snapshot.Message, contentWidth)))
-	} else {
-		lines = append(lines, mutedSt.Render("No todo items in latest result"))
-	}
-
-	if len(lines) > rowBudget {
-		lines = lines[:rowBudget]
-	}
+	lines := append([]string{header}, bodyRows...)
 	body := strings.Join(lines, "\n")
 	return inputStyle.Width(width).Render(renderAccentBorderedPanel(body, panelWidth))
+}
+
+func renderTodoOverlayBodyRows(snapshot todoOverlaySnapshot, width int) []string {
+	if snapshot.Err != "" {
+		return []string{errSt.Render("! " + oneLine(snapshot.Err, width-2))}
+	}
+	if snapshot.Action == "list" {
+		return renderTodoOverlayListRows(snapshot.Lists, width, 0)
+	}
+	if len(snapshot.Items) > 0 {
+		return renderTodoOverlayItemRows(snapshot.Items, width, 0)
+	}
+	if snapshot.Message != "" {
+		return []string{mutedSt.Render(oneLine(snapshot.Message, width))}
+	}
+	return []string{mutedSt.Render("No todo items in latest result")}
+}
+
+func sliceTodoOverlayRows(rows []string, capacity int, scroll int) ([]string, int) {
+	if capacity <= 0 || len(rows) <= capacity {
+		return rows[:min(len(rows), max(0, capacity))], 0
+	}
+	maxScroll := max(0, len(rows)-capacity)
+	scroll = clampInt(scroll, 0, maxScroll)
+	visible := append([]string{}, rows[scroll:min(len(rows), scroll+capacity)]...)
+	if scroll > 0 {
+		visible[0] = mutedSt.Render(fmt.Sprintf("↑ %d more", scroll))
+	}
+	if scroll+capacity < len(rows) {
+		visible[len(visible)-1] = mutedSt.Render(fmt.Sprintf("↓ %d more", len(rows)-scroll-capacity))
+	}
+	return visible, scroll
 }
 
 func renderTodoOverlayHeader(snapshot todoOverlaySnapshot, width int) string {
@@ -236,9 +277,6 @@ func renderTodoOverlayHeader(snapshot todoOverlaySnapshot, width int) string {
 		title += " · " + snapshot.Action
 	}
 	icon := lipgloss.NewStyle().Foreground(accent).Render("✦")
-	if snapshot.Total > 0 && snapshot.Completed == snapshot.Total {
-		icon = okSt.Render("✓")
-	}
 	if snapshot.Err != "" {
 		icon = errSt.Render("!")
 	}
@@ -246,12 +284,13 @@ func renderTodoOverlayHeader(snapshot todoOverlaySnapshot, width int) string {
 }
 
 func renderTodoOverlayItemRows(items []todoOverlayItem, width int, maxRows int) []string {
-	if maxRows <= 0 {
-		return nil
+	limit := len(items)
+	if maxRows > 0 {
+		limit = min(limit, maxRows)
 	}
-	rows := make([]string, 0, min(len(items), maxRows))
+	rows := make([]string, 0, limit)
 	for i, item := range items {
-		if len(rows) >= maxRows {
+		if maxRows > 0 && len(rows) >= maxRows {
 			rows[len(rows)-1] = mutedSt.Render(fmt.Sprintf("… %d more", len(items)-i+1))
 			break
 		}
@@ -271,15 +310,16 @@ func renderTodoOverlayItemRows(items []todoOverlayItem, width int, maxRows int) 
 }
 
 func renderTodoOverlayListRows(entries []todoOverlayListEntry, width int, maxRows int) []string {
-	if maxRows <= 0 {
-		return nil
-	}
 	if len(entries) == 0 {
 		return []string{mutedSt.Render("no todo lists")}
 	}
-	rows := make([]string, 0, min(len(entries), maxRows))
+	limit := len(entries)
+	if maxRows > 0 {
+		limit = min(limit, maxRows)
+	}
+	rows := make([]string, 0, limit)
 	for i, entry := range entries {
-		if len(rows) >= maxRows {
+		if maxRows > 0 && len(rows) >= maxRows {
 			rows[len(rows)-1] = mutedSt.Render(fmt.Sprintf("… %d more", len(entries)-i+1))
 			break
 		}
@@ -290,4 +330,143 @@ func renderTodoOverlayListRows(entries []todoOverlayListEntry, width int, maxRow
 		rows = append(rows, lipgloss.NewStyle().Foreground(cyan).Render(oneLine(entry.ID, max(8, width-lipgloss.Width(stripANSI(meta))-2)))+meta)
 	}
 	return rows
+}
+
+func (m model) todoOverlayBounds() todoOverlayBounds {
+	if m.width <= 0 || m.height <= 0 {
+		return todoOverlayBounds{}
+	}
+	queuedStatus := m.renderQueuedStatus()
+	input := m.renderInput()
+	status := m.renderInputStatus()
+	footer := m.renderFooter()
+	preOverlayBottomHeight := lipgloss.Height(queuedStatus) + lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
+	maxHeight := max(0, min(maxTodoOverlayRows+2, m.height-preOverlayBottomHeight-4))
+	overlay := m.renderTodoOverlay(maxHeight)
+	height := lipgloss.Height(overlay)
+	if height <= 0 {
+		return todoOverlayBounds{}
+	}
+	mainHeight := max(0, m.height-preOverlayBottomHeight-height)
+	startY := mainHeight + lipgloss.Height(queuedStatus)
+	plainLines := strings.Split(stripANSI(overlay), "\n")
+	endX := 0
+	for _, line := range plainLines {
+		endX = max(endX, lipgloss.Width(line)-1)
+	}
+	if endX < 0 {
+		endX = 0
+	}
+	headerY := startY
+	if m.todoOverlayExpanded {
+		headerY = min(startY+1, startY+height-1)
+	}
+	return todoOverlayBounds{Visible: true, HeaderStartY: headerY, HeaderEndY: headerY, StartY: startY, EndY: startY + height - 1, StartX: 0, EndX: endX}
+}
+
+func (b todoOverlayBounds) contains(mouse tea.Mouse) bool {
+	return b.Visible && mouse.Y >= b.StartY && mouse.Y <= b.EndY && mouse.X >= b.StartX && mouse.X <= b.EndX
+}
+
+func (b todoOverlayBounds) containsHeader(mouse tea.Mouse) bool {
+	return b.Visible && mouse.Y >= b.HeaderStartY && mouse.Y <= b.HeaderEndY && mouse.X >= b.StartX && mouse.X <= b.EndX
+}
+
+func (m *model) syncTodoOverlayState() {
+	_, key, ok := m.todoOverlaySnapshot()
+	if !ok {
+		m.todoOverlayKey = ""
+		m.todoOverlayScroll = 0
+		m.todoOverlayMouseDownHeader = false
+		return
+	}
+	if key != m.todoOverlayKey {
+		m.todoOverlayKey = key
+		m.todoOverlayExpanded = false
+		m.todoOverlayScroll = 0
+		m.todoOverlayMouseDownHeader = false
+	}
+	m.clampTodoOverlayScroll()
+}
+
+func (m *model) clampTodoOverlayScroll() {
+	snapshot, _, ok := m.todoOverlaySnapshot()
+	if !ok {
+		m.todoOverlayScroll = 0
+		return
+	}
+	capacity := m.todoOverlayRowCapacity()
+	maxScroll := max(0, len(renderTodoOverlayBodyRows(snapshot, max(20, min(max(44, m.width-8), 96)-6)))-capacity)
+	m.todoOverlayScroll = clampInt(m.todoOverlayScroll, 0, maxScroll)
+}
+
+func (m model) todoOverlayRowCapacity() int {
+	queuedStatus := m.renderQueuedStatus()
+	input := m.renderInput()
+	status := m.renderInputStatus()
+	footer := m.renderFooter()
+	preOverlayBottomHeight := lipgloss.Height(queuedStatus) + lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
+	maxHeight := max(0, min(maxTodoOverlayRows+2, m.height-preOverlayBottomHeight-4))
+	rowBudget := min(maxTodoOverlayRows, max(1, maxHeight-2))
+	return max(0, rowBudget-1)
+}
+
+func (m model) updateTodoOverlayMouseWheel(msg tea.MouseWheelMsg) (model, bool) {
+	mouse := msg.Mouse()
+	bounds := m.todoOverlayBounds()
+	if !m.todoOverlayExpanded || !bounds.contains(mouse) {
+		return m, false
+	}
+	delta := max(1, m.viewport.MouseWheelDelta)
+	switch mouse.Button {
+	case tea.MouseWheelUp:
+		m.todoOverlayScroll -= delta
+	case tea.MouseWheelDown:
+		m.todoOverlayScroll += delta
+	default:
+		return m, false
+	}
+	m.clampTodoOverlayScroll()
+	return m, true
+}
+
+func (m model) updateTodoOverlayMouseClick(mouse tea.Mouse) (model, bool) {
+	if mouse.Button != tea.MouseLeft || m.mode != modeChat {
+		return m, false
+	}
+	if !m.todoOverlayBounds().containsHeader(mouse) {
+		m.todoOverlayMouseDownHeader = false
+		return m, false
+	}
+	m.todoOverlayMouseDownHeader = true
+	return m, true
+}
+
+func (m model) updateTodoOverlayMouseRelease(mouse tea.Mouse) (model, bool) {
+	if mouse.Button != tea.MouseLeft || m.mode != modeChat || !m.todoOverlayMouseDownHeader {
+		return m, false
+	}
+	m.todoOverlayMouseDownHeader = false
+	if !m.todoOverlayBounds().containsHeader(mouse) {
+		return m, true
+	}
+	m.todoOverlayExpanded = !m.todoOverlayExpanded
+	if m.todoOverlayExpanded {
+		m.scrollTodoOverlayToBottom()
+	} else {
+		m.clampTodoOverlayScroll()
+	}
+	m.status = "ready"
+	return m, true
+}
+
+func (m *model) scrollTodoOverlayToBottom() {
+	snapshot, _, ok := m.todoOverlaySnapshot()
+	if !ok {
+		m.todoOverlayScroll = 0
+		return
+	}
+	capacity := m.todoOverlayRowCapacity()
+	contentWidth := max(20, min(max(44, m.width-8), 96)-6)
+	m.todoOverlayScroll = max(0, len(renderTodoOverlayBodyRows(snapshot, contentWidth))-capacity)
 }

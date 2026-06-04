@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/mattn/go-runewidth"
 )
 
 func TestInputSpinnerActiveDuringRunningStreamAfterForkTree(t *testing.T) {
@@ -2648,7 +2649,11 @@ func TestTranscriptMouseDragSelectsTextAndEscClears(t *testing.T) {
 		t.Fatal("transcript selection not active after mouse click")
 	}
 	dragged := clicked.updateMouseMotion(tea.MouseMotionMsg{X: 6, Y: clicked.chatTopY + 2, Button: tea.MouseLeft}).(model)
-	released := dragged.updateMouseRelease(tea.MouseReleaseMsg{X: 6, Y: dragged.chatTopY + 2, Button: tea.MouseLeft}).(model)
+	releasedModel, releaseCmd := dragged.updateMouseRelease(tea.MouseReleaseMsg{X: 6, Y: dragged.chatTopY + 2, Button: tea.MouseLeft})
+	if releaseCmd != nil {
+		t.Fatalf("release command = %v, want nil", releaseCmd)
+	}
+	released := releasedModel.(model)
 
 	if !released.transcriptSelection.Active {
 		t.Fatal("transcript selection cleared after drag release")
@@ -2746,5 +2751,123 @@ func TestMouseWheelDuringTranscriptSelectionScrollsChat(t *testing.T) {
 	}
 	if !updated.transcriptSelection.Active {
 		t.Fatal("transcript selection cleared by wheel scroll")
+	}
+}
+
+func TestTranscriptLinkHitboxesExtractURLs(t *testing.T) {
+	lines := transcriptRenderLines("prefix https://example.com/path, suffix\nwide αβ https://example.org/q?x=1!")
+	boxes := transcriptLinkHitboxes(lines)
+	if len(boxes) != 2 {
+		t.Fatalf("link hitboxes = %d, want 2: %#v", len(boxes), boxes)
+	}
+	if boxes[0].URL != "https://example.com/path" || boxes[0].Line != 0 {
+		t.Fatalf("first hitbox = %#v", boxes[0])
+	}
+	wantStart := runewidth.StringWidth("prefix ")
+	wantEnd := wantStart + runewidth.StringWidth("https://example.com/path") - 1
+	if boxes[0].StartX != wantStart || boxes[0].EndX != wantEnd {
+		t.Fatalf("first hitbox x = %d..%d, want %d..%d", boxes[0].StartX, boxes[0].EndX, wantStart, wantEnd)
+	}
+	if boxes[1].URL != "https://example.org/q?x=1" {
+		t.Fatalf("second URL = %q, want punctuation trimmed", boxes[1].URL)
+	}
+}
+
+func TestCtrlClickTranscriptLinkReturnsOpenCommand(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 100
+	m.height = 10
+	m.layout()
+	content := "see https://example.com/docs now"
+	m.viewport.SetContent(content)
+	m.transcriptContent = content
+	m.transcriptLines = transcriptRenderLines(content)
+	m.linkHitboxes = transcriptLinkHitboxes(m.transcriptLines)
+	m.viewport.GotoTop()
+
+	if len(m.linkHitboxes) != 1 {
+		t.Fatalf("link hitboxes = %d, want 1", len(m.linkHitboxes))
+	}
+	x := m.linkHitboxes[0].StartX
+	clicked := m.updateMouseClick(tea.MouseClickMsg{X: x, Y: m.chatTopY, Button: tea.MouseLeft, Mod: tea.ModCtrl}).(model)
+	updatedModel, cmd := clicked.updateMouseRelease(tea.MouseReleaseMsg{X: x, Y: clicked.chatTopY, Button: tea.MouseLeft, Mod: tea.ModCtrl})
+	updated := updatedModel.(model)
+	if cmd == nil {
+		t.Fatal("ctrl+click link command = nil, want open browser command")
+	}
+	if updated.status != "opening link" {
+		t.Fatalf("status = %q, want opening link", updated.status)
+	}
+	if updated.transcriptSelection.Active {
+		t.Fatal("transcript selection remains active after opening link")
+	}
+}
+
+func TestCtrlDragTranscriptLinkDoesNotOpen(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 100
+	m.height = 10
+	m.layout()
+	content := "see https://example.com/docs now"
+	m.viewport.SetContent(content)
+	m.transcriptContent = content
+	m.transcriptLines = transcriptRenderLines(content)
+	m.linkHitboxes = transcriptLinkHitboxes(m.transcriptLines)
+	m.viewport.GotoTop()
+
+	x := m.linkHitboxes[0].StartX
+	clicked := m.updateMouseClick(tea.MouseClickMsg{X: x, Y: m.chatTopY, Button: tea.MouseLeft, Mod: tea.ModCtrl}).(model)
+	dragged := clicked.updateMouseMotion(tea.MouseMotionMsg{X: x + 4, Y: clicked.chatTopY + 1, Button: tea.MouseLeft, Mod: tea.ModCtrl}).(model)
+	updatedModel, cmd := dragged.updateMouseRelease(tea.MouseReleaseMsg{X: x + 4, Y: dragged.chatTopY + 1, Button: tea.MouseLeft, Mod: tea.ModCtrl})
+	updated := updatedModel.(model)
+	if cmd != nil {
+		t.Fatalf("ctrl+drag release command = %v, want nil", cmd)
+	}
+	if !updated.transcriptSelection.Active {
+		t.Fatal("transcript selection not active after ctrl+drag")
+	}
+}
+
+func TestPlainClickTranscriptLinkDoesNotOpen(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 100
+	m.height = 10
+	m.layout()
+	content := "see https://example.com/docs now"
+	m.viewport.SetContent(content)
+	m.transcriptContent = content
+	m.transcriptLines = transcriptRenderLines(content)
+	m.linkHitboxes = transcriptLinkHitboxes(m.transcriptLines)
+	m.viewport.GotoTop()
+
+	x := m.linkHitboxes[0].StartX
+	clicked := m.updateMouseClick(tea.MouseClickMsg{X: x, Y: m.chatTopY, Button: tea.MouseLeft}).(model)
+	updatedModel, cmd := clicked.updateMouseRelease(tea.MouseReleaseMsg{X: x, Y: clicked.chatTopY, Button: tea.MouseLeft})
+	updated := updatedModel.(model)
+	if cmd != nil {
+		t.Fatalf("plain click command = %v, want nil", cmd)
+	}
+	if updated.status != "ready" {
+		t.Fatalf("status = %q, want ready", updated.status)
+	}
+}
+
+func TestPlanViewAndTodoOverlayUseMatchingBorder(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.layout()
+
+	plan := m.renderPlanViewMessage(chatMessage{Role: "view", ViewType: "plan", Title: "Plan: launch", Content: "# Launch\n\n- step"}, "Plan: launch", 80)
+	todo := renderTodoOverlaySnapshot(todoOverlaySnapshot{Name: "launch", Items: []todoOverlayItem{{Text: "step", IsTask: true}}, Total: 1}, 100, 10, true, 0)
+	plainPlan := stripANSI(plan)
+	plainTodo := stripANSI(todo)
+	for _, border := range []string{"╭", "│", "╰"} {
+		if !strings.Contains(plainPlan, border) || !strings.Contains(plainTodo, border) {
+			t.Fatalf("plan/todo borders mismatch: plan=%q todo=%q", plainPlan, plainTodo)
+		}
 	}
 }
