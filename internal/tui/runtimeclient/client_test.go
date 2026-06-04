@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,5 +89,28 @@ func TestReadStdoutDisconnectHandling(t *testing.T) {
 	case err := <-rt.Errors():
 		t.Fatalf("unexpected shutdown error: %v", err)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestSummarizeRuntimeEventCompactsSessionList(t *testing.T) {
+	raw := []byte(`{"type":"session.list","id":"req-1","sessionId":"sess-1","sessionTitle":"Active","sessions":[{"id":"sess-1","title":"Active"},{"id":"sess-2","title":"Long old chat"}]}`)
+	ev := protocol.RuntimeEvent{
+		Type:         "session.list",
+		ID:           "req-1",
+		SessionID:    "sess-1",
+		SessionTitle: "Active",
+		Sessions: []protocol.SessionInfo{
+			{ID: "sess-1", Title: "Active"},
+			{ID: "sess-2", Title: "Long old chat"},
+		},
+	}
+
+	got := summarizeRuntimeEvent(raw, ev)
+
+	if !strings.Contains(got, "session.list") || !strings.Contains(got, "sessions=2") {
+		t.Fatalf("summary = %q, want compact session count", got)
+	}
+	if strings.Contains(got, "Long old chat") || strings.Contains(got, `"sessions"`) {
+		t.Fatalf("summary = %q, want session payload omitted", got)
 	}
 }

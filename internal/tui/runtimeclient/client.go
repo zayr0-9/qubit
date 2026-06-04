@@ -247,12 +247,13 @@ func (r *Client) readStdout(stdout io.Reader, seq int) {
 			return
 		}
 		line := append([]byte(nil), scanner.Bytes()...)
-		r.appendLog("stdout", string(line))
 		var ev protocol.RuntimeEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
+			r.appendLog("stdout", string(line))
 			r.emitError(fmt.Errorf("bad runtime event: %s", string(line)))
 			continue
 		}
+		r.appendLog("stdout", summarizeRuntimeEvent(line, ev))
 		r.events <- ev
 	}
 	if !r.shouldReportReader(seq) {
@@ -289,6 +290,18 @@ func (r *Client) appendLog(stream string, line string) {
 	}
 	defer f.Close()
 	_, _ = f.WriteString(entry)
+}
+
+func summarizeRuntimeEvent(raw []byte, ev protocol.RuntimeEvent) string {
+	switch ev.Type {
+	case "session.list":
+		return fmt.Sprintf("%s id=%s sessionId=%s sessionTitle=%q sessions=%d", ev.Type, ev.ID, ev.SessionID, ev.SessionTitle, len(ev.Sessions))
+	case "session.messages":
+		return fmt.Sprintf("%s id=%s sessionId=%s sessionTitle=%q messages=%d", ev.Type, ev.ID, ev.SessionID, ev.SessionTitle, len(ev.Messages))
+	case "session.tree":
+		return fmt.Sprintf("%s id=%s sessionId=%s sessionTitle=%q nodes=%d", ev.Type, ev.ID, ev.SessionID, ev.SessionTitle, len(ev.ForkTreeNodes))
+	}
+	return string(raw)
 }
 
 func (r *Client) closeConnectionOnly(markClosed bool) {
