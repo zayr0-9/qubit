@@ -4,20 +4,12 @@ import (
 	"fmt"
 	"os"
 
-	tea "charm.land/bubbletea/v2"
+	"github.com/qubit/graviton-cli/internal/tui"
 )
 
 func main() {
-	rt, err := startRuntime()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to start runtime: %v\n", err)
-		os.Exit(1)
-	}
-	defer rt.shutdown()
-
-	program := tea.NewProgram(initialModel(rt))
-	if _, err := program.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "qubit crashed: %v\n", err)
+	if err := tui.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

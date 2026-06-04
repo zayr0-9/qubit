@@ -56,36 +56,60 @@ When adding a new major subsystem or extracting detailed guidance from this file
 
 ```txt
 D:\qubit
-  package.json              Node runtime package config
-  runtime.ts                Node sidecar runtime source
-  dist\runtime.js           Compiled Node sidecar runtime launched by Go
-  go.mod                    Go module config
-  main.go                   CLI entrypoint
-  app.go                    Bubble Tea app model/update logic
-  streaming.go              Frontend-simulated assistant streaming helpers, if/when split out
-  view.go                   TUI rendering, including Glow/Glamour Markdown message rendering
-  commands.go               Slash commands and session picker interactions
-  keys.go                   API key picker and masked key-entry UI
-  runtime_client.go         Go <-> singleton Node runtime server JSON-lines client
-  types.go                  Shared Go structs and message types
-  styles.go                 Lip Gloss styling
-  util.go                   Shared helpers
-  bin\qubit.exe             Built Windows executable
-  .qubit\\sessions.sqlite    hyper-router SQLite transcript store in the terminal launch cwd
-  .qubit\\session-index.json Qubit-owned session index in the terminal launch cwd; may include session metadata such as favouritedAt
-  .qubit\\runtime.log        Runtime diagnostic log in the terminal launch cwd
-  .qubit\\codex-provider-calls.log
-                            JSON-lines Codex provider call log in the terminal launch cwd
-  .qubit\\input-history.json Persisted non-secret composer history in the terminal launch cwd
-  %APPDATA%\\Qubit or ~/.config/qubit
-                            User-global Qubit config directory, overrideable with QUBIT_CONFIG_DIR
-  <config>\\theme.json       User-global selected `/theme` palette
-  <config>\\settings.json    User-global non-secret app defaults, including default provider and per-provider default models
-  .qubit\\todos\\*.md        Project todo lists managed by todoMd
-  .qubit\\plans\\*.md        Project plans managed by planMd
+  package.json                         Node runtime package config
+  runtime.ts                           Node sidecar runtime source
+  dist\runtime.js                      Compiled Node sidecar runtime launched by Go
+  go.mod                               Go module config
+  main.go                              CLI entrypoint only; calls internal/tui.Run
+  internal\tui\run.go                  Exported TUI package entrypoint used by main.go
+  internal\tui\app.go                  Bubble Tea app model/update dispatcher
+  internal\tui\input_update.go         Keyboard/composer submit flow
+  internal\tui\runtime_events.go       Runtime event dispatcher
+  internal\tui\run_lifecycle.go        Assistant/reasoning/streaming/notification lifecycle
+  internal\tui\session_events.go       Session list/message event handling
+  internal\tui\errors_layout.go        Runtime/send error handling and layout helpers
+  internal\tui\view.go                 Top-level TUI rendering composition
+  internal\tui\header_footer_view.go   Header, footer, and status rendering
+  internal\tui\input_view.go           Composer/input rendering
+  internal\tui\message_view.go         Chat viewport/message rendering helpers
+  internal\tui\markdown_view.go        Glamour Markdown rendering and ANSI cleanup
+  internal\tui\session_picker_view.go  Session picker rendering
+  internal\tui\modal_view.go           Modal rendering
+  internal\tui\plan_view.go            Plan view rendering
+  internal\tui\reasoning_view.go       Reasoning block rendering
+  internal\tui\layout_render.go        Transparent fixed-height render helpers
+  internal\tui\commands.go             Slash commands and command palette interactions
+  internal\tui\keys.go                 API key picker and masked key-entry UI
+  internal\tui\runtime_client.go       TUI-side Tea command adapter around runtimeclient
+  internal\tui\runtime_state.go        TUI runtime client wrapper state for tests/adapters
+  internal\tui\protocol_aliases.go     Internal aliases to protocol DTOs
+  internal\tui\model_struct.go         Main model struct
+  internal\tui\*_state.go              Focused UI state structs split by feature/domain
+  internal\tui\styles.go               Lip Gloss styling
+  internal\tui\util.go                 Shared helpers
+  internal\tui\protocol\types.go       JSON-lines protocol DTOs
+  internal\tui\runtimeclient\client.go Runtime process/server client implementation
+  internal\tui\components\composer\    Custom multiline composer component
+  internal\tui\components\listwindow\  Visible list-window helper
+  internal\tui\platform\platform.go    Browser/config-dir/notification platform helpers
+  internal\tui\storage\input_history.go
+                                       Project-local input history store
+  bin\qubit.exe                        Built Windows executable
+  .qubit\sessions.sqlite               hyper-router SQLite transcript store in the terminal launch cwd
+  .qubit\session-index.json            Qubit-owned session index in the terminal launch cwd; may include session metadata such as favouritedAt
+  .qubit\runtime.log                   Runtime diagnostic log in the terminal launch cwd
+  .qubit\codex-provider-calls.log
+                                       JSON-lines Codex provider call log in the terminal launch cwd
+  .qubit\input-history.json            Persisted non-secret composer history in the terminal launch cwd
+  %APPDATA%\Qubit or ~/.config/qubit
+                                       User-global Qubit config directory, overrideable with QUBIT_CONFIG_DIR
+  <config>\theme.json                  User-global selected `/theme` palette
+  <config>\settings.json               User-global non-secret app defaults, including default provider and per-provider default models
+  .qubit\todos\*.md                    Project todo lists managed by todoMd
+  .qubit\plans\*.md                    Project plans managed by planMd
+```
 
-
-  ## Architecture Rules
+## Architecture Rules
 
 1. Keep `hyper-router` pure.
    - Do not add Bubble Tea, terminal UI, app-specific sessions, Qubit keybindings, CLI code, or runtime sidecar code to `hyper-router`.
@@ -157,23 +181,90 @@ When adding protocol messages:
 
 ### Package Layout
 
-This is currently a small single-package Go application using `package main`. Keep files split by responsibility:
+The root binary is intentionally tiny: `main.go` imports `github.com/qubit/graviton-cli/internal/tui` and calls `tui.Run()`. Most app orchestration still lives in package `internal/tui` so white-box tests and unexported model internals remain usable, but low-risk leaf packages have been extracted.
 
 ```txt
-main.go            process entrypoint only
-app.go             Bubble Tea model lifecycle and state transitions
-view.go            top-level rendering composition and shared render helpers
-commands.go        slash commands and session picker interactions
-keys.go            API key picker, switching, deletion, and masked key-entry UI
-modal.go           reusable modal state/update/render helpers
-streaming.go       frontend-simulated assistant streaming helpers when streaming logic grows
-runtime_client.go  sidecar process/client code
-types.go           shared structs/types
-styles.go          UI styles/colors
-util.go            small generic helpers
+main.go
+  Process entrypoint only.
+
+internal/tui/run.go
+  Exported Run() entrypoint: start runtime, run Bubble Tea, return errors.
+
+internal/tui/app.go
+  `initialModel`, `Init`, and `Update` dispatcher only.
+
+internal/tui/input_update.go
+  Keyboard routing, composer updates, submit flow, chat-run setup, and edit/reroll submit paths.
+
+internal/tui/runtime_events.go
+  Runtime event dispatcher and run-scoped event acceptance.
+
+internal/tui/run_lifecycle.go
+  Assistant/reasoning events, frontend-simulated streaming, cancellation, and run-complete notifications.
+
+internal/tui/session_events.go
+  Session list/activity reconciliation and session message/favourite/delete event handling.
+
+internal/tui/errors_layout.go
+  Runtime/send error handling, terminal setup result handling, viewport/layout helpers.
+
+internal/tui/view.go
+  Top-level View composition, app view setup, main area routing, and bottom overlay selection.
+
+internal/tui/header_footer_view.go
+  Header, footer, badges, and input status rendering.
+
+internal/tui/input_view.go
+  Composer/input rendering and prompt helpers.
+
+internal/tui/session_picker_view.go
+  Session picker rendering and row formatting.
+
+internal/tui/message_view.go
+  Viewport refresh, message separators, view-message rendering, message icons, and render cache lookup.
+
+internal/tui/markdown_view.go
+  Glamour Markdown rendering, no-background style config, and ANSI background stripping.
+
+internal/tui/plan_view.go
+  Plan view-message rendering.
+
+internal/tui/reasoning_view.go
+  Reasoning block rendering helpers.
+
+internal/tui/layout_render.go
+  Transparent fixed-height/chat render helpers.
+
+internal/tui/commands.go, keys.go, md_editor.go, fork_tree.go, tool_calls.go, todo_overlay.go, transcript_selection.go, file_mentions.go, theme.go, modal.go
+  Feature interaction/update/render helpers that still need direct model access.
+
+internal/tui/model_struct.go
+  Main Bubble Tea model struct.
+
+internal/tui/*_state.go and internal/tui/runtime_messages.go
+  Focused UI state structs and Tea message wrappers split out from the former catch-all types file.
+
+internal/tui/protocol/types.go
+  JSON-lines protocol DTOs shared by the runtime client adapter and TUI.
+  `internal/tui/protocol_aliases.go` keeps package-local aliases for existing TUI code; preserve JSON tags when editing DTOs.
+
+internal/tui/runtimeclient/client.go
+  Concrete Go <-> Node runtime process/server client. It owns app-root discovery, singleton server attach/start, JSON-lines send/read, diagnostics logging, and shutdown. Keep Bubble Tea adapters in `internal/tui/runtime_client.go`.
+
+internal/tui/components/composer/
+  Custom multiline composer component with public methods for value/cursor/selection/layout configuration.
+
+internal/tui/components/listwindow/
+  Pure visible-list-window helper.
+
+internal/tui/platform/
+  Browser opener, user config directory helper, notification interface/default backend.
+
+internal/tui/storage/
+  Project-local input history JSON store.
 ```
 
-Keep the application maintainable as it grows. Split cohesive behavior into focused files or self-contained components when a feature has its own state/update/render rules, tests, or lifecycle. Do not keep adding unrelated logic to `app.go` or `view.go` until they become giant catch-all files. A new file is appropriate when it has a clear responsibility, reduces coupling, and makes the code easier to navigate; avoid tiny abstraction files that only add indirection.
+Future extraction should proceed incrementally from `internal/tui` into subpackages such as `internal/tui/features/...` only when boundaries are clear and tests can move with the extracted code. Keep app-level Tea command adapters and model-bound behavior in `internal/tui`; keep leaf packages free of broad model/business logic. Do not add unrelated logic to `internal/tui/app.go` or `internal/tui/view.go`; prefer the focused files above or a new cohesive file/component when a feature has its own state, update/render rules, tests, or lifecycle. Avoid tiny abstraction files that only add indirection.
 
 ### Go Style
 
@@ -183,7 +274,7 @@ Follow standard Go conventions:
 - Prefer simple functions and explicit control flow.
 - Keep names short but meaningful.
 - Use `camelCase` for unexported identifiers.
-- Export only what must be used outside the package. Since this is `package main`, most identifiers should stay unexported.
+- Export only what must be used outside the package. The root `package main` should normally only call `tui.Run`; most TUI identifiers in `internal/tui` should stay unexported until a real subpackage boundary needs them.
 - Return errors instead of panicking, except in truly unrecoverable startup cases.
 - Wrap errors with context using `fmt.Errorf("context: %w", err)` when returning them.
 - Avoid global mutable state unless it is configuration/style data.
@@ -210,7 +301,7 @@ Follow standard Go conventions:
 - All side effects should happen through `tea.Cmd` where possible.
 - Maintain value semantics for the model unless pointer mutation is clearer for local helpers.
 - Use `tea.Batch` for multiple commands.
-- The chat composer uses Qubit's custom `composerModel` in `composer.go`, not `textarea.Model` or `textinput.Model`. Preserve multiline input, source-index-based cursor/selection state, internal wrapping, max-height scrolling, and inline selection rendering.
+- The chat composer uses Qubit's custom `composerModel` adapter in `internal/tui/composer.go`, backed by `internal/tui/components/composer`, not `textarea.Model` or `textinput.Model`. Preserve multiline input, source-index-based cursor/selection state, internal wrapping, max-height scrolling, and inline selection rendering.
 - Do not post-process rendered ANSI text to implement composer selection/highlighting. Selection must be tracked before rendering with source indices so the chevron/prompt is never highlighted and selection stays behind input characters only.
 - The composer prompt/chevron renders only on the first visible input row. Wrapped/continuation rows should use prompt-width spaces for alignment, not repeated chevrons.
 - Plain Enter sends the current chat message. Modified Enter (`Shift+Enter` when available, and `Alt+Enter` when the terminal does not reserve it) inserts a literal newline and must not submit. `Ctrl+J` is the reliable terminal fallback for inserting a newline.
@@ -233,7 +324,7 @@ view.MouseMode = tea.MouseModeCellMotion
 ### Runtime Client Standards
 
 - Keep the Go runtime client responsible only for process management, singleton server attach/start, logging, JSON encoding/decoding, and Tea commands.
-- Do not put business logic in `runtime_client.go`.
+- Do not put business logic in `internal/tui/runtime_client.go` or `internal/tui/runtimeclient/client.go`.
 - Prefer attaching to an existing runtime server for the same project `.qubit` directory; only start a new Node process when no server is reachable.
 - Keep runtime socket/stdout parsing strict JSON-lines.
 - Log runtime event/stderr lines to `.qubit/runtime.log` for copyable diagnostics.
@@ -242,7 +333,7 @@ view.MouseMode = tea.MouseModeCellMotion
 ### UI/UX Standards
 
 - Chat should stay usable and calm by default.
-- Render user and assistant message bodies as Markdown in `view.go` using the Glow/Glamour renderer path. Preserve fenced code blocks, lists, headings, and intentional newlines.
+- Render user and assistant message bodies as Markdown through `internal/tui/message_view.go` and `internal/tui/markdown_view.go` using the Glow/Glamour renderer path. Preserve fenced code blocks, lists, headings, and intentional newlines.
 - If Markdown appears flattened, inspect `.qubit/runtime.log` first to confirm whether message content contains real `\n` characters before changing the renderer.
 - Slash commands should be discoverable by typing `/` and must render in a reserved visible area above the input, not appended below the viewport where they can be clipped.
 - When reserving terminal layout space, preserve the composer/footer visibility without painting opaque chat/message rows. Avoid using `Style.Width(...).Height(...).Render(...)` or `lipgloss.Place(...)` around the chat viewport when the style has a background, because Lip Gloss/viewport padding can create full-line black bars behind messages and role names. Prefer transparent styles plus explicit blank-line padding helpers such as `renderFixedHeight`/`renderChat`.
@@ -330,7 +421,7 @@ Recommended commands from `D:\qubit` on Windows:
 
 ```powershell
 $env:Path = "C:\Program Files\Go\bin;" + $env:Path
-$files = Get-ChildItem -Filter *.go | ForEach-Object { $_.FullName }
+$files = Get-ChildItem -Recurse -Filter *.go -File | Where-Object { $_.FullName -notmatch '\\(dist|node_modules|bin)\\' } | ForEach-Object { $_.FullName }
 gofmt -w $files
 go test ./...
 go vet ./...

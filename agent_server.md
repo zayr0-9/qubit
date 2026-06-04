@@ -21,7 +21,7 @@ The first TUI for a project starts the Node runtime server. Later TUIs connect t
 
 ## Current Implementation
 
-- Go startup is in `runtime_client.go`.
+- Go startup is called through `internal/tui.Run()` from the root `main.go`; the Tea command adapter is in `internal/tui/runtime_client.go`, and the concrete runtime process/server client is in `internal/tui/runtimeclient/client.go`.
 - Node runtime server mode is in `runtime.ts`.
 - Go computes a deterministic localhost address from the project `.qubit` directory.
 - Go first tries to connect to the existing runtime server.
@@ -185,7 +185,7 @@ Recommended manual smoke test:
 9. Send a normal chat in one terminal and verify the other terminal does not corrupt its local selected view.
 10. Inspect `.qubit/runtime.log` if startup or routing looks wrong.
 
-Automated tests should prefer focused Go tests for `runtime_client.go` address/attach behavior where possible and TypeScript/runtime tests for client routing functions if the runtime server is further modularized.
+Automated tests should prefer focused Go tests for `internal/tui/runtimeclient/client.go` address/attach behavior and `internal/tui/runtime_client.go` Tea adapter behavior where possible, plus TypeScript/runtime tests for client routing functions if the runtime server is further modularized.
 
 ## Future Work
 

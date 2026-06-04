@@ -52,3 +52,7 @@ Qubit's terminal interface should stay clean, minimal, and calm. Prefer readable
 - Qubit owns transcript link opening through app-generated hitboxes over rendered transcript text, not terminal-native URL detection. Build hitboxes from ANSI-stripped rendered lines and display-cell coordinates so Unicode prefixes align correctly.
 - Open links only on Ctrl+left-click release when no drag occurred. Plain clicks continue to feed transcript selection/tool/reasoning toggles, and Ctrl+drag must remain text selection rather than browser launch.
 - Footer/help copy should say Ctrl+click opens links only when the terminal forwards the mouse event, because some terminals intercept Ctrl+click URLs before Bubble Tea receives them.
+
+## Implementation Locations
+
+- Top-level TUI rendering currently starts in `internal/tui/view.go`; related helpers are split across `internal/tui/header_footer_view.go`, `input_view.go`, `message_view.go`, `markdown_view.go`, `session_picker_view.go`, `modal_view.go`, `plan_view.go`, `reasoning_view.go`, and `layout_render.go`.

@@ -73,7 +73,7 @@ Runtime path safety rules:
 
 ## Go UI State and Behavior
 
-Markdown editor UI lives in `md_editor.go` and uses `modeMdEditor` plus `mdEditorState`.
+Markdown editor UI lives in `internal/tui/md_editor.go` and uses `modeMdEditor` plus `mdEditorState`.
 
 Editor subviews:
 
@@ -97,7 +97,7 @@ Edit view:
 - `Ctrl+S`: save through `md.save`.
 - `Ctrl+R`: rename current file.
 - `Esc`: return to list if clean; open discard confirmation if dirty.
-- Newline keys (`Ctrl+J`, enhanced Shift+Enter/Alt+Enter) insert literal newlines.
+- Newline keys (`Enter`, `Ctrl+J`, enhanced Shift+Enter/Alt+Enter) insert literal newlines.
 - `Ctrl+C` copies selected editor text before quitting.
 
 Rename view:
@@ -147,7 +147,7 @@ When changing `/md-editor`, add or update Go tests for the full model/protocol b
 Recommended validation:
 
 ```powershell
-gofmt -w md_editor.go md_editor_test.go types.go commands.go app.go view.go transcript_selection.go
+gofmt -w internal/tui/md_editor.go internal/tui/md_editor_test.go internal/tui/md_editor_state.go internal/tui/commands.go internal/tui/app.go internal/tui/view.go internal/tui/transcript_selection.go internal/tui/protocol/types.go
 go test ./...
 go vet ./...
 go build -o bin\qubit.exe .
