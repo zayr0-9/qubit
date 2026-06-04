@@ -19,6 +19,7 @@ import { OpenAIProvider } from "@hyper-labs/hyper-router/providers/openai-vai";
 import { AmazonBedrockVAIProvider } from "@hyper-labs/hyper-router/providers/amazon-bedrock-vai";
 import { OpenRouterProvider } from "@hyper-labs/hyper-router/providers/openrouter";
 import { qubitTools } from "./tools/index.js";
+import { isPathInProjectPlansDirectory } from "./tools/editFile.js";
 import { setPlanClarificationRequester, setPlanViewEmitter } from "./tools/planMd.js";
 import { setMultiCallLifecycleEmitter, setMultiCallPermissionRequester } from "./tools/multiCall.js";
 import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
@@ -26,6 +27,7 @@ import { clearRunCwdBlockEnabled, setRunCwdBlockEnabled } from "./utils/toolAcce
 import { CodexCallLogWriter, CodexResponsesProvider, QubitCodexTokenStore, cancelCodexLogin, startCodexLogin } from "./runtime/codex/index.js";
 import { overlayActiveRunUserMessages } from "./runtime/activeRunOverlay.js";
 import { assistantReasoningContent } from "./runtime/assistantReasoning.js";
+import { createMdDocument, listMdDocuments, readMdDocument, renameMdDocument, saveMdDocument } from "./runtime/mdDocuments.js";
 
 const entryDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = basename(entryDir) === "dist" ? dirname(entryDir) : entryDir;
@@ -233,6 +235,8 @@ function targetForRunEvent(event) {
 }
 
 async function requestToolPermission(request) {
+  if (await shouldAutoAllowToolPermission(request)) return { type: "allow" };
+
   const target = targetForRunEvent(request);
   write({
     type: "tool.permission.request",
@@ -251,6 +255,18 @@ async function requestToolPermission(request) {
   return await new Promise((resolve) => {
     pendingPermissions.set(request.id, resolve);
   });
+}
+
+async function shouldAutoAllowToolPermission(request) {
+  const metadata = request?.metadata || {};
+  if (metadata.planModeAutoAllowProjectPlansOnly !== true) return false;
+  if (runtimeState?.promptMode !== "plan") return false;
+  if (request?.toolName !== "editFile") return false;
+
+  const args = request?.args || {};
+  const filePath = typeof args.path === "string" ? args.path : "";
+  if (!filePath) return false;
+  return await isPathInProjectPlansDirectory(filePath, typeof args.cwd === "string" ? args.cwd : undefined);
 }
 
 setMultiCallPermissionRequester(requestToolPermission);
@@ -606,6 +622,36 @@ async function handleLine(line) {
 
   if (request.type === "session.list") {
     writeSessionList(request.id);
+    return;
+  }
+
+  if (request.type === "md.list") {
+    const files = await listMdDocuments(dataDir);
+    write({ type: "md.list", id: request.id, files });
+    return;
+  }
+
+  if (request.type === "md.read") {
+    const result = await readMdDocument(dataDir, request);
+    write({ type: "md.read", id: request.id, file: result.file, content: result.content });
+    return;
+  }
+
+  if (request.type === "md.create") {
+    const result = await createMdDocument(dataDir);
+    write({ type: "md.created", id: request.id, file: result.file, content: result.content, status: `Created ${result.file.name}.md.` });
+    return;
+  }
+
+  if (request.type === "md.save") {
+    const result = await saveMdDocument(dataDir, request);
+    write({ type: "md.saved", id: request.id, file: result.file, content: result.content, status: `Saved ${result.file.name}.md.` });
+    return;
+  }
+
+  if (request.type === "md.rename") {
+    const result = await renameMdDocument(dataDir, request);
+    write({ type: "md.renamed", id: request.id, file: result.file, path: result.previousPath, status: `Renamed to ${result.file.name}.md.` });
     return;
   }
 

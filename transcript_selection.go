@@ -32,6 +32,8 @@ func (m model) updateMouseWheelRouted(msg tea.MouseWheelMsg) tea.Model {
 		return m.updateForkTreeMouseWheel(msg)
 	case modeSessionPicker:
 		return m.updateSessionPickerMouseWheel(msg)
+	case modeMdEditor:
+		return m.updateMdEditorMouseWheel(msg)
 	case modeKeyPicker:
 		return m.updateKeyPickerMouseWheel(msg)
 	case modeModal:

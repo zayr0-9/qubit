@@ -197,6 +197,7 @@ const (
 	modeThemeEntry
 	modeModal
 	modeForkTree
+	modeMdEditor
 )
 
 type permissionMode string
@@ -292,6 +293,38 @@ type slashCommand struct {
 	OpensOnSelect bool
 }
 
+type mdFileInfo struct {
+	Section    string `json:"section"`
+	Name       string `json:"name"`
+	Title      string `json:"title,omitempty"`
+	Path       string `json:"path"`
+	ModifiedAt string `json:"modifiedAt,omitempty"`
+	SizeBytes  int    `json:"sizeBytes,omitempty"`
+}
+
+type mdEditorView string
+
+const (
+	mdEditorList           mdEditorView = "list"
+	mdEditorEdit           mdEditorView = "edit"
+	mdEditorRename         mdEditorView = "rename"
+	mdEditorDiscardConfirm mdEditorView = "discard-confirm"
+)
+
+type mdEditorState struct {
+	View            mdEditorView
+	Loading         bool
+	Files           []mdFileInfo
+	Cursor          int
+	Current         *mdFileInfo
+	Editor          composerModel
+	OriginalContent string
+	Dirty           bool
+	Status          string
+	Rename          composerModel
+	ConfirmCursor   int
+}
+
 type forkTreeNode struct {
 	ID                     string                   `json:"id"`
 	SessionID              string                   `json:"sessionId"`
@@ -349,6 +382,8 @@ type runtimeEvent struct {
 	Keys             []apiKeyInfo                `json:"keys,omitempty"`
 	Models           []modelInfo                 `json:"models,omitempty"`
 	ForkTreeNodes    []forkTreeNode              `json:"nodes,omitempty"`
+	Files            []mdFileInfo                `json:"files,omitempty"`
+	File             *mdFileInfo                 `json:"file,omitempty"`
 	StoragePath      string                      `json:"storagePath,omitempty"`
 	IndexPath        string                      `json:"indexPath,omitempty"`
 	WorkspaceCwd     string                      `json:"workspaceCwd,omitempty"`
@@ -520,6 +555,7 @@ type model struct {
 	keyEntry                   *keyEntryState
 	themeEntry                 *themeEntryState
 	forkTree                   forkTreeState
+	mdEditor                   mdEditorState
 	autoScroll                 bool
 	toolHitboxes               []toolHitbox
 	linkHitboxes               []linkHitbox

@@ -45,6 +45,9 @@ agent_codex.md
 
 agent_server.md
   Mandatory when working on Qubit's singleton Node runtime server, multi-TUI attachment, runtime process lifetime, client routing, or JSON-lines transport.
+
+agent_md_editor.md
+  Mandatory when working on Qubit's `/md-editor` slash command, Markdown document list/editor UI, or runtime Markdown document protocol.
 ```
 
 When adding a new major subsystem or extracting detailed guidance from this file, create a focused `agent_<category>.md` context file and list it here with when it is mandatory to read.

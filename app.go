@@ -142,6 +142,9 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modeForkTree {
 		return m.updateForkTree(msg)
 	}
+	if m.mode == modeMdEditor {
+		return m.updateMdEditor(msg)
+	}
 	if m.mode == modeKeyEntry {
 		return m.updateKeyEntry(msg)
 	}
@@ -486,6 +489,16 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.applySessionList(ev)
 	case "session.tree":
 		m.applyForkTree(ev)
+	case "md.list":
+		m.applyMdList(ev)
+	case "md.read":
+		m.applyMdRead(ev)
+	case "md.created":
+		m.applyMdCreated(ev)
+	case "md.saved":
+		m.applyMdSaved(ev)
+	case "md.renamed":
+		m.applyMdRenamed(ev)
 	case "key.list":
 		m.applyKeyList(ev)
 	case "model.list":

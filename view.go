@@ -84,6 +84,8 @@ func (m model) renderMainArea(height int) string {
 		chatContent = m.renderModal(bodyHeight)
 	} else if m.mode == modeForkTree {
 		chatContent = m.renderForkTreeModal(bodyHeight)
+	} else if m.mode == modeMdEditor {
+		chatContent = m.renderMdEditor(bodyHeight)
 	}
 	chat := renderChat(chatContent, m.width, max(1, bodyHeight))
 	if m.mode != modeChat {
@@ -227,6 +229,17 @@ func (m model) renderFooter() string {
 			footer = "up/down select | pgup/pgdn session | left parent | right child | wheel preview | enter open session | esc sessions | text only"
 		} else {
 			footer = "up/down select | left parent | right child | wheel/pgup/pgdn preview | enter open session | esc close | text only"
+		}
+	} else if m.mode == modeMdEditor {
+		switch m.mdEditor.View {
+		case mdEditorEdit:
+			footer = "ctrl+s save | ctrl+r rename | esc close | raw markdown"
+		case mdEditorRename:
+			footer = "enter rename | esc cancel"
+		case mdEditorDiscardConfirm:
+			footer = "left/right choose | enter confirm | esc cancel"
+		default:
+			footer = "up/down select | enter open | n new doc | esc close"
 		}
 	} else if m.mode == modeKeyEntry {
 		footer = "enter next/save | ctrl+v paste | esc cancel | secret input is masked"

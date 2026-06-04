@@ -15,6 +15,7 @@ var slashCommands = []slashCommand{
 	{Name: "fork", Usage: "/fork [title|message-number]", Description: "Fork here or edit a numbered user message", NeedsArg: false},
 	{Name: "tree", Usage: "/tree", Description: "Open the fork tree", NeedsArg: false, OpensOnSelect: true},
 	{Name: "sessions", Usage: "/sessions", Description: "Open the session picker", NeedsArg: false, OpensOnSelect: true},
+	{Name: "md-editor", Usage: "/md-editor", Description: "Edit project Markdown docs", NeedsArg: false, OpensOnSelect: true},
 	{Name: "favourite-session", Usage: "/favourite-session", Description: "Favourite the current session", NeedsArg: false},
 	{Name: "keys", Usage: "/keys", Description: "Manage provider API keys", NeedsArg: false, OpensOnSelect: true},
 	{Name: "models", Usage: "/models", Description: "Choose the active model", NeedsArg: false, OpensOnSelect: true},
@@ -284,6 +285,8 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.busy = true
 		m.status = "loading sessions"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.list"})
+	case "md-editor", "md", "docs":
+		return m.openMdEditor()
 	case "favourite-session", "favorite-session", "favourite", "favorite":
 		if strings.TrimSpace(m.session) == "" {
 			m.appendSystem("No active session to favourite.")
@@ -578,7 +581,24 @@ func (m model) shouldAutoAllowPermission(ev runtimeEvent) bool {
 	if m.permissionMode == permissionModeAlwaysAllow || m.permissionMode == permissionModeAllowAll {
 		return true
 	}
-	return m.permissionMode == permissionModeAsk && ev.ToolName == "planMd"
+	if m.permissionMode != permissionModeAsk {
+		return false
+	}
+	if ev.ToolName == "planMd" {
+		return true
+	}
+	return ev.ToolName == "editFile" && boolMetadata(ev.Metadata, "planModeAutoAllowProjectPlansOnly")
+}
+
+func boolMetadata(metadata map[string]any, key string) bool {
+	value, ok := metadata[key]
+	if !ok {
+		return false
+	}
+	if boolValue, ok := value.(bool); ok {
+		return boolValue
+	}
+	return false
 }
 
 func (m model) openForkTree() (tea.Model, tea.Cmd) {
