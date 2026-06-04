@@ -635,3 +635,119 @@ func TestForkTreePreviewLeftToFirstMessagePositionsFirstMessageAtTop(t *testing.
 		t.Fatalf("visible preview = %q, response appears before first selected user message", visible)
 	}
 }
+
+func TestForkTreePageDownSwitchesSessionWhenOpenedFromSessionPicker(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.mode = modeForkTree
+	m.previousMode = modeSessionPicker
+	m.session = "sess_active"
+	m.sessionCursor = 0
+	m.forkTree = newForkTreeState()
+	m.forkTree.FocalSessionID = "sess_one"
+	m.sessions = []sessionInfo{
+		{ID: "sess_one", Title: "One", UpdatedAt: "2026-01-03T00:00:00Z"},
+		{ID: "sess_two", Title: "Two", UpdatedAt: "2026-01-02T00:00:00Z"},
+		{ID: "sess_fork", Title: "Fork", ForkedFromSessionID: "sess_one", UpdatedAt: "2026-01-04T00:00:00Z"},
+	}
+
+	updated, cmd := m.updateForkTree(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	got := updated.(model)
+
+	if got.mode != modeForkTree {
+		t.Fatalf("mode = %v, want modeForkTree", got.mode)
+	}
+	if got.previousMode != modeSessionPicker {
+		t.Fatalf("previousMode = %v, want modeSessionPicker", got.previousMode)
+	}
+	if got.sessionCursor != 1 {
+		t.Fatalf("sessionCursor = %d, want 1", got.sessionCursor)
+	}
+	if got.forkTree.FocalSessionID != "sess_two" {
+		t.Fatalf("focal session = %q, want sess_two", got.forkTree.FocalSessionID)
+	}
+	if !got.busy || got.status != "loading fork tree" {
+		t.Fatalf("busy/status = %v/%q, want loading fork tree", got.busy, got.status)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.tree", "sess_two")
+}
+
+func TestForkTreePageUpWrapsSessionWhenOpenedFromSessionPicker(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.mode = modeForkTree
+	m.previousMode = modeSessionPicker
+	m.sessionCursor = 0
+	m.forkTree = newForkTreeState()
+	m.forkTree.FocalSessionID = "sess_one"
+	m.sessions = []sessionInfo{
+		{ID: "sess_one", Title: "One", UpdatedAt: "2026-01-03T00:00:00Z"},
+		{ID: "sess_two", Title: "Two", UpdatedAt: "2026-01-02T00:00:00Z"},
+	}
+
+	updated, cmd := m.updateForkTree(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	got := updated.(model)
+
+	if got.sessionCursor != 1 {
+		t.Fatalf("sessionCursor = %d, want wrapped last index 1", got.sessionCursor)
+	}
+	if got.previousMode != modeSessionPicker {
+		t.Fatalf("previousMode = %v, want modeSessionPicker", got.previousMode)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "session.tree", "sess_two")
+}
+
+func TestForkTreeEscapeSelectsViewedSessionInSessionPicker(t *testing.T) {
+	m := initialModel(nil)
+	m.mode = modeForkTree
+	m.previousMode = modeSessionPicker
+	m.session = "sess_active"
+	m.sessionCursor = 0
+	m.forkTree = newForkTreeState()
+	m.forkTree.FocalSessionID = "sess_two"
+	m.sessions = []sessionInfo{
+		{ID: "sess_one", Title: "One", UpdatedAt: "2026-01-03T00:00:00Z"},
+		{ID: "sess_two", Title: "Two", UpdatedAt: "2026-01-02T00:00:00Z"},
+	}
+
+	updated, cmd := m.updateForkTree(tea.KeyPressMsg{Code: tea.KeyEsc})
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatal("esc returned command, want nil")
+	}
+	if got.mode != modeSessionPicker {
+		t.Fatalf("mode = %v, want modeSessionPicker", got.mode)
+	}
+	if got.sessionCursor != 1 {
+		t.Fatalf("sessionCursor = %d, want viewed sess_two index 1", got.sessionCursor)
+	}
+	if got.previousMode != modeChat {
+		t.Fatalf("previousMode = %v, want reset to modeChat", got.previousMode)
+	}
+}
+
+func TestForkTreePageKeysStillScrollPreviewWhenOpenedFromChat(t *testing.T) {
+	m := initialModel(nil)
+	m.mode = modeForkTree
+	m.previousMode = modeChat
+	m.forkTree = newForkTreeState()
+	m.forkTree.Preview = viewport.New()
+	m.forkTree.Preview.SetWidth(40)
+	m.forkTree.Preview.SetHeight(3)
+	m.forkTree.Preview.SetContent(strings.Repeat("line\n", 20))
+
+	updated, cmd := m.updateForkTree(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatal("pgdown returned command, want nil when tree opened from chat")
+	}
+	if got.forkTree.Preview.YOffset() <= 0 {
+		t.Fatalf("preview YOffset = %d, want scrolled", got.forkTree.Preview.YOffset())
+	}
+}

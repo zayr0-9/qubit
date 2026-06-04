@@ -201,12 +201,21 @@ func sessionRecentTimestamp(session sessionInfo) string {
 
 func (m *model) ensureSessionCursor() {
 	m.ensureSessionCursorInBounds()
+	m.setSessionCursorForSession(m.session)
+}
+
+func (m *model) setSessionCursorForSession(sessionID string) bool {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return false
+	}
 	for i, session := range m.sessionPickerSessions() {
-		if session.ID == m.session {
+		if session.ID == sessionID {
 			m.sessionCursor = i
-			return
+			return true
 		}
 	}
+	return false
 }
 
 func (m *model) ensureSessionCursorInBounds() {
@@ -562,9 +571,14 @@ func (m model) openForkTreeForSession(sessionID string) (tea.Model, tea.Cmd) {
 	if sessionID == "" {
 		sessionID = m.session
 	}
-	m.previousMode = m.mode
+	previousMode := m.mode
+	if m.mode == modeForkTree && m.previousMode == modeSessionPicker {
+		previousMode = modeSessionPicker
+	}
+	m.previousMode = previousMode
 	m.mode = modeForkTree
 	m.forkTree = newForkTreeState()
+	m.forkTree.FocalSessionID = sessionID
 	m.busy = true
 	m.status = "loading fork tree"
 	return m, sendRuntime(m.runtime, map[string]any{"type": "session.tree", "sessionId": sessionID})

@@ -206,7 +206,11 @@ func (m model) renderFooter() string {
 			footer = "left/right choose action | enter confirm | esc deny/cancel"
 		}
 	} else if m.mode == modeForkTree {
-		footer = "up/down select | left parent | right child | wheel/pgup/pgdn preview | enter open session | esc close | text only"
+		if m.previousMode == modeSessionPicker {
+			footer = "up/down select | pgup/pgdn session | left parent | right child | wheel preview | enter open session | esc sessions | text only"
+		} else {
+			footer = "up/down select | left parent | right child | wheel/pgup/pgdn preview | enter open session | esc close | text only"
+		}
 	} else if m.mode == modeKeyEntry {
 		footer = "enter next/save | ctrl+v paste | esc cancel | secret input is masked"
 	} else if m.mode == modeThemeEntry {

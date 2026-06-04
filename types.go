@@ -278,17 +278,18 @@ type forkTreeNode struct {
 }
 
 type forkTreeState struct {
-	Loading       bool
-	Nodes         []forkTreeNode
-	Selected      int
-	Order         []int
-	OffsetX       int
-	OffsetY       int
-	CanvasWidth   int
-	CanvasHeight  int
-	Preview       viewport.Model
-	PreviewWidth  int
-	PreviewHeight int
+	Loading        bool
+	FocalSessionID string
+	Nodes          []forkTreeNode
+	Selected       int
+	Order          []int
+	OffsetX        int
+	OffsetY        int
+	CanvasWidth    int
+	CanvasHeight   int
+	Preview        viewport.Model
+	PreviewWidth   int
+	PreviewHeight  int
 }
 
 type runtimeEvent struct {

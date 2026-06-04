@@ -24,13 +24,15 @@ func newForkTreeState() forkTreeState {
 
 func (m *model) applyForkTree(ev runtimeEvent) {
 	state := m.forkTree
+	focalSessionID := fallback(ev.SessionID, fallback(state.FocalSessionID, m.session))
 	state.Loading = false
+	state.FocalSessionID = focalSessionID
 	state.Nodes = expandForkTreeMessageNodes(cloneForkTreeNodes(ev.ForkTreeNodes))
 	state.Selected = 0
 	state.Preview = viewport.New()
 	state.PreviewWidth = 0
 	state.PreviewHeight = 0
-	state.buildForkTreeLayout(fallback(ev.SessionID, m.session))
+	state.buildForkTreeLayout(focalSessionID)
 	m.forkTree = state
 	m.busy = false
 	m.status = "fork tree"
@@ -203,6 +205,7 @@ func (m model) updateForkTree(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc":
 		if m.previousMode == modeSessionPicker {
+			m.setSessionCursorForSession(m.currentForkTreeSessionID())
 			m.mode = modeSessionPicker
 		} else {
 			m.mode = modeChat
@@ -223,13 +226,50 @@ func (m model) updateForkTree(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "right", "l":
 		m.moveForkTreeChild()
 	case "pgup":
+		if m.previousMode == modeSessionPicker {
+			return m.pageForkTreeSession(-1)
+		}
 		m.forkTree.Preview.PageUp()
 	case "pgdown":
+		if m.previousMode == modeSessionPicker {
+			return m.pageForkTreeSession(1)
+		}
 		m.forkTree.Preview.PageDown()
 	case "enter":
 		return m.activateSelectedForkTreeSession()
 	}
 	return m, nil
+}
+
+func (m model) currentForkTreeSessionID() string {
+	if m.forkTree.FocalSessionID != "" {
+		return m.forkTree.FocalSessionID
+	}
+	if m.forkTree.hasSelectedNode() {
+		return m.forkTree.Nodes[m.forkTree.Selected].SessionID
+	}
+	return ""
+}
+
+func (m model) pageForkTreeSession(delta int) (tea.Model, tea.Cmd) {
+	sessions := m.sessionPickerSessions()
+	if len(sessions) == 0 {
+		return m, nil
+	}
+	currentID := m.currentForkTreeSessionID()
+	index := m.sessionCursor
+	for i, session := range sessions {
+		if session.ID == currentID {
+			index = i
+			break
+		}
+	}
+	if index < 0 || index >= len(sessions) {
+		index = 0
+	}
+	index = (index + delta + len(sessions)) % len(sessions)
+	m.sessionCursor = index
+	return m.openForkTreeForSession(sessions[index].ID)
 }
 
 func (m model) updateForkTreeMouseWheel(msg tea.MouseWheelMsg) model {
