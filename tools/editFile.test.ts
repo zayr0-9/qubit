@@ -64,7 +64,20 @@ describe('editFileSearchReplace', () => {
     assert.ok(result.matchStrategy === 'whitespace_normalized' || result.matchStrategy === 'exact')
   })
 
-  it('finds fuzzy match when enabled', async () => {
+  it('does not use fuzzy matching by default', async () => {
+    await writeFileInDir(tmpDir, 'fuzzy-default-off.txt', 'function computeTotal(items) {')
+    const result = await editFileSearchReplace('fuzzy-default-off.txt', 'function computeTotal(item) {', 'function calcTotal(items) {', {
+      cwd: tmpDir,
+      fuzzyThreshold: 0.6,
+    })
+    assert.equal(result.success, false)
+    assert.ok(result.attemptedStrategies)
+    assert.equal(result.attemptedStrategies.includes('fuzzy'), false)
+    const content = await readFileInDir(tmpDir, 'fuzzy-default-off.txt')
+    assert.equal(content, 'function computeTotal(items) {')
+  })
+
+  it('finds fuzzy match when explicitly enabled', async () => {
     await writeFileInDir(tmpDir, 'fuzzy.txt', 'function computeTotal(items) {')
     const result = await editFileSearchReplace('fuzzy.txt', 'function computeTotal(item) {', 'function calcTotal(items) {', {
       cwd: tmpDir,
@@ -240,7 +253,7 @@ describe('editFile (dispatch)', () => {
     assert.equal(content, 'first\nsecond')
   })
 
-  it('plan mode blocks all operations', async () => {
+  it('plan mode blocks edits outside .qubit/plans', async () => {
     await writeFileInDir(tmpDir, 'dispatch-plan.txt', 'original')
     const result = await editFile('dispatch-plan.txt', 'replace', {
       searchPattern: 'original',
@@ -250,6 +263,34 @@ describe('editFile (dispatch)', () => {
     })
     assert.equal(result.success, false)
     assert.ok(result.message.includes('planning mode'))
+  })
+
+  it('plan mode allows edits inside project .qubit/plans', async () => {
+    await writeFileInDir(tmpDir, path.join('.qubit', 'plans', 'saved-plan.md'), '# Plan\n\n- old')
+    const result = await editFile(path.join('.qubit', 'plans', 'saved-plan.md'), 'replace', {
+      searchPattern: 'old',
+      replacement: 'new',
+      cwd: tmpDir,
+      operationMode: 'plan',
+    })
+    assert.equal(result.success, true)
+    assert.equal(result.replacements, 1)
+    const content = await readFileInDir(tmpDir, path.join('.qubit', 'plans', 'saved-plan.md'))
+    assert.equal(content, '# Plan\n\n- new')
+  })
+
+  it('plan mode rejects path traversal out of .qubit/plans', async () => {
+    await writeFileInDir(tmpDir, path.join('.qubit', 'outside.md'), 'original')
+    const result = await editFile(path.join('.qubit', 'plans', '..', 'outside.md'), 'replace', {
+      searchPattern: 'original',
+      replacement: 'modified',
+      cwd: tmpDir,
+      operationMode: 'plan',
+    })
+    assert.equal(result.success, false)
+    assert.ok(result.message.includes('.qubit/plans'))
+    const content = await readFileInDir(tmpDir, path.join('.qubit', 'outside.md'))
+    assert.equal(content, 'original')
   })
 
   it('replace without searchPattern returns error', async () => {

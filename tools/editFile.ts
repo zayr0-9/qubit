@@ -1,15 +1,17 @@
 import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
+import * as path from 'node:path'
 import { defineTool } from '@hyper-labs/hyper-router'
-import { resolveRestrictedToolPath } from '../utils/pathSafety.js'
+import { assertPathWithinWorkspace, resolveRestrictedToolPath, resolveToolPath } from '../utils/pathSafety.js'
 import { cwdOrDefault } from '../utils/toolWorkspace.js'
 import { cwdBlockEnabledFromContext, restrictToCwd, type ToolAccessPolicyOptions } from '../utils/toolAccessPolicy.js'
 import { readTextFile, type FileMetadata } from './readFile.js'
 
 const FULL_FILE_READ_MAX_BYTES = Number.MAX_SAFE_INTEGER
 const DEFAULT_LINE_HINT_WINDOW = 100
+const PLAN_DIR_RELATIVE_PATH = path.join('.qubit', 'plans')
 const PLAN_MODE_MESSAGE =
-  'You are in planning mode. File modification is not allowed. Please describe your implementation plan instead. Do not try to edit the code or make changes. Do not use bash to skip this warning.'
+  'You are in planning mode. File modification is not allowed outside .qubit/plans. Use editFile only for targeted updates to saved Markdown plans.'
 
 export type EditOperation = 'replace' | 'replace_first' | 'append'
 export type MatchStrategy = 'exact' | 'line_ending_normalized' | 'whitespace_normalized' | 'fuzzy'
@@ -109,6 +111,18 @@ interface ResolvedEditTarget {
   fsPath: string
   displayPath: string
   cwd: string
+}
+
+export async function isPathInProjectPlansDirectory(filePath: string, cwd?: string): Promise<boolean> {
+  try {
+    const workspaceCwd = cwdOrDefault(cwd)
+    const target = await resolveToolPath(filePath, { cwd: workspaceCwd, mode: 'file' })
+    const plansDir = await resolveToolPath(PLAN_DIR_RELATIVE_PATH, { cwd: workspaceCwd, mode: 'directory' })
+    assertPathWithinWorkspace(target, plansDir)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function calculateHash(content: string): string {
@@ -504,7 +518,7 @@ export async function editFileSearchReplace(
 ): Promise<EditFileResult> {
   const {
     encoding = 'utf8',
-    enableFuzzyMatching = true,
+    enableFuzzyMatching = false,
     fuzzyThreshold = 0.8,
     preserveIndentation = true,
     validateContent = true,
@@ -622,7 +636,9 @@ export async function editFile(
   operation: EditOperation,
   options: EditFileOptions & { searchPattern?: string; replacement?: string; content?: string } = {}
 ): Promise<EditFileResult> {
-  if (options.operationMode === 'plan') return { success: false, sizeBytes: 0, replacements: 0, message: PLAN_MODE_MESSAGE }
+  if (options.operationMode === 'plan' && !(await isPathInProjectPlansDirectory(filePath, options.cwd))) {
+    return { success: false, sizeBytes: 0, replacements: 0, message: PLAN_MODE_MESSAGE }
+  }
 
   if (operation === 'replace') {
     if (!options.searchPattern || options.replacement === undefined) {
@@ -744,7 +760,7 @@ export const editFileTool = defineTool({
     required: ['path', 'operation'],
     additionalProperties: false,
   },
-  permission: { mode: 'ask' },
+  permission: { mode: 'ask', metadata: { planModeAutoAllowProjectPlansOnly: true } },
   async execute(args: EditFileOptions & { path?: string; operation?: EditOperation; searchPattern?: string; replacement?: string; content?: string }, context) {
     if (!args.path) return { ok: false, error: 'path is required' }
     if (!args.operation) return { ok: false, error: 'operation is required' }

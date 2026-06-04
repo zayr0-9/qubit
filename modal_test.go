@@ -448,6 +448,36 @@ func TestPlanModeAutoApprovesPlanToolOnly(t *testing.T) {
 	}
 }
 
+func TestPlanModeAutoApprovesPlanScopedEditFile(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.permissionMode = permissionModeAsk
+
+	updated, cmd := m.updateRuntime(runtimeEvent{Type: "tool.permission.request", ID: "perm_plan_edit", ToolName: "editFile", Metadata: map[string]any{"planModeAutoAllowProjectPlansOnly": true}})
+	got := updated.(model)
+	if got.modal != nil || got.mode == modeModal {
+		t.Fatalf("plan-scoped editFile opened modal in plan mode: mode=%v modal=%#v", got.mode, got.modal)
+	}
+	payload := runBatchSendCommand(t, cmd, stdin, "tool.permission.response")
+	if payload["id"] != "perm_plan_edit" || payload["allow"] != true {
+		t.Fatalf("payload = %#v, want allow response for perm_plan_edit", payload)
+	}
+}
+
+func TestPlanModeStillPromptsForUnscopedEditFile(t *testing.T) {
+	m := initialModel(nil)
+	m.permissionMode = permissionModeAsk
+
+	updated, cmd := m.updateRuntime(runtimeEvent{Type: "tool.permission.request", ID: "perm_edit", ToolName: "editFile"})
+	got := updated.(model)
+	if cmd == nil {
+		t.Fatal("permission request returned nil command, want waitRuntimeEvent command")
+	}
+	if got.mode != modeModal || got.modal == nil || got.modal.ID != "perm_edit" {
+		t.Fatalf("unscoped editFile did not open modal in plan mode: mode=%v modal=%#v", got.mode, got.modal)
+	}
+}
+
 func TestPermissionModalAllowAllEnablesSessionAutoAllow(t *testing.T) {
 	rt, stdin := newTestRuntime(t)
 	m := initialModel(rt)

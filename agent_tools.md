@@ -58,7 +58,7 @@ createFile
 
 editFile
   Edits files with replace, replace_first, or append operations.
-  Preserves layered matching, optional backups, validation metadata checks, line hints, and operationMode plan guard; permission mode is ask.
+  Preserves layered matching, optional backups, validation metadata checks, line hints, and operationMode plan guard. Fuzzy matching is disabled by default because broad fuzzy replacements can corrupt brace-sensitive code; callers must explicitly set `enableFuzzyMatching: true` to use it. In plan mode, editFile may only modify files inside the project `.qubit/plans` directory; all other paths are blocked by the tool. Permission mode is ask, but the runtime/Go permission bridge auto-allows plan-scoped `.qubit/plans` editFile permission requests in plan mode.
 
 multiEdit
   Applies editFile-style operations sequentially across one or more files.
@@ -239,7 +239,7 @@ Qubit currently supports three user-facing permission modes for gated tools:
 
 ```txt
 ask
-  The Go client opens the permission modal when the runtime emits tool.permission.request, except planMd is always-allowed for planning workflows.
+  The Go client opens the permission modal when the runtime emits tool.permission.request, except planMd is always-allowed for planning workflows and editFile is auto-allowed only for plan-mode requests that the runtime has verified are restricted to project `.qubit/plans` files.
 
 always_allow
   The Go client immediately sends tool.permission.response with allow=true for runtime permission requests and uses the edit prompt.
@@ -250,7 +250,7 @@ allow_all
 
 The permission mode is Go UI/session state. Keep the runtime/tool definitions responsible for declaring static tool safety (`permission: { mode: 'ask' }` for gated tools and `permission: { mode: 'always' }` for intrinsically safe read/search/planning tools), but keep user-facing auto-approval gating in the Go client. Do not conflate tool-level `always` with user-level `always_allow` or `allow_all`.
 
-For now, permission mode is changed with `/permission <plan|edit|allow-all>` or cycled in the chat UI with Shift+Tab. The current mode is rendered as a minimal bright `plan` / `edit` / `allow all` label in a dedicated status section below the input area and is not persisted across process restarts. The same status section also shows cwd containment state as `cwd block` or `cwd open`; `/cwd-remove-block` and `/cwd-enable-block` toggle that per-TUI-session setting. Plan mode maps to ask-before-gated-tools behavior with planMd allowed, edit mode maps to always-allow gated tools plus the edit prompt, and allow-all mode maps to always-allow gated tools while retaining the plan prompt. If persistence is added later, document the settings file and migration behavior here.
+For now, permission mode is changed with `/permission <plan|edit|allow-all>` or cycled in the chat UI with Shift+Tab. The current mode is rendered as a minimal bright `plan` / `edit` / `allow all` label in a dedicated status section below the input area and is not persisted across process restarts. The same status section also shows cwd containment state as `cwd block` or `cwd open`; `/cwd-remove-block` and `/cwd-enable-block` toggle that per-TUI-session setting. Plan mode maps to ask-before-gated-tools behavior with planMd allowed and editFile auto-allowed only after runtime path validation confirms the target is inside project `.qubit/plans`; edit mode maps to always-allow gated tools plus the edit prompt; allow-all mode maps to always-allow gated tools while retaining the plan prompt. If persistence is added later, document the settings file and migration behavior here.
 
 ## Tool Definition Standards
 
@@ -305,7 +305,7 @@ createFile/editFile/multiEdit/deleteFile
   Use resolveRestrictedToolPath and the same cwd containment rule.
   Writes to WSL paths use UNC conversion when Node filesystem APIs are used.
   Write tools are permission-gated with ask.
-  operationMode: "plan" blocks write operations.
+  operationMode: "plan" blocks write operations for createFile, multiEdit, and deleteFile. editFile has the only plan-mode write exception: it may patch existing Markdown plan files under project `.qubit/plans` and blocks every other path, including traversal attempts.
   editFile intentionally excludes old LSP integration for now.
 
 todoMd
