@@ -1529,15 +1529,7 @@ func assertSendDone(t *testing.T, msg tea.Msg) {
 }
 
 func plainText(s string) string {
-	replacer := strings.NewReplacer(
-		"\x1b[0m", "",
-		"\x1b[m", "",
-		"\x1b[1;38;2;242;166;90m", "",
-		"\x1b[1;38;2;139;211;221m", "",
-		"\x1b[1;38;2;255;107;107m", "",
-		"\x1b[38;5;252m", "",
-	)
-	return replacer.Replace(s)
+	return stripANSI(s)
 }
 
 func assertPayload(t *testing.T, payload map[string]any, wantType string, wantSessionID string) {

@@ -136,10 +136,8 @@ export interface CodexProviderCallLogEvent {
   startedAt: string;
   finishedAt: string;
   durationMs: number;
-  request: unknown;
   responseId?: string;
   usage?: unknown;
-  outputItems?: unknown[];
   result?: {
     contextMessageCount?: number;
     contentChars: number;

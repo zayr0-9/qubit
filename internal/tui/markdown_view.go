@@ -54,6 +54,20 @@ func colorToHex(c color.Color) string {
 func noBackgroundMarkdownStyle() ansi.StyleConfig {
 	style := styles.DarkStyleConfig
 	style.Document.Margin = uintPtr(0)
+	style.Document.Color = stringPtr(colorToHex(text))
+	style.Paragraph.Color = stringPtr(colorToHex(text))
+	style.Text.Color = stringPtr(colorToHex(text))
+	style.Strikethrough.Color = stringPtr(colorToHex(text))
+	style.Emph.Color = stringPtr(colorToHex(text))
+	style.Strong.Color = stringPtr(colorToHex(text))
+	style.HorizontalRule.Color = stringPtr(colorToHex(muted))
+	style.Item.Color = stringPtr(colorToHex(text))
+	style.Enumeration.Color = stringPtr(colorToHex(muted))
+	style.Task.Color = stringPtr(colorToHex(text))
+	style.Link.Color = stringPtr(colorToHex(cyan))
+	style.LinkText.Color = stringPtr(colorToHex(cyan))
+	style.Image.Color = stringPtr(colorToHex(cyan))
+	style.ImageText.Color = stringPtr(colorToHex(cyan))
 	style.H1.BackgroundColor = nil
 	style.H1.Color = stringPtr(colorToHex(accent))
 	style.H1.Bold = boolPtr(true)
@@ -64,8 +78,10 @@ func noBackgroundMarkdownStyle() ansi.StyleConfig {
 	style.BlockQuote.Color = stringPtr(colorToHex(muted))
 	style.Code.Color = stringPtr(colorToHex(cyan))
 	style.Code.BackgroundColor = nil
+	style.CodeBlock.Color = stringPtr(colorToHex(text))
 	style.CodeBlock.Margin = uintPtr(0)
 	if style.CodeBlock.Chroma != nil {
+		style.CodeBlock.Chroma.Text.Color = stringPtr(colorToHex(text))
 		style.CodeBlock.Chroma.Error.BackgroundColor = nil
 		style.CodeBlock.Chroma.Background.BackgroundColor = nil
 	}

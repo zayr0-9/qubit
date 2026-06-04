@@ -73,7 +73,7 @@ describe("CodexResponsesProvider", () => {
     assert.deepEqual(capturedBody.client_metadata, { "x-codex-installation-id": "session-1" });
   });
 
-  it("emits completed call log events with request and response metadata", async () => {
+  it("emits completed call log events with usage metadata but no request or output payloads", async () => {
     const logs: any[] = [];
     const tokenStore = new MemoryTokenStore({
       tokens: {
@@ -121,15 +121,13 @@ describe("CodexResponsesProvider", () => {
     assert.equal(logs[0].model, "gpt-5.2-codex");
     assert.equal(logs[0].status, "completed");
     assert.equal(logs[0].responseId, "resp-logged");
-    assert.equal(logs[0].request.prompt_cache_key, "session-1");
+    assert.equal(logs[0].request, undefined);
     assert.deepEqual(logs[0].usage, {
       input_tokens: 15,
       input_tokens_details: { cached_tokens: 6 },
       output_tokens: 4,
     });
-    assert.deepEqual(logs[0].outputItems, [
-      { type: "message", content: [{ type: "output_text", text: "Logged." }] },
-    ]);
+    assert.equal(logs[0].outputItems, undefined);
     assert.deepEqual(logs[0].result, {
       contextMessageCount: 1,
       contentChars: 7,

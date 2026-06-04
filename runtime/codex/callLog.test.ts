@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { CodexCallLogWriter } from "./callLog.js";
 
 describe("CodexCallLogWriter", () => {
-  it("writes JSON lines and preserves token counts while redacting secrets", async () => {
+  it("writes compact JSON lines with usage metadata only", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qubit-codex-log-"));
     const path = join(dir, "codex-provider-calls.log");
     const writer = new CodexCallLogWriter(path);
@@ -23,21 +23,25 @@ describe("CodexCallLogWriter", () => {
       startedAt: "2026-06-03T00:00:00.000Z",
       finishedAt: "2026-06-03T00:00:00.010Z",
       durationMs: 10,
-      request: {
-        input: [{ type: "message", content: [{ type: "input_text", text: "hello" }] }],
-        access_token: "secret-token",
-      },
       usage: {
         input_tokens: 20,
         input_tokens_details: { cached_tokens: 12 },
         output_tokens: 8,
       },
-    });
+      request: {
+        input: [{ type: "message", content: [{ type: "input_text", text: "hello" }] }],
+        access_token: "secret-token",
+      },
+      outputItems: [{ type: "message", content: [{ type: "output_text", text: "hello back" }] }],
+    } as any);
 
     const lines = (await readFile(path, "utf8")).trim().split("\n");
     assert.equal(lines.length, 1);
     const parsed = JSON.parse(lines[0]!);
-    assert.equal(parsed.request.access_token, "[redacted]");
+    assert.equal(parsed.request, undefined);
+    assert.equal(parsed.outputItems, undefined);
+    assert.equal(JSON.stringify(parsed).includes("hello"), false);
+    assert.equal(JSON.stringify(parsed).includes("secret-token"), false);
     assert.equal(parsed.usage.input_tokens, 20);
     assert.equal(parsed.usage.input_tokens_details.cached_tokens, 12);
     assert.equal(parsed.usage.output_tokens, 8);

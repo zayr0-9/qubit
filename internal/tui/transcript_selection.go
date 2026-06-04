@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	ansiSequenceRE = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+	ansiSequenceRE = regexp.MustCompile(`\x1b\[[0-9;:?]*[ -/]*[@-~]`)
 	urlRE          = regexp.MustCompile(`https?://[^\s<>"')\]]+`)
 )
 

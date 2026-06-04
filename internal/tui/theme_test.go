@@ -226,3 +226,23 @@ func TestThemeReasoningColorDefaultsAndCustomFallback(t *testing.T) {
 		t.Fatalf("reasoning color fallback = %q, want tool search fallback", got)
 	}
 }
+
+func TestLightThemeMarkdownUsesReadableThemeText(t *testing.T) {
+	applyTheme(builtinThemes[1])
+	defer applyTheme(defaultTheme())
+
+	style := noBackgroundMarkdownStyle()
+	wantText := builtinThemes[1].Text
+	if style.Document.Color == nil || *style.Document.Color != wantText {
+		t.Fatalf("document markdown color = %v, want %q", style.Document.Color, wantText)
+	}
+	if style.Text.Color == nil || *style.Text.Color != wantText {
+		t.Fatalf("inline markdown text color = %v, want %q", style.Text.Color, wantText)
+	}
+	if style.Paragraph.Color == nil || *style.Paragraph.Color != wantText {
+		t.Fatalf("paragraph markdown color = %v, want %q", style.Paragraph.Color, wantText)
+	}
+	if style.CodeBlock.Color == nil || *style.CodeBlock.Color != wantText {
+		t.Fatalf("code block markdown color = %v, want %q", style.CodeBlock.Color, wantText)
+	}
+}

@@ -106,7 +106,7 @@ web_search
 image_generation
 ```
 
-These hosted tools run on OpenAI's server side. They are not Qubit local tools, do not emit local `tool.permission.request` events, and must not be added to `tools/index.ts`. Web search/browser actions may appear as `web_search_call` output items in Codex responses and should be preserved in provider call logs. Image generation appears as `image_generation_call` output with base64 image data; Qubit saves generated images under `.qubit\generated` and surfaces the saved path in chat.
+These hosted tools run on OpenAI's server side. They are not Qubit local tools, do not emit local `tool.permission.request` events, and must not be added to `tools/index.ts`. Web search/browser actions may appear as `web_search_call` output items in Codex responses for parsing, but provider call logs must not persist those output items or other response payloads. Image generation appears as `image_generation_call` output with base64 image data; Qubit saves generated images under `.qubit\generated` and surfaces the saved path in chat.
 
 Important event types include:
 
@@ -128,7 +128,7 @@ Codex provider calls are logged as sanitized JSON lines to:
 .qubit\codex-provider-calls.log
 ```
 
-Each line represents one Codex `generate()` call, not one UI message. A single Qubit run can produce multiple Codex calls when tools are involved. Keep entries useful for debugging token/cache behavior by preserving request body, `response.id`, `usage`, final output items, run/session/call identifiers, timings, status, and summary counts. After each Codex call log append, emit a sanitized `codex.usage` runtime event with normalized usage for that model/tool turn so the TUI can update the compact `ctx ... log ...` status before the overall run finishes. Also persist the final/latest Codex usage for a run as message metadata on the latest generated assistant message so reopened sessions can recover the status from transcript history. Never log authorization headers, raw access tokens, refresh tokens, ID tokens, API keys, OAuth secrets, or bearer values.
+Each line represents one Codex `generate()` call, not one UI message. A single Qubit run can produce multiple Codex calls when tools are involved. Keep entries compact and metadata-only: run/session/call identifiers, model/provider, request/response IDs, timings, status, token/cache `usage`, and summary counts are OK. Do not log request bodies, chat/user/model messages, tool call arguments/results, final output items, or other prompt/response payloads. After each Codex call log append, emit a sanitized `codex.usage` runtime event with normalized usage for that model/tool turn so the TUI can update the compact `ctx ... log ...` status before the overall run finishes. Also persist the final/latest Codex usage for a run as message metadata on the latest generated assistant message so reopened sessions can recover the status from transcript history. Never log authorization headers, raw access tokens, refresh tokens, ID tokens, API keys, OAuth secrets, or bearer values.
 
 ## Validation
 

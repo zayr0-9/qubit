@@ -106,10 +106,8 @@ export class CodexResponsesProvider implements ModelProvider {
         status: "completed",
         startedAt,
         ...this.finishedTiming(startedAtMs),
-        request: body,
         ...(parsed.responseId ? { responseId: parsed.responseId } : {}),
         ...(parsed.usage !== undefined ? { usage: parsed.usage } : {}),
-        ...(parsed.outputItems?.length ? { outputItems: parsed.outputItems } : {}),
         result: {
           contextMessageCount: input.messages.length,
           contentChars: parsed.content.length,
@@ -133,7 +131,6 @@ export class CodexResponsesProvider implements ModelProvider {
         status: input.signal?.aborted || isAbortError(error) ? "cancelled" : "failed",
         startedAt,
         ...this.finishedTiming(startedAtMs),
-        request: body,
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;

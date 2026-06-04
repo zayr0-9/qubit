@@ -16,7 +16,13 @@ export class CodexCallLogWriter {
 }
 
 function sanitizeLogEvent(event: CodexProviderCallLogEvent): CodexProviderCallLogEvent {
-  return sanitizeUnknown(event) as CodexProviderCallLogEvent;
+  const { request: _request, outputItems: _outputItems, ...metadataOnly } = event as CodexProviderCallLogEvent & {
+    request?: unknown;
+    outputItems?: unknown[];
+  };
+  void _request;
+  void _outputItems;
+  return sanitizeUnknown(metadataOnly) as CodexProviderCallLogEvent;
 }
 
 function sanitizeUnknown(value: unknown): unknown {
