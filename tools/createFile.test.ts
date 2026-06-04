@@ -91,3 +91,30 @@ describe('createTextFile', () => {
     assert.ok(result.message.toLowerCase().includes('outside') || result.message.toLowerCase().includes('denied'))
   })
 })
+
+
+describe('createTextFile cwd block policy', () => {
+  let workspaceDir: string
+  let outsideDir: string
+
+  before(async () => {
+    workspaceDir = await createTempDir('qubit-create-workspace-')
+    outsideDir = await createTempDir('qubit-create-outside-')
+  })
+
+  after(async () => {
+    await cleanupTempDir(workspaceDir)
+    await cleanupTempDir(outsideDir)
+  })
+
+  it('blocks creating outside cwd by default and allows when cwd block is disabled', async () => {
+    const outsidePath = path.join(outsideDir, 'outside-created.txt')
+    const blocked = await createTextFile(outsidePath, 'blocked', { cwd: workspaceDir })
+    assert.equal(blocked.success, false)
+    assert.match(blocked.message, /outside the workspace|Access denied/)
+
+    const allowed = await createTextFile(outsidePath, 'allowed', { cwd: workspaceDir, cwdBlockEnabled: false })
+    assert.equal(allowed.success, true)
+    assert.equal(await fs.promises.readFile(outsidePath, 'utf8'), 'allowed')
+  })
+})

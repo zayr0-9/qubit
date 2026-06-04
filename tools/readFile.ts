@@ -2,13 +2,15 @@ import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import { defineTool } from '@hyper-labs/hyper-router'
 import { resolveRestrictedToolPath } from '../utils/pathSafety.js'
+import { cwdOrDefault } from '../utils/toolWorkspace.js'
+import { cwdBlockEnabledFromContext, restrictToCwd, type ToolAccessPolicyOptions } from '../utils/toolAccessPolicy.js'
 
 export interface LineRange {
   startLine: number
   endLine: number
 }
 
-export interface ReadFileOptions {
+export interface ReadFileOptions extends ToolAccessPolicyOptions {
   maxBytes?: number
   startLine?: number
   endLine?: number
@@ -296,7 +298,12 @@ export async function readTextFile(inputPath: string, options: ReadFileOptions =
 
   validateLineRangeValues(options)
 
-  const resolved = await resolveRestrictedToolPath(inputPath, { cwd: options.cwd, mode: 'file' })
+  const resolved = await resolveRestrictedToolPath(inputPath, {
+    cwd: cwdOrDefault(options.cwd),
+    mode: 'file',
+    restrictToCwd: restrictToCwd(options),
+    workspaceCwd: options.workspaceCwd,
+  })
   const abs = resolved.fsPath
 
   let stats: fs.Stats
@@ -415,10 +422,10 @@ export const readFileTool = defineTool({
   description: 'Read the contents of a text/code/config file with optional line ranges, truncation, metadata, and hashes.',
   inputSchema: readFileInputSchema,
   permission: { mode: 'always' },
-  async execute(args: ReadFileOptions & { path?: string }) {
+  async execute(args: ReadFileOptions & { path?: string }, context) {
     if (!args.path) return { ok: false, error: 'path is required' }
     try {
-      return { ok: true, data: await readTextFile(args.path, args) }
+      return { ok: true, data: await readTextFile(args.path, { ...args, cwdBlockEnabled: cwdBlockEnabledFromContext(context) }) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
@@ -442,12 +449,12 @@ export const readFileContinuationTool = defineTool({
     additionalProperties: false,
   },
   permission: { mode: 'always' },
-  async execute(args: { path?: string; afterLine?: number; numLines?: number } & Omit<ReadFileOptions, 'startLine' | 'endLine' | 'ranges'>) {
+  async execute(args: { path?: string; afterLine?: number; numLines?: number } & Omit<ReadFileOptions, 'startLine' | 'endLine' | 'ranges'>, context) {
     if (!args.path) return { ok: false, error: 'path is required' }
     if (args.afterLine === undefined) return { ok: false, error: 'afterLine is required' }
     if (args.numLines === undefined) return { ok: false, error: 'numLines is required' }
     try {
-      return { ok: true, data: await readFileContinuation(args.path, args.afterLine, args.numLines, args) }
+      return { ok: true, data: await readFileContinuation(args.path, args.afterLine, args.numLines, { ...args, cwdBlockEnabled: cwdBlockEnabledFromContext(context) }) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }

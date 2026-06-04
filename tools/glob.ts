@@ -1,7 +1,8 @@
 import { glob } from 'glob'
 import { defineTool } from '@hyper-labs/hyper-router'
-import { resolveToolPath } from '../utils/pathSafety.js'
+import { resolveRestrictedToolPath } from '../utils/pathSafety.js'
 import { cwdOrDefault } from '../utils/toolWorkspace.js'
+import { cwdBlockEnabledFromContext, restrictToCwd, type ToolAccessPolicyOptions } from '../utils/toolAccessPolicy.js'
 
 const DEFAULT_MAX_MATCHES = 3000
 const DEFAULT_TIMEOUT_MS = 5000
@@ -24,7 +25,7 @@ const DEFAULT_IGNORE_PATTERNS = [
   '**/*.min.js',
 ]
 
-export interface GlobOptions {
+export interface GlobOptions extends ToolAccessPolicyOptions {
   cwd?: string
   ignore?: string | string[]
   dot?: boolean
@@ -84,7 +85,13 @@ export async function globSearch(pattern: string, options: GlobOptions = {}): Pr
   } = options
 
   try {
-    const resolvedCwd = await resolveToolPath(cwdOrDefault(cwd), { mode: 'directory' })
+    const workspaceCwd = cwdOrDefault(cwd)
+    const resolvedCwd = await resolveRestrictedToolPath(workspaceCwd, {
+      cwd: workspaceCwd,
+      mode: 'directory',
+      restrictToCwd: restrictToCwd(options),
+      workspaceCwd: options.workspaceCwd,
+    })
     const sanitizedPattern = enforcePatternDepth(pattern)
     const ignorePatterns = mergeIgnorePatterns(DEFAULT_IGNORE_PATTERNS, ignore)
 
@@ -168,9 +175,9 @@ export const globTool = defineTool({
     additionalProperties: false,
   },
   permission: { mode: 'always' },
-  async execute(args: GlobOptions & { pattern?: string }) {
+  async execute(args: GlobOptions & { pattern?: string }, context) {
     if (!args.pattern) return { ok: false, error: 'pattern is required' }
-    return { ok: true, data: await globSearch(args.pattern, args) }
+    return { ok: true, data: await globSearch(args.pattern, { ...args, cwdBlockEnabled: cwdBlockEnabledFromContext(context) }) }
   },
 })
 

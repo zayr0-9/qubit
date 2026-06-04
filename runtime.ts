@@ -22,6 +22,7 @@ import { qubitTools } from "./tools/index.js";
 import { setPlanViewEmitter } from "./tools/planMd.js";
 import { setMultiCallLifecycleEmitter, setMultiCallPermissionRequester } from "./tools/multiCall.js";
 import { getDefaultToolCwd, setDefaultToolCwd } from "./utils/toolWorkspace.js";
+import { clearRunCwdBlockEnabled, setRunCwdBlockEnabled } from "./utils/toolAccessPolicy.js";
 import { CodexCallLogWriter, CodexResponsesProvider, QubitCodexTokenStore, cancelCodexLogin, startCodexLogin } from "./runtime/codex/index.js";
 import { overlayActiveRunUserMessages } from "./runtime/activeRunOverlay.js";
 import { assistantReasoningContent } from "./runtime/assistantReasoning.js";
@@ -747,8 +748,10 @@ async function handleChatRequest(request, responseTarget = null) {
 
   await touchSession(runSessionId, { title: titleFromInput(request.input) });
 
+  const cwdBlockEnabled = request.cwdBlockEnabled !== false;
+  setRunCwdBlockEnabled(runId, cwdBlockEnabled);
   const runRuntimeState = runtimeState;
-  activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, input: request.input, controller, runtime: runRuntimeState.runtime, target: responseTarget });
+  activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, input: request.input, controller, runtime: runRuntimeState.runtime, target: responseTarget, cwdBlockEnabled });
   write({ type: "run_started", id: request.id, runId, sessionId: runSessionId }, responseTarget);
 
   try {
@@ -796,6 +799,7 @@ async function handleChatRequest(request, responseTarget = null) {
     }
   } finally {
     activeRuns.delete(runId);
+    clearRunCwdBlockEnabled(runId);
     latestCodexUsageByRun.delete(runId);
   }
 }

@@ -40,6 +40,7 @@ func initialModel(rt *runtimeClient) model {
 		messages:             []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
 		status:               "starting runtime",
 		permissionMode:       permissionModeAsk,
+		cwdBlockEnabled:      true,
 		theme:                theme,
 		autoNewSessionOnChat: true,
 		autoScroll:           true,
@@ -362,7 +363,7 @@ func (m model) startChatRun(input string) (model, tea.Cmd) {
 	m.status = "thinking"
 	m.autoScroll = true
 	m.refreshViewport()
-	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "systemPromptMode": m.systemPromptMode(), "reasoningLevel": m.reasoningLevelValue()}
+	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "systemPromptMode": m.systemPromptMode(), "reasoningLevel": m.reasoningLevelValue(), "cwdBlockEnabled": m.cwdBlockEnabled}
 	if m.autoNewSessionOnChat {
 		payload["newSession"] = true
 		payload["title"] = titleFromInput(input)
@@ -388,7 +389,7 @@ func (m model) submitMessageEdit(input string) (tea.Model, tea.Cmd) {
 	m.autoScroll = true
 	m.refreshViewport()
 
-	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "sessionId": m.session, "replaceFromMessageIndex": target, "title": "Edit: " + fallback(m.title, m.currentSessionTitle()), "systemPromptMode": m.systemPromptMode(), "reasoningLevel": m.reasoningLevelValue()}
+	payload := map[string]any{"type": "chat", "input": input, "runId": runID, "sessionId": m.session, "replaceFromMessageIndex": target, "title": "Edit: " + fallback(m.title, m.currentSessionTitle()), "systemPromptMode": m.systemPromptMode(), "reasoningLevel": m.reasoningLevelValue(), "cwdBlockEnabled": m.cwdBlockEnabled}
 	return m, tea.Batch(sendRuntime(m.runtime, payload), m.spinner.Tick)
 }
 

@@ -79,6 +79,21 @@ describe('resolveRestrictedToolPath', () => {
       /outside the workspace|Access denied/
     )
   })
+
+  it('allows absolute path outside workspace when cwd restriction is disabled', async () => {
+    const outsidePath = path.resolve(path.join(tmpDir, '..', 'outside-open.txt'))
+    const result = await resolveRestrictedToolPath(outsidePath, { cwd: tmpDir, mode: 'file', restrictToCwd: false })
+    assert.equal(result.comparisonPath, outsidePath)
+  })
+
+  it('can restrict a supplied cwd to a separate default workspace', async () => {
+    const defaultWorkspace = path.join(tmpDir, 'default-workspace')
+    const outsideWorkspace = path.resolve(path.join(tmpDir, '..', 'outside-workspace'))
+    await assert.rejects(
+      () => resolveRestrictedToolPath(outsideWorkspace, { cwd: outsideWorkspace, workspaceCwd: defaultWorkspace, mode: 'directory' }),
+      /outside the workspace|Access denied/
+    )
+  })
 })
 
 describe('assertPathWithinWorkspace', () => {

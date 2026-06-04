@@ -113,8 +113,21 @@ func (m model) renderMainArea(height int) string {
 }
 
 func (m model) renderInput() string {
-	view := m.composer.View(m.inputPrompt(), m.inputCursorPulse)
+	view := m.composer.ViewStyled(m.inputPrompt(), m.inputCursorPulse, m.composerTextStyle())
 	return inputStyle.Width(m.width).Height(m.composer.Height()).Render(view)
+}
+
+func (m model) composerTextStyle() lipgloss.Style {
+	switch {
+	case m.messageEdit.Active:
+		return messageEditInputSt
+	case m.forkSelector.Active && m.forkSelector.Cursor >= 0:
+		return forkSelectInputSt
+	case m.inputHistoryActive:
+		return inputHistorySt
+	default:
+		return lipgloss.Style{}
+	}
 }
 
 func (m model) inputPrompt() string {
@@ -129,12 +142,18 @@ func idleInputPrompt() string {
 }
 
 func (m model) renderInputStatus() string {
-	mode := m.permissionModeBadge()
+	mode := m.statusModeBadges()
 	if m.messageEdit.Active {
-		return footerStyle.Width(m.width).Render(mode + mutedSt.Render(" · editing message, enter forks/rerolls from here"))
+		return footerStyle.Width(m.width).Render(mode + mutedSt.Render(" · ") + messageEditInputSt.Render("editing message") + mutedSt.Render(" · enter forks/rerolls from here"))
 	}
 	if m.forkSelector.Active {
-		return footerStyle.Width(m.width).Render(mode + mutedSt.Render(" · enter forks here, up chooses a previous user message"))
+		if m.forkSelector.Cursor >= 0 {
+			return footerStyle.Width(m.width).Render(mode + mutedSt.Render(" · ") + forkSelectInputSt.Render("selected past message") + mutedSt.Render(" · enter edit/reroll · up/down choose"))
+		}
+		return footerStyle.Width(m.width).Render(mode + mutedSt.Render(" · ") + forkSelectInputSt.Render("fork here") + mutedSt.Render(" · enter forks here, up chooses a previous user message"))
+	}
+	if m.inputHistoryActive {
+		return footerStyle.Width(m.width).Render(mode + mutedSt.Render(" · ") + inputHistorySt.Render("history") + mutedSt.Render(" · up/down browse · type edits draft"))
 	}
 
 	parts := []string{m.reasoningLevelValue()}
@@ -142,6 +161,13 @@ func (m model) renderInputStatus() string {
 		parts = append(parts, contextStatus)
 	}
 	return footerStyle.Width(m.width).Render(mode + mutedSt.Render(" · "+strings.Join(parts, " · ")))
+}
+
+func (m model) statusModeBadges() string {
+	if m.cwdBlockEnabled {
+		return m.permissionModeBadge()
+	}
+	return m.permissionModeBadge() + mutedSt.Render(" · ") + m.cwdBlockBadge()
 }
 
 func (m model) permissionModeBadge() string {
@@ -153,6 +179,10 @@ func (m model) permissionModeBadge() string {
 		style = style.Foreground(accent)
 	}
 	return style.Render(mode)
+}
+
+func (m model) cwdBlockBadge() string {
+	return lipgloss.NewStyle().Bold(true).Foreground(red).Render("cwd open")
 }
 
 func (m model) renderFooter() string {

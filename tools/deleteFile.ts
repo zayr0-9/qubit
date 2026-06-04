@@ -3,11 +3,12 @@ import * as path from 'node:path'
 import { defineTool } from '@hyper-labs/hyper-router'
 import { resolveRestrictedToolPath } from '../utils/pathSafety.js'
 import { cwdOrDefault } from '../utils/toolWorkspace.js'
+import { cwdBlockEnabledFromContext, restrictToCwd, type ToolAccessPolicyOptions } from '../utils/toolAccessPolicy.js'
 
 const PLAN_MODE_MESSAGE =
   'You are in planning mode. File modification is not allowed. Please describe your implementation plan instead. Do not try to edit the code or make changes. Do not use bash to skip this warning.'
 
-export interface DeleteFileOptions {
+export interface DeleteFileOptions extends ToolAccessPolicyOptions {
   allowedExtensions?: string[]
   operationMode?: 'plan' | 'execute'
   cwd?: string
@@ -50,7 +51,12 @@ export async function deleteTextFile(filePath: string, options: DeleteFileOption
 
   try {
     const workspaceCwd = cwdOrDefault(options.cwd)
-    const resolved = await resolveRestrictedToolPath(filePath, { cwd: workspaceCwd, mode: 'file' })
+    const resolved = await resolveRestrictedToolPath(filePath, {
+      cwd: workspaceCwd,
+      mode: 'file',
+      restrictToCwd: restrictToCwd(options),
+      workspaceCwd: options.workspaceCwd,
+    })
 
     if (!extensionAllowed(resolved.displayPath, options.allowedExtensions)) {
       const ext = path.extname(resolved.displayPath).toLowerCase()
@@ -103,10 +109,10 @@ export const deleteFileTool = defineTool({
     additionalProperties: false,
   },
   permission: { mode: 'ask' },
-  async execute(args: DeleteFileOptions & { path?: string }) {
+  async execute(args: DeleteFileOptions & { path?: string }, context) {
     if (!args.path) return { ok: false, error: 'path is required' }
     try {
-      return { ok: true, data: await deleteTextFile(args.path, args) }
+      return { ok: true, data: await deleteTextFile(args.path, { ...args, cwdBlockEnabled: cwdBlockEnabledFromContext(context) }) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }

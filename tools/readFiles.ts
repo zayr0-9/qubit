@@ -1,6 +1,7 @@
 import { defineTool } from '@hyper-labs/hyper-router'
-import { relativeDisplayPath, resolveToolPath } from '../utils/pathSafety.js'
+import { relativeDisplayPath, resolveRestrictedToolPath, resolveToolPath } from '../utils/pathSafety.js'
 import { cwdOrDefault } from '../utils/toolWorkspace.js'
+import { cwdBlockEnabledFromContext, restrictToCwd } from '../utils/toolAccessPolicy.js'
 import { readTextFile, type ReadFileOptions } from './readFile.js'
 
 export interface ReadMultipleOptions extends ReadFileOptions {
@@ -20,7 +21,18 @@ export async function readMultipleTextFiles(
   if (!Array.isArray(inputPaths) || inputPaths.length === 0) throw new Error('No file paths provided')
 
   const cwdBase = cwdOrDefault(options.cwd)
-  const baseDir = await resolveToolPath(options.baseDir || cwdBase, { cwd: cwdBase })
+  await resolveRestrictedToolPath(cwdBase, {
+    cwd: cwdBase,
+    mode: 'directory',
+    restrictToCwd: restrictToCwd(options),
+    workspaceCwd: options.workspaceCwd,
+  })
+  const baseDir = await resolveRestrictedToolPath(options.baseDir || cwdBase, {
+    cwd: cwdBase,
+    mode: 'directory',
+    restrictToCwd: restrictToCwd(options),
+    workspaceCwd: options.workspaceCwd,
+  })
   const results: ReadMultipleResultItem[] = new Array(inputPaths.length)
 
   const readOne = async (inputPath: string, index: number): Promise<void> => {
@@ -32,6 +44,8 @@ export async function readMultipleTextFiles(
         ranges: options.ranges,
         cwd: cwdBase,
         includeHash: false,
+        cwdBlockEnabled: options.cwdBlockEnabled,
+        restrictToCwd: options.restrictToCwd,
       })
 
       const resolved = await resolveToolPath(inputPath, { cwd: cwdBase })
@@ -95,10 +109,10 @@ export const readFilesTool = defineTool({
     additionalProperties: false,
   },
   permission: { mode: 'always' },
-  async execute(args: ReadMultipleOptions & { paths?: string[] }) {
+  async execute(args: ReadMultipleOptions & { paths?: string[] }, context) {
     if (!args.paths) return { ok: false, error: 'paths is required' }
     try {
-      const files = await readMultipleTextFiles(args.paths, args)
+      const files = await readMultipleTextFiles(args.paths, { ...args, cwdBlockEnabled: cwdBlockEnabledFromContext(context) })
       return { ok: true, data: { files, content: formatReadFilesResult(files) } }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }

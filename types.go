@@ -444,6 +444,7 @@ type model struct {
 	status                string
 	err                   string
 	permissionMode        permissionMode
+	cwdBlockEnabled       bool
 	theme                 themeConfig
 	autoNewSessionOnChat  bool
 	lastRunStartedSession string

@@ -25,6 +25,8 @@ var slashCommands = []slashCommand{
 	{Name: "rename", Usage: "/rename <title>", Description: "Rename current session", NeedsArg: true},
 	{Name: "terminal-setup", Usage: "/terminal-setup", Description: "Install Windows Terminal keyboard and appearance setup", NeedsArg: false},
 	{Name: "permission", Usage: "/permission <plan|edit|allow-all>", Description: "Set tool permission mode", NeedsArg: true},
+	{Name: "cwd-remove-block", Usage: "/cwd-remove-block", Description: "Allow tools to access paths outside launch cwd", NeedsArg: false},
+	{Name: "cwd-enable-block", Usage: "/cwd-enable-block", Description: "Restrict tools to launch cwd", NeedsArg: false},
 	{Name: "reasoning", Usage: "/reasoning <none|low|medium|high>", Description: "Set model reasoning effort", NeedsArg: true},
 	{Name: "permission-test", Usage: "/permission-test", Description: "Open a demo permission modal", NeedsArg: false},
 	{Name: "help", Usage: "/help", Description: "Show command help", NeedsArg: false},
@@ -298,6 +300,10 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		return m.openTerminalSetupConfirm(), nil
 	case "permission", "permissions", "perm":
 		return m.setPermissionMode(arg)
+	case "cwd-remove-block", "cwd-unblock", "cwd-open":
+		return m.setCwdBlockEnabled(false), nil
+	case "cwd-enable-block", "cwd-block", "cwd-close":
+		return m.setCwdBlockEnabled(true), nil
 	case "reasoning", "reason", "effort":
 		return m.setReasoningLevel(arg)
 	case "permission-test", "modal-test":
@@ -452,6 +458,17 @@ func (m model) setPermissionMode(arg string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) setCwdBlockEnabled(enabled bool) model {
+	m.cwdBlockEnabled = enabled
+	m.status = "ready"
+	if enabled {
+		m.appendSystem("CWD block enabled. Tools are restricted to the launch cwd.")
+	} else {
+		m.appendSystem("CWD block removed. Tools may access paths outside the launch cwd when otherwise permitted.")
+	}
+	return m
+}
+
 func (m model) setReasoningLevel(arg string) (tea.Model, tea.Cmd) {
 	level := normalizeReasoningLevel(arg)
 	if strings.TrimSpace(arg) == "" {
@@ -560,7 +577,7 @@ func (m model) showSlashPalette() bool {
 
 func slashCommandRunsDuringActiveRun(cmd string) bool {
 	switch strings.ToLower(strings.TrimSpace(cmd)) {
-	case "help", "h", "permission", "permissions", "perm", "theme", "themes", "colors", "color", "permission-test", "modal-test":
+	case "help", "h", "permission", "permissions", "perm", "cwd-remove-block", "cwd-enable-block", "cwd-unblock", "cwd-block", "cwd-open", "cwd-close", "theme", "themes", "colors", "color", "permission-test", "modal-test":
 		return true
 	default:
 		return false

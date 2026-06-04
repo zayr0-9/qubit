@@ -218,3 +218,38 @@ func TestComposerCharLimitAllowsLargePrompts(t *testing.T) {
 		t.Fatalf("InsertString length = %d, want %d", got, composerCharLimit)
 	}
 }
+
+func TestComposerStyledTextDoesNotStylePrompt(t *testing.T) {
+	c := newComposer()
+	c.focused = false
+	c.SetValue("hello")
+
+	view := c.ViewStyled("› ", 0, forkSelectInputSt)
+
+	if strings.HasPrefix(view, forkSelectInputSt.Render("›")) || strings.HasPrefix(view, forkSelectInputSt.Render("› ")) {
+		t.Fatalf("prompt appears styled as input text: %q", view)
+	}
+	if !strings.HasPrefix(view, "› "+forkSelectInputSt.Render("hello")) {
+		t.Fatalf("normal input text was not styled after raw prompt: %q", view)
+	}
+}
+
+func TestComposerStyledTextDoesNotOverrideSelectionOrPlaceholder(t *testing.T) {
+	c := newComposer()
+	c.SetValue("hello")
+	c.SelectAll()
+
+	selectedView := c.ViewStyled("› ", 0, messageEditInputSt)
+	if !strings.Contains(selectedView, inputSelectSt.Render("h")) {
+		t.Fatalf("selection styling was not preserved: %q", selectedView)
+	}
+	if strings.Contains(selectedView, messageEditInputSt.Render("h")) {
+		t.Fatalf("normal text style overrode selected text: %q", selectedView)
+	}
+
+	c.Reset()
+	placeholderView := c.ViewStyled("› ", 0, messageEditInputSt)
+	if !strings.Contains(placeholderView, mutedSt.Render(c.placeholder)) {
+		t.Fatalf("placeholder did not keep muted style: %q", placeholderView)
+	}
+}

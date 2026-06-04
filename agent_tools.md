@@ -211,14 +211,17 @@ Tool implementations should default omitted `cwd` values to `cwdOrDefault(...)`,
 
 ## Workspace Safety
 
-If `cwd` is supplied or defaulted for a filesystem tool:
+If cwd blocking is enabled, and `cwd` is supplied or defaulted for a filesystem tool:
 
 1. Relative paths resolve against `cwd`.
-2. Absolute paths must be inside `cwd`.
-3. Windows paths and WSL/POSIX paths are treated as different filesystem styles.
-4. Mixed-style workspace escapes must fail unless a future explicit exception is added.
+2. Absolute paths must be inside the launch workspace cwd.
+3. A supplied tool `cwd` or search/shell root must also be inside the launch workspace cwd.
+4. Windows paths and WSL/POSIX paths are treated as different filesystem styles.
+5. Mixed-style workspace escapes must fail unless cwd blocking is explicitly disabled.
 
-Current policy intentionally does not migrate old managed-path exceptions from the previous harness. Keep behavior simple: stay inside `cwd`.
+Cwd blocking is enabled by default. `/cwd-remove-block` disables this containment gate for subsequent runs in the current TUI session, allowing tools to access absolute paths outside the launch cwd such as `D:\\Hyper-router` while still respecting normal tool permission prompts. `/cwd-enable-block` restores the default containment gate. The status below the input renders the current state next to the permission mode as `cwd block` or `cwd open`.
+
+Current policy intentionally does not migrate old managed-path exceptions from the previous harness. Default behavior stays inside the launch cwd unless the user explicitly runs `/cwd-remove-block`.
 
 Do not reintroduce old `YGG_*` concepts. Qubit-owned project storage is the hidden `.qubit` directory under the terminal launch cwd. Internal project stores such as `.qubit/todos` and `.qubit/plans` use `utils/qubitProject.ts` instead of the normal file-tool cwd gate, while ordinary read/edit/delete tools remain restricted to the workspace.
 
@@ -247,7 +250,7 @@ allow_all
 
 The permission mode is Go UI/session state. Keep the runtime/tool definitions responsible for declaring static tool safety (`permission: { mode: 'ask' }` for gated tools and `permission: { mode: 'always' }` for intrinsically safe read/search/planning tools), but keep user-facing auto-approval gating in the Go client. Do not conflate tool-level `always` with user-level `always_allow` or `allow_all`.
 
-For now, permission mode is changed with `/permission <plan|edit|allow-all>` or cycled in the chat UI with Shift+Tab. The current mode is rendered as a minimal bright `plan` / `edit` / `allow all` label in a dedicated status section below the input area and is not persisted across process restarts. Plan mode maps to ask-before-gated-tools behavior with planMd allowed, edit mode maps to always-allow gated tools plus the edit prompt, and allow-all mode maps to always-allow gated tools while retaining the plan prompt. If persistence is added later, document the settings file and migration behavior here.
+For now, permission mode is changed with `/permission <plan|edit|allow-all>` or cycled in the chat UI with Shift+Tab. The current mode is rendered as a minimal bright `plan` / `edit` / `allow all` label in a dedicated status section below the input area and is not persisted across process restarts. The same status section also shows cwd containment state as `cwd block` or `cwd open`; `/cwd-remove-block` and `/cwd-enable-block` toggle that per-TUI-session setting. Plan mode maps to ask-before-gated-tools behavior with planMd allowed, edit mode maps to always-allow gated tools plus the edit prompt, and allow-all mode maps to always-allow gated tools while retaining the plan prompt. If persistence is added later, document the settings file and migration behavior here.
 
 ## Tool Definition Standards
 

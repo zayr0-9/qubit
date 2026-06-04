@@ -3,6 +3,7 @@ import * as fs from 'node:fs'
 import { defineTool } from '@hyper-labs/hyper-router'
 import { resolveRestrictedToolPath } from '../utils/pathSafety.js'
 import { cwdOrDefault } from '../utils/toolWorkspace.js'
+import { cwdBlockEnabledFromContext, restrictToCwd, type ToolAccessPolicyOptions } from '../utils/toolAccessPolicy.js'
 import { readTextFile, type FileMetadata } from './readFile.js'
 
 const FULL_FILE_READ_MAX_BYTES = Number.MAX_SAFE_INTEGER
@@ -13,7 +14,7 @@ const PLAN_MODE_MESSAGE =
 export type EditOperation = 'replace' | 'replace_first' | 'append'
 export type MatchStrategy = 'exact' | 'line_ending_normalized' | 'whitespace_normalized' | 'fuzzy'
 
-export interface EditFileOptions {
+export interface EditFileOptions extends ToolAccessPolicyOptions {
   createBackup?: boolean
   encoding?: BufferEncoding
   enableFuzzyMatching?: boolean
@@ -127,14 +128,19 @@ function resolveEscapeHandling(options: EditFileOptions) {
   }
 }
 
-async function resolveEditTarget(filePath: string, cwd?: string): Promise<ResolvedEditTarget> {
-  const workspaceCwd = cwdOrDefault(cwd)
-  const resolved = await resolveRestrictedToolPath(filePath, { cwd: workspaceCwd, mode: 'file' })
+async function resolveEditTarget(filePath: string, options: EditFileOptions = {}): Promise<ResolvedEditTarget> {
+  const workspaceCwd = cwdOrDefault(options.cwd)
+  const resolved = await resolveRestrictedToolPath(filePath, {
+    cwd: workspaceCwd,
+    mode: 'file',
+    restrictToCwd: restrictToCwd(options),
+    workspaceCwd: options.workspaceCwd,
+  })
   return { fsPath: resolved.fsPath, displayPath: resolved.displayPath, cwd: workspaceCwd }
 }
 
-async function readFullTextFileForEdit(filePath: string, cwd: string) {
-  const fileData = await readTextFile(filePath, { cwd, maxBytes: FULL_FILE_READ_MAX_BYTES, includeHash: false })
+async function readFullTextFileForEdit(filePath: string, options: EditFileOptions & { cwd: string }) {
+  const fileData = await readTextFile(filePath, { ...options, maxBytes: FULL_FILE_READ_MAX_BYTES, includeHash: false })
   if (fileData.truncated) throw new Error(`Refusing to edit '${filePath}' because the file read was truncated.`)
   return fileData
 }
@@ -506,8 +512,8 @@ export async function editFileSearchReplace(
   const { interpretSearchEscapes, interpretReplacementEscapes } = resolveEscapeHandling(options)
 
   try {
-    const target = await resolveEditTarget(filePath, options.cwd)
-    const fileData = await readFullTextFileForEdit(filePath, target.cwd)
+    const target = await resolveEditTarget(filePath, options)
+    const fileData = await readFullTextFileForEdit(filePath, { ...options, cwd: target.cwd })
     const originalContent = fileData.content
 
     let validation: FileValidationResult | undefined
@@ -585,7 +591,7 @@ export async function appendToFile(filePath: string, content: string, options: E
   const { encoding = 'utf8' } = options
 
   try {
-    const target = await resolveEditTarget(filePath, options.cwd)
+    const target = await resolveEditTarget(filePath, options)
     const existingStats = await fs.promises.stat(target.fsPath).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return null
       throw error
@@ -739,11 +745,11 @@ export const editFileTool = defineTool({
     additionalProperties: false,
   },
   permission: { mode: 'ask' },
-  async execute(args: EditFileOptions & { path?: string; operation?: EditOperation; searchPattern?: string; replacement?: string; content?: string }) {
+  async execute(args: EditFileOptions & { path?: string; operation?: EditOperation; searchPattern?: string; replacement?: string; content?: string }, context) {
     if (!args.path) return { ok: false, error: 'path is required' }
     if (!args.operation) return { ok: false, error: 'operation is required' }
     try {
-      return { ok: true, data: await editFile(args.path, args.operation, args) }
+      return { ok: true, data: await editFile(args.path, args.operation, { ...args, cwdBlockEnabled: cwdBlockEnabledFromContext(context) }) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
@@ -782,10 +788,10 @@ export const multiEditTool = defineTool({
     additionalProperties: false,
   },
   permission: { mode: 'ask' },
-  async execute(args: MultiEditOptions & { edits?: MultiEditItem[] }) {
+  async execute(args: MultiEditOptions & { edits?: MultiEditItem[] }, context) {
     if (!args.edits) return { ok: false, error: 'edits is required' }
     try {
-      return { ok: true, data: await multiEdit(args.edits, args) }
+      return { ok: true, data: await multiEdit(args.edits, { ...args, cwdBlockEnabled: cwdBlockEnabledFromContext(context) }) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }

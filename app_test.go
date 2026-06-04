@@ -1092,6 +1092,7 @@ func TestSubmitEditedMessagePreviewsTruncatedForkAndRequestsForkedReroll(t *test
 	m.width = 80
 	m.height = 24
 	m.session = "sess_parent"
+	m.cwdBlockEnabled = false
 	m.messages = []chatMessage{
 		{Role: "user", Content: "first question"},
 		{Role: "assistant", Content: "first answer"},
@@ -1130,6 +1131,9 @@ func TestSubmitEditedMessagePreviewsTruncatedForkAndRequestsForkedReroll(t *test
 	}
 	if _, ok := payload["newSession"]; ok {
 		t.Fatalf("newSession present in edit reroll payload: %#v", payload)
+	}
+	if payload["cwdBlockEnabled"] != false {
+		t.Fatalf("cwdBlockEnabled = %#v, want false; payload=%#v", payload["cwdBlockEnabled"], payload)
 	}
 }
 
@@ -1658,12 +1662,16 @@ func TestSubmitInputIncludesSystemPromptMode(t *testing.T) {
 	m.autoNewSessionOnChat = false
 	m.session = "sess_1"
 	m.permissionMode = permissionModeAlwaysAllow
+	m.cwdBlockEnabled = false
 	m.composer.SetValue("change files")
 
 	_, cmd := m.submitInput()
 	payload := runBatchSendCommand(t, cmd, stdin, "chat")
 	if payload["systemPromptMode"] != "edit" {
 		t.Fatalf("systemPromptMode = %#v, want edit; payload=%#v", payload["systemPromptMode"], payload)
+	}
+	if payload["cwdBlockEnabled"] != false {
+		t.Fatalf("cwdBlockEnabled = %#v, want false; payload=%#v", payload["cwdBlockEnabled"], payload)
 	}
 }
 
@@ -2658,7 +2666,7 @@ func TestTranscriptMouseDragSelectsTextAndEscClears(t *testing.T) {
 	if !released.transcriptSelection.Active {
 		t.Fatal("transcript selection cleared after drag release")
 	}
-	if got, want := released.transcriptSelectedText(), "◆ line 1\n  line 2\n  line"; got != want {
+	if got, want := released.transcriptSelectedText(), "◆ line 1\n  line 2\n  line 3\n  line"; got != want {
 		t.Fatalf("selected text = %q, want %q", got, want)
 	}
 
@@ -2869,5 +2877,79 @@ func TestPlanViewAndTodoOverlayUseMatchingBorder(t *testing.T) {
 		if !strings.Contains(plainPlan, border) || !strings.Contains(plainTodo, border) {
 			t.Fatalf("plan/todo borders mismatch: plan=%q todo=%q", plainPlan, plainTodo)
 		}
+	}
+}
+
+func TestForkAndHistoryComposerStateColors(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 24
+	m.session = "sess_parent"
+	m.inputHistory = []string{"history item"}
+	m.inputHistoryIndex = len(m.inputHistory)
+	m.messages = []chatMessage{
+		{Role: "user", Content: "first question"},
+		{Role: "assistant", Content: "first answer"},
+		{Role: "user", Content: "second question"},
+		{Role: "assistant", Content: "second answer"},
+	}
+	m.layout()
+
+	updated, _ := m.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	history := updated.(model)
+	if !history.inputHistoryActive || history.composer.Value() != "history item" {
+		t.Fatalf("history state/input = %v/%q, want active history item", history.inputHistoryActive, history.composer.Value())
+	}
+	if got := history.composerTextStyle().Render("history item"); !strings.Contains(history.renderInput(), got) {
+		t.Fatalf("history input missing history color: %q want %q", history.renderInput(), got)
+	}
+	if !strings.Contains(stripANSI(history.renderInputStatus()), "history") || strings.Contains(stripANSI(history.renderInputStatus()), "editing message") {
+		t.Fatalf("history status = %q, want history hint distinct from editing", history.renderInputStatus())
+	}
+	if history.composerTextStyle().Render("x") == messageEditInputSt.Render("x") || history.composerTextStyle().Render("x") == forkSelectInputSt.Render("x") {
+		t.Fatal("history composer style should be distinct from edit and fork selector styles")
+	}
+
+	updated, _ = history.updateKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
+	typed := updated.(model)
+	if typed.inputHistoryActive {
+		t.Fatal("inputHistoryActive = true after typing, want cleared")
+	}
+	if strings.Contains(stripANSI(typed.renderInputStatus()), "history") {
+		t.Fatalf("typed status still shows history: %q", typed.renderInputStatus())
+	}
+
+	m.composer.SetValue("/fork")
+	updated, _ = m.submitInput()
+	forking := updated.(model)
+	updated, _ = forking.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	forking = updated.(model)
+	if !forking.forkSelector.Active || forking.forkSelector.Cursor < 0 {
+		t.Fatalf("fork selector state = %#v, want selected past message", forking.forkSelector)
+	}
+	if got := forkSelectInputSt.Render(forking.composer.Value()); !strings.Contains(forking.renderInput(), got) {
+		t.Fatalf("fork selector input missing fork color: %q want %q", forking.renderInput(), got)
+	}
+	if !strings.Contains(stripANSI(forking.renderInputStatus()), "selected past message") {
+		t.Fatalf("fork selector status = %q, want selected past message hint", forking.renderInputStatus())
+	}
+	if forking.composerTextStyle().Render("x") == messageEditInputSt.Render("x") || forking.composerTextStyle().Render("x") == inputHistorySt.Render("x") {
+		t.Fatal("fork selector composer style should be distinct from edit and history styles")
+	}
+
+	updated, _ = forking.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	editing := updated.(model)
+	if !editing.messageEdit.Active {
+		t.Fatal("message edit inactive, want active after selecting fork point")
+	}
+	if got := messageEditInputSt.Render(editing.composer.Value()); !strings.Contains(editing.renderInput(), got) {
+		t.Fatalf("edit input missing edit color: %q want %q", editing.renderInput(), got)
+	}
+	if !strings.Contains(stripANSI(editing.renderInputStatus()), "editing message") {
+		t.Fatalf("edit status = %q, want editing message hint", editing.renderInputStatus())
+	}
+	if editing.composerTextStyle().Render("x") == forkSelectInputSt.Render("x") || editing.composerTextStyle().Render("x") == inputHistorySt.Render("x") {
+		t.Fatal("edit composer style should be distinct from fork selector and history styles")
 	}
 }

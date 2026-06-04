@@ -1,12 +1,13 @@
 import { defineTool } from '@hyper-labs/hyper-router'
 import { getWSLCommandArgs, isWindows } from '../utils/wslBridge.js'
-import { resolveToolPath } from '../utils/pathSafety.js'
+import { resolveRestrictedToolPath } from '../utils/pathSafety.js'
 import { cwdOrDefault } from '../utils/toolWorkspace.js'
+import { cwdBlockEnabledFromContext, restrictToCwd, type ToolAccessPolicyOptions } from '../utils/toolAccessPolicy.js'
 import { runSpawnedCommand, type ShellRunOptions, type ShellRunResult } from './shellShared.js'
 
 const EXIT_1_NO_MATCH_COMMANDS = ['grep', 'egrep', 'fgrep', 'diff', 'cmp', 'awk']
 
-export interface BashOptions extends ShellRunOptions {
+export interface BashOptions extends ShellRunOptions, ToolAccessPolicyOptions {
   description?: string
   cwd?: string
 }
@@ -18,8 +19,14 @@ function getDefaultSuccessCodes(command: string): number[] {
   return EXIT_1_NO_MATCH_COMMANDS.includes(basename) ? [0, 1] : [0]
 }
 
-async function buildBashInvocation(command: string, cwd?: string): Promise<{ cmd: string; args: string[]; cwd?: string; displayCwd: string; detached?: boolean }> {
-  const resolvedCwd = await resolveToolPath(cwdOrDefault(cwd), { mode: 'directory' })
+async function buildBashInvocation(command: string, options: BashOptions = {}): Promise<{ cmd: string; args: string[]; cwd?: string; displayCwd: string; detached?: boolean }> {
+  const workspaceCwd = cwdOrDefault(options.cwd)
+  const resolvedCwd = await resolveRestrictedToolPath(workspaceCwd, {
+    cwd: workspaceCwd,
+    mode: 'directory',
+    restrictToCwd: restrictToCwd(options),
+    workspaceCwd: options.workspaceCwd,
+  })
 
   if (isWindows()) {
     if (resolvedCwd.comparisonKind !== 'posix') {
@@ -37,7 +44,7 @@ export async function runBashCommand(command: string, options: BashOptions = {})
     return { success: false, cwd: cwdOrDefault(options.cwd), stdout: '', stderr: '', error: 'command is required' }
   }
 
-  const invocation = await buildBashInvocation(command, options.cwd)
+  const invocation = await buildBashInvocation(command, options)
   return runSpawnedCommand({
     ...invocation,
     options,
@@ -64,10 +71,10 @@ export const bashTool = defineTool({
     additionalProperties: false,
   },
   permission: { mode: 'ask', reason: 'Shell commands can read, write, or execute arbitrary code.' },
-  async execute(args: BashOptions & { command?: string }) {
+  async execute(args: BashOptions & { command?: string }, context) {
     if (!args.command) return { ok: false, error: 'command is required' }
     try {
-      return { ok: true, data: await runBashCommand(args.command, args) }
+      return { ok: true, data: await runBashCommand(args.command, { ...args, cwdBlockEnabled: cwdBlockEnabledFromContext(context) }) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }

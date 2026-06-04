@@ -292,6 +292,7 @@ func TestRenderInputStatusShowsPermissionMode(t *testing.T) {
 	m := initialModel(nil)
 	m.width = 80
 	m.permissionMode = permissionModeAlwaysAllow
+	m.cwdBlockEnabled = true
 
 	status := plainText(m.renderInputStatus())
 	if strings.Contains(status, "permissions:") {
@@ -302,6 +303,41 @@ func TestRenderInputStatusShowsPermissionMode(t *testing.T) {
 	}
 	if strings.Contains(status, "always allow") || strings.Contains(status, "ask") {
 		t.Fatalf("status section = %q, want plan/edit label only", status)
+	}
+	if strings.Contains(status, "cwd block") || strings.Contains(status, "cwd open") {
+		t.Fatalf("status section = %q, want cwd state hidden while blocked", status)
+	}
+}
+
+func TestCwdBlockSlashCommandsAndStatus(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+
+	updated, cmd := m.handleSlashCommand("/cwd-remove-block")
+	if cmd != nil {
+		t.Fatal("/cwd-remove-block returned command, want nil")
+	}
+	got := updated.(model)
+	if got.cwdBlockEnabled {
+		t.Fatal("cwdBlockEnabled = true, want false")
+	}
+	status := plainText(got.renderInputStatus())
+	if !strings.Contains(status, "cwd open") || !strings.Contains(status, "plan") {
+		t.Fatalf("status = %q, want plan and cwd open", status)
+	}
+
+	updated, cmd = got.handleSlashCommand("/cwd-enable-block")
+	if cmd != nil {
+		t.Fatal("/cwd-enable-block returned command, want nil")
+	}
+	got = updated.(model)
+	if !got.cwdBlockEnabled {
+		t.Fatal("cwdBlockEnabled = false, want true")
+	}
+	status = plainText(got.renderInputStatus())
+	if strings.Contains(status, "cwd block") || strings.Contains(status, "cwd open") {
+		t.Fatalf("status = %q, want cwd state hidden while blocked", status)
 	}
 }
 

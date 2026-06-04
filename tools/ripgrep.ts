@@ -1,15 +1,16 @@
 import { spawn } from 'node:child_process'
 import { defineTool } from '@hyper-labs/hyper-router'
 import { isWindows, toWslPath } from '../utils/wslBridge.js'
-import { resolveToolPath } from '../utils/pathSafety.js'
+import { resolveRestrictedToolPath, resolveToolPath } from '../utils/pathSafety.js'
 import { cwdOrDefault } from '../utils/toolWorkspace.js'
+import { cwdBlockEnabledFromContext, restrictToCwd, type ToolAccessPolicyOptions } from '../utils/toolAccessPolicy.js'
 
 const DEFAULT_MAX_OUTPUT_CHARS = 40000
 const MAX_RESULT_LINES = 5000
 const MAX_LINE_LENGTH = 1000
 const DEFAULT_TIMEOUT_MS = 30000
 
-export interface RipgrepOptions {
+export interface RipgrepOptions extends ToolAccessPolicyOptions {
   caseSensitive?: boolean
   lineNumbers?: boolean
   count?: boolean
@@ -162,6 +163,13 @@ export async function ripgrepSearch(pattern: string, searchPath = '.', options: 
   if (!options.count && !options.filesWithMatches) args.push('--json')
 
   const effectiveSearchPath = searchPath || cwdOrDefault(options.cwd)
+  const cwdBase = cwdOrDefault(options.cwd)
+  await resolveRestrictedToolPath(effectiveSearchPath, {
+    cwd: cwdBase,
+    mode: 'directory',
+    restrictToCwd: restrictToCwd(options),
+    workspaceCwd: options.workspaceCwd,
+  })
   const command = await buildRipgrepCommand(effectiveSearchPath, args)
 
   return new Promise(resolve => {
@@ -271,10 +279,10 @@ export const ripgrepTool = defineTool({
     additionalProperties: false,
   },
   permission: { mode: 'always' },
-  async execute(args: RipgrepOptions & { pattern?: string; searchPath?: string }) {
+  async execute(args: RipgrepOptions & { pattern?: string; searchPath?: string }, context) {
     if (!args.pattern) return { ok: false, error: 'pattern is required' }
     try {
-      return { ok: true, data: await ripgrepSearch(args.pattern, args.searchPath || cwdOrDefault(args.cwd), args) }
+      return { ok: true, data: await ripgrepSearch(args.pattern, args.searchPath || cwdOrDefault(args.cwd), { ...args, cwdBlockEnabled: cwdBlockEnabledFromContext(context) }) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }

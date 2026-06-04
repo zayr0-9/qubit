@@ -17,6 +17,8 @@ export interface ResolvedToolPath {
 export interface ResolveToolPathOptions {
   cwd?: string
   mode?: 'file' | 'directory'
+  restrictToCwd?: boolean
+  workspaceCwd?: string
 }
 
 function isWindowsPath(inputPath: string): boolean {
@@ -114,8 +116,8 @@ export async function resolveRestrictedToolPath(
   options: ResolveToolPathOptions = {}
 ): Promise<ResolvedToolPath> {
   const resolved = await resolveToolPath(inputPath, options)
-  if (options.cwd) {
-    const workspace = await resolveWorkspaceRoot(options.cwd)
+  if (options.cwd && options.restrictToCwd !== false) {
+    const workspace = await resolveWorkspaceRoot(options.workspaceCwd || options.cwd)
     assertPathWithinWorkspace(resolved, workspace)
   }
   return resolved

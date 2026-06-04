@@ -3,11 +3,12 @@ import * as path from 'node:path'
 import { defineTool } from '@hyper-labs/hyper-router'
 import { resolveRestrictedToolPath } from '../utils/pathSafety.js'
 import { cwdOrDefault } from '../utils/toolWorkspace.js'
+import { cwdBlockEnabledFromContext, restrictToCwd, type ToolAccessPolicyOptions } from '../utils/toolAccessPolicy.js'
 
 const PLAN_MODE_MESSAGE =
   'You are in planning mode. File modification is not allowed. Please describe your implementation plan instead. Do not try to edit the code or make changes. Do not use bash to skip this warning.'
 
-export interface CreateFileOptions {
+export interface CreateFileOptions extends ToolAccessPolicyOptions {
   createParentDirs?: boolean
   overwrite?: boolean
   executable?: boolean
@@ -36,7 +37,12 @@ export async function createTextFile(
 
   try {
     const workspaceCwd = cwdOrDefault(options.cwd)
-    const resolved = await resolveRestrictedToolPath(filePath, { cwd: workspaceCwd, mode: 'file' })
+    const resolved = await resolveRestrictedToolPath(filePath, {
+      cwd: workspaceCwd,
+      mode: 'file',
+      restrictToCwd: restrictToCwd(options),
+      workspaceCwd: options.workspaceCwd,
+    })
     const targetPath = resolved.fsPath
 
     const existingStats = await fs.promises.stat(targetPath).catch((error: NodeJS.ErrnoException) => {
@@ -127,10 +133,10 @@ export const createFileTool = defineTool({
     additionalProperties: false,
   },
   permission: { mode: 'ask' },
-  async execute(args: CreateFileOptions & { path?: string; content?: string }) {
+  async execute(args: CreateFileOptions & { path?: string; content?: string }, context) {
     if (!args.path) return { ok: false, error: 'path is required' }
     try {
-      return { ok: true, data: await createTextFile(args.path, args.content ?? '', args) }
+      return { ok: true, data: await createTextFile(args.path, args.content ?? '', { ...args, cwdBlockEnabled: cwdBlockEnabledFromContext(context) }) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }

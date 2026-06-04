@@ -105,3 +105,31 @@ describe('readTextFile', () => {
     assert.equal(result.truncated, false)
   })
 })
+
+
+describe('readTextFile cwd block policy', () => {
+  let workspaceDir: string
+  let outsideDir: string
+
+  before(async () => {
+    workspaceDir = await createTempDir('qubit-read-workspace-')
+    outsideDir = await createTempDir('qubit-read-outside-')
+    await fs.promises.writeFile(path.join(outsideDir, 'outside.txt'), 'outside content', 'utf8')
+  })
+
+  after(async () => {
+    await cleanupTempDir(workspaceDir)
+    await cleanupTempDir(outsideDir)
+  })
+
+  it('blocks reading outside cwd by default and allows when cwd block is disabled', async () => {
+    const outsidePath = path.join(outsideDir, 'outside.txt')
+    await assert.rejects(
+      () => readTextFile(outsidePath, { cwd: workspaceDir }),
+      /outside the workspace|Access denied/
+    )
+
+    const result = await readTextFile(outsidePath, { cwd: workspaceDir, cwdBlockEnabled: false })
+    assert.equal(result.content, 'outside content')
+  })
+})

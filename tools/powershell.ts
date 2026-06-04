@@ -1,16 +1,23 @@
 import { defineTool } from '@hyper-labs/hyper-router'
 import { isWindows } from '../utils/wslBridge.js'
-import { resolveToolPath } from '../utils/pathSafety.js'
+import { resolveRestrictedToolPath } from '../utils/pathSafety.js'
 import { cwdOrDefault } from '../utils/toolWorkspace.js'
+import { cwdBlockEnabledFromContext, restrictToCwd, type ToolAccessPolicyOptions } from '../utils/toolAccessPolicy.js'
 import { runSpawnedCommand, type ShellRunOptions, type ShellRunResult } from './shellShared.js'
 
-export interface PowerShellOptions extends ShellRunOptions {
+export interface PowerShellOptions extends ShellRunOptions, ToolAccessPolicyOptions {
   description?: string
   cwd?: string
 }
 
-async function buildPowerShellInvocation(command: string, cwd?: string): Promise<{ cmd: string; args: string[]; cwd: string; displayCwd: string; detached?: boolean }> {
-  const resolvedCwd = await resolveToolPath(cwdOrDefault(cwd), { mode: 'directory' })
+async function buildPowerShellInvocation(command: string, options: PowerShellOptions = {}): Promise<{ cmd: string; args: string[]; cwd: string; displayCwd: string; detached?: boolean }> {
+  const workspaceCwd = cwdOrDefault(options.cwd)
+  const resolvedCwd = await resolveRestrictedToolPath(workspaceCwd, {
+    cwd: workspaceCwd,
+    mode: 'directory',
+    restrictToCwd: restrictToCwd(options),
+    workspaceCwd: options.workspaceCwd,
+  })
   return {
     cmd: isWindows() ? 'powershell.exe' : 'pwsh',
     args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
@@ -25,7 +32,7 @@ export async function runPowerShellCommand(command: string, options: PowerShellO
     return { success: false, cwd: cwdOrDefault(options.cwd), stdout: '', stderr: '', error: 'command is required' }
   }
 
-  const invocation = await buildPowerShellInvocation(command, options.cwd)
+  const invocation = await buildPowerShellInvocation(command, options)
   return runSpawnedCommand({ ...invocation, options, defaultSuccessCodes: [0] })
 }
 
@@ -48,10 +55,10 @@ export const powershellTool = defineTool({
     additionalProperties: false,
   },
   permission: { mode: 'ask', reason: 'PowerShell commands can read, write, or execute arbitrary code.' },
-  async execute(args: PowerShellOptions & { command?: string }) {
+  async execute(args: PowerShellOptions & { command?: string }, context) {
     if (!args.command) return { ok: false, error: 'command is required' }
     try {
-      return { ok: true, data: await runPowerShellCommand(args.command, args) }
+      return { ok: true, data: await runPowerShellCommand(args.command, { ...args, cwdBlockEnabled: cwdBlockEnabledFromContext(context) }) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }

@@ -642,6 +642,10 @@ func (c *composerModel) InsertNewline() {
 }
 
 func (c composerModel) View(prompt string, pulseFrame int) string {
+	return c.ViewStyled(prompt, pulseFrame, lipgloss.Style{})
+}
+
+func (c composerModel) ViewStyled(prompt string, pulseFrame int, normalStyle lipgloss.Style) string {
 	lines := c.visualLines()
 	height := c.Height()
 	start := clampInt(c.scrollLine, 0, max(0, len(lines)-1))
@@ -660,7 +664,7 @@ func (c composerModel) View(prompt string, pulseFrame int) string {
 		if i == 0 {
 			linePrompt = prompt
 		}
-		out = append(out, linePrompt+c.renderLine(line, pulseFrame))
+		out = append(out, linePrompt+c.renderLine(line, pulseFrame, normalStyle))
 	}
 	for len(out) < height {
 		linePrompt := continuationPrompt
@@ -672,7 +676,7 @@ func (c composerModel) View(prompt string, pulseFrame int) string {
 	return strings.Join(out, "\n")
 }
 
-func (c composerModel) renderLine(line composerLine, pulseFrame int) string {
+func (c composerModel) renderLine(line composerLine, pulseFrame int, normalStyle lipgloss.Style) string {
 	if len(c.value) == 0 && line.startIndex == 0 {
 		if c.focused && c.cursor == 0 {
 			return renderComposerCursor(" ", pulseFrame) + mutedSt.Render(c.placeholder)
@@ -682,6 +686,14 @@ func (c composerModel) renderLine(line composerLine, pulseFrame int) string {
 
 	start, end := c.SelectionRange()
 	var b strings.Builder
+	var normalRun strings.Builder
+	flushNormalRun := func() {
+		if normalRun.Len() == 0 {
+			return
+		}
+		b.WriteString(normalStyle.Render(normalRun.String()))
+		normalRun.Reset()
+	}
 	cursorRendered := false
 	for _, cell := range line.cells {
 		selected := c.HasSelection() && cell.index >= start && cell.index < end
@@ -689,14 +701,17 @@ func (c composerModel) renderLine(line composerLine, pulseFrame int) string {
 		text := string(cell.r)
 		switch {
 		case cursorHere:
+			flushNormalRun()
 			b.WriteString(renderComposerCursor(text, pulseFrame))
 			cursorRendered = true
 		case selected:
+			flushNormalRun()
 			b.WriteString(inputSelectSt.Render(text))
 		default:
-			b.WriteString(text)
+			normalRun.WriteString(text)
 		}
 	}
+	flushNormalRun()
 	if c.focused && !c.HasSelection() && !cursorRendered && c.cursor == line.endIndex {
 		b.WriteString(renderComposerCursor(" ", pulseFrame))
 	}
