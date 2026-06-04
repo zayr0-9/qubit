@@ -157,7 +157,8 @@ func (m model) updateKeyEntry(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m model) updateKeyEntryPaste(msg composerPasteMsg) model {
 	if msg.Err != nil {
-		return m.updateRuntimeError(msg.Err)
+		updated, _ := m.updateRuntimeError(msg.Err)
+		return updated
 	}
 	return m.insertKeyEntryPaste(msg.Text)
 }

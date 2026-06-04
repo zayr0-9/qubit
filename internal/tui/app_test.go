@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mattn/go-runewidth"
+	"github.com/qubit/graviton-cli/internal/tui/runtimeclient"
 )
 
 func TestInputSpinnerActiveDuringRunningStreamAfterForkTree(t *testing.T) {
@@ -3171,5 +3172,56 @@ func TestCodexLoginWhileStreamingStillQueuesDisplayStatus(t *testing.T) {
 	}
 	if len(m.messages) != 1 {
 		t.Fatalf("messages = %#v, want no direct append while streaming", m.messages)
+	}
+}
+
+func TestRuntimeDisconnectStartsReconnectAndPreservesComposer(t *testing.T) {
+	rt, _ := newTestRuntime(t)
+	reconnects := 0
+	rt.reconnect = func() error {
+		reconnects++
+		return nil
+	}
+	m := initialModel(rt)
+	m.ready = true
+	m.busy = true
+	m.activeRunID = "run_1"
+	m.composer.SetValue("draft stays")
+
+	updated, cmd := m.Update(runtimeErrMsg{err: runtimeclient.ErrDisconnected})
+	got := updated.(model)
+	if cmd == nil {
+		t.Fatal("disconnect returned nil command, want reconnect command")
+	}
+	if got.status != "runtime disconnected; reconnecting..." {
+		t.Fatalf("status = %q, want reconnecting", got.status)
+	}
+	if got.composer.Value() != "draft stays" {
+		t.Fatalf("composer = %q, want preserved draft", got.composer.Value())
+	}
+	msg := cmd()
+	if reconnects != 1 {
+		t.Fatalf("reconnects = %d, want 1", reconnects)
+	}
+	if reconnectMsg, ok := msg.(runtimeReconnectMsg); !ok || reconnectMsg.err != nil {
+		t.Fatalf("msg = %#v, want successful runtimeReconnectMsg", msg)
+	}
+}
+
+func TestRuntimeReconnectFailureSurfacesLogPath(t *testing.T) {
+	rt, _ := newTestRuntime(t)
+	rt.logPath = `D:\qubit\.qubit\runtime.log`
+	m := initialModel(rt)
+
+	updated, cmd := m.Update(runtimeReconnectMsg{err: fmt.Errorf("dial failed")})
+	got := updated.(model)
+	if cmd != nil {
+		t.Fatal("failed reconnect returned command, want nil")
+	}
+	if got.status != "runtime reconnect failed" {
+		t.Fatalf("status = %q, want reconnect failed", got.status)
+	}
+	if len(got.messages) == 0 || !strings.Contains(got.messages[len(got.messages)-1].Content, rt.logPath) {
+		t.Fatalf("messages = %#v, want runtime log path", got.messages)
 	}
 }

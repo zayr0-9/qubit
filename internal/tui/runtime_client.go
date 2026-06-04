@@ -3,7 +3,6 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -33,20 +32,8 @@ func (r *runtimeClient) shutdown() {
 		r.client.Shutdown()
 		return
 	}
-	if r.attached {
-		if r.conn != nil {
-			_ = r.conn.Close()
-		}
-		return
-	}
 	if r.conn != nil {
 		_ = r.conn.Close()
-	}
-	if r.cmd != nil && r.cmd.Process != nil {
-		_ = r.cmd.Process.Kill()
-	}
-	if r.lockPath != "" {
-		_ = os.Remove(r.lockPath)
 	}
 }
 
@@ -83,5 +70,21 @@ func sendRuntime(r *runtimeClient, payload map[string]any) tea.Cmd {
 		}
 		err := r.send(payload)
 		return sendDoneMsg{err: err}
+	}
+}
+
+func reconnectRuntime(r *runtimeClient) tea.Cmd {
+	return func() tea.Msg {
+		if r == nil {
+			return runtimeReconnectMsg{err: fmt.Errorf("runtime client unavailable")}
+		}
+		if r.client != nil {
+			err := r.client.Reconnect()
+			return runtimeReconnectMsg{err: err}
+		}
+		if r.reconnect != nil {
+			return runtimeReconnectMsg{err: r.reconnect()}
+		}
+		return runtimeReconnectMsg{err: fmt.Errorf("runtime reconnect unavailable")}
 	}
 }

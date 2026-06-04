@@ -127,6 +127,7 @@ When a TUI starts:
 QUBIT_WORKSPACE_CWD=<launch cwd>
 QUBIT_PROJECT_DIR=<launch cwd>\.qubit
 QUBIT_RUNTIME_ADDR=<host:port>
+QUBIT_RUNTIME_LOCK_PATH=<launch cwd>\.qubit\runtime-server.lock
 ```
 
 6. Connect to the newly started server.
@@ -138,16 +139,13 @@ If a stale lock is found and no server becomes reachable, Go may remove the stal
 
 Current MVP behavior:
 
-- The owner TUI starts the Node server.
-- Secondary TUIs attach to the existing server.
-- Attached secondary TUIs should close only their socket on exit.
-- The owner TUI may still terminate the Node server on exit in the current implementation.
-
-Future preferred behavior:
-
-- Server lifetime should be independent from any single TUI.
-- The server should stay alive while clients are connected or active runs exist.
-- The server may exit after an idle timeout when no clients/runs remain.
+- Server lifetime is independent from any single TUI.
+- Any TUI, including the one that started the server, closes only its own runtime socket on normal exit.
+- The Go client does not remove `.qubit/runtime-server.lock` or kill the Node server during normal TUI shutdown.
+- The lock file is advisory and server-owned during graceful idle exit; Go stale-lock recovery remains the fallback when no server is reachable.
+- The server stays alive while at least one client is connected or visible/hidden runtime work is active.
+- When no clients and no active runs remain, the server exits after `QUBIT_RUNTIME_IDLE_MS` milliseconds, defaulting to 120 seconds.
+- If a runtime socket disconnects unexpectedly, the TUI attempts to reconnect to the existing server or starts a fresh server before surfacing a reconnect failure.
 
 Do not regress the first TUI into a server-only process. It must connect to the server it starts and behave like every other TUI.
 
@@ -177,15 +175,17 @@ Changes to this area should include or update tests where practical and must be 
 Recommended manual smoke test:
 
 1. Close all Qubit terminals.
-2. Start Terminal A with `pnpm run chat`.
+2. Start Terminal A with `pnpm run chat` or `bin\qubit.exe`.
 3. Verify Terminal A is usable and can type `/`.
-4. Start Terminal B with `pnpm run chat`.
+4. Start Terminal B from the same cwd.
 5. Verify Terminal B attaches and is usable.
 6. In Terminal A, open `/sessions` and activate a different session.
 7. Verify Terminal B does not mirror Terminal A's selected session.
 8. In Terminal B, open `/providers` or `/models` and verify Terminal A does not open/mirror that modal.
-9. Send a normal chat in one terminal and verify the other terminal does not corrupt its local selected view.
-10. Inspect `.qubit/runtime.log` if startup or routing looks wrong.
+9. Close Terminal A.
+10. Verify Terminal B remains usable and can send a stub chat.
+11. Close Terminal B, wait past `QUBIT_RUNTIME_IDLE_MS` or the default idle timeout, and verify the Node runtime exits and removes/advises stale lock cleanup.
+12. Inspect `.qubit/runtime.log` for `[runtime-server]` client connect/disconnect and idle shutdown diagnostics if startup or routing looks wrong.
 
 Automated tests should prefer focused Go tests for `internal/tui/runtimeclient/client.go` address/attach behavior and `internal/tui/runtime_client.go` Tea adapter behavior where possible, plus TypeScript/runtime tests for client routing functions if the runtime server is further modularized.
 

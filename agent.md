@@ -317,8 +317,10 @@ Follow standard Go conventions:
 - Keep the Go runtime client responsible only for process management, singleton server attach/start, logging, JSON encoding/decoding, and Tea commands.
 - Do not put business logic in `internal/tui/runtime_client.go` or `internal/tui/runtimeclient/client.go`.
 - Prefer attaching to an existing runtime server for the same project `.qubit` directory; only start a new Node process when no server is reachable.
+- Normal TUI shutdown must close only that TUI's runtime socket. Do not kill the singleton Node server or remove `.qubit/runtime-server.lock` on normal exit.
 - Keep runtime socket/stdout parsing strict JSON-lines.
-- Log runtime event/stderr lines to `.qubit/runtime.log` for copyable diagnostics.
+- Log runtime socket events and server diagnostics to `.qubit/runtime.log` for copyable diagnostics; a server process that outlives its starter TUI should write diagnostics directly to that file.
+- Unexpected runtime socket disconnects should trigger reconnect/failover before becoming permanent UI errors.
 - Avoid swallowing send/decode/runtime errors silently.
 
 ### UI/UX Standards

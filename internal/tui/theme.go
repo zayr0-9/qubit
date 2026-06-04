@@ -101,7 +101,8 @@ func (m model) updateThemeEntryTeaPaste(msg tea.PasteMsg) model {
 
 func (m model) updateThemeEntryPaste(msg composerPasteMsg) model {
 	if msg.Err != nil {
-		return m.updateRuntimeError(msg.Err)
+		updated, _ := m.updateRuntimeError(msg.Err)
+		return updated
 	}
 	return m.insertThemeEntryPaste(msg.Text)
 }

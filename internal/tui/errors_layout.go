@@ -1,13 +1,19 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/qubit/graviton-cli/internal/tui/runtimeclient"
 )
 
-func (m model) updateRuntimeError(err error) model {
+func (m model) updateRuntimeError(err error) (model, tea.Cmd) {
+	if isRuntimeDisconnect(err) {
+		return m.updateRuntimeDisconnected(err)
+	}
 	m.clearFakeStream()
 	m.busy = false
 	m.ready = false
@@ -19,7 +25,42 @@ func (m model) updateRuntimeError(err error) model {
 	}
 	m.messages = append(m.messages, chatMessage{Role: "error", Content: detail})
 	m.refreshViewport()
-	return m
+	return m, nil
+}
+
+func isRuntimeDisconnect(err error) bool {
+	return err != nil && (errors.Is(err, runtimeclient.ErrDisconnected) || strings.Contains(strings.ToLower(err.Error()), "runtime stopped"))
+}
+
+func (m model) updateRuntimeDisconnected(err error) (model, tea.Cmd) {
+	m.clearFakeStream()
+	m.busy = false
+	m.ready = false
+	m.activeRunID = ""
+	m.lastRunStartedSession = ""
+	m.err = err.Error()
+	m.status = "runtime disconnected; reconnecting..."
+	return m, reconnectRuntime(m.runtime)
+}
+
+func (m model) updateRuntimeReconnect(err error) (model, tea.Cmd) {
+	if err != nil {
+		m.clearFakeStream()
+		m.busy = false
+		m.ready = false
+		m.err = err.Error()
+		m.status = "runtime reconnect failed"
+		detail := "Runtime reconnect failed: " + err.Error()
+		if m.runtime != nil && m.runtime.logPath != "" {
+			detail += "\n\nRuntime log: " + m.runtime.logPath
+		}
+		m.messages = append(m.messages, chatMessage{Role: "error", Content: detail})
+		m.refreshViewport()
+		return m, nil
+	}
+	m.err = ""
+	m.status = "runtime reconnected"
+	return m, waitRuntimeEvent(m.runtime)
 }
 
 func (m model) updateSendDone(err error) model {

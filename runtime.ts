@@ -2,7 +2,7 @@
 // @ts-nocheck
 import readline from "node:readline";
 import net from "node:net";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -380,6 +380,27 @@ const hooks = {
   },
 };
 
+class QubitAgentRuntime extends AgentRuntime {
+  async executeToolCalls(sessionId, runId, signal, step, toolCalls) {
+    const messages = await super.executeToolCalls(sessionId, runId, signal, step, toolCalls);
+    return messages.map((message) => {
+      if (message?.role !== "tool" || message.name !== "planMd") return message;
+      const parsed = parseStoredToolResult(message.content);
+      const payload = resultPayload(parsed);
+      const data = plainObject(payload);
+      if (data.displayed !== true || typeof data.modelContent !== "string") return message;
+      return {
+        ...message,
+        content: JSON.stringify({ ok: Boolean(parsed?.ok), data: { displayed: true, exists: data.exists !== false, name: data.name, path: data.path, message: data.modelContent } }),
+      };
+    });
+  }
+}
+
+function createQubitRuntime(config) {
+  return new QubitAgentRuntime(config);
+}
+
 let apiKeyIndex = await loadApiKeyIndex();
 const codexTokenStore = new QubitCodexTokenStore({ dataDir: configDir, legacyDataDir: dataDir, keychainService, keytar });
 let runtimeState = await createRuntimeState("plan");
@@ -387,6 +408,50 @@ let sessionIndex = await loadSessionIndex();
 let activeSessionId = sessionIndex.activeSessionId;
 
 const clients = new Set();
+const clientMeta = new Map();
+let nextClientId = 1;
+let idleShutdownTimer = null;
+
+function runtimeIdleTimeoutMs() {
+  const parsed = Number(process.env.QUBIT_RUNTIME_IDLE_MS || "");
+  if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  return 120000;
+}
+
+function hasVisibleOrActiveRuns() {
+  return activeRuns.size > 0 || hiddenRuns.size > 0;
+}
+
+function cancelIdleShutdown(reason = "") {
+  if (!idleShutdownTimer) return;
+  clearTimeout(idleShutdownTimer);
+  idleShutdownTimer = null;
+  console.error(`[runtime-server] idle shutdown cancelled${reason ? `: ${reason}` : ""}`);
+}
+
+function maybeScheduleIdleShutdown(reason = "") {
+  if (!serverAddress || clients.size > 0 || hasVisibleOrActiveRuns() || idleShutdownTimer) return;
+  const timeoutMs = runtimeIdleTimeoutMs();
+  console.error(`[runtime-server] scheduling idle shutdown in ${timeoutMs}ms${reason ? `: ${reason}` : ""}`);
+  idleShutdownTimer = setTimeout(async () => {
+    idleShutdownTimer = null;
+    if (clients.size > 0 || hasVisibleOrActiveRuns()) return;
+    console.error("[runtime-server] idle timeout reached; exiting");
+    await cleanupRuntimeLock();
+    process.exit(0);
+  }, timeoutMs);
+}
+
+async function cleanupRuntimeLock() {
+  const lockPath = process.env.QUBIT_RUNTIME_LOCK_PATH || "";
+  if (!lockPath) return;
+  try {
+    await rm(lockPath, { force: true });
+    console.error(`[runtime-server] removed lock ${lockPath}`);
+  } catch (error) {
+    console.error(`[runtime-server] failed to remove lock: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 function readyMessage(id) {
   return {
@@ -455,18 +520,30 @@ function startStdioClient() {
 
 async function startRuntimeServer(address) {
   const server = net.createServer((socket) => {
+    const clientId = `client_${nextClientId++}`;
     clients.add(socket);
+    clientMeta.set(socket, { clientId, connectedAt: Date.now() });
+    cancelIdleShutdown(`client connected ${clientId}`);
+    console.error(`[runtime-server] client connected ${clientId}; clients=${clients.size}`);
     socket.setEncoding("utf8");
-    const rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
+    let removed = false;
+    let rl = null;
+    const removeClient = (event) => {
+      if (removed) return;
+      removed = true;
+      const meta = clientMeta.get(socket);
+      clients.delete(socket);
+      clientMeta.delete(socket);
+      rl?.close();
+      console.error(`[runtime-server] client ${event} ${meta?.clientId || clientId}; clients=${clients.size}`);
+      maybeScheduleIdleShutdown(`client ${event}`);
+    };
+    rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
+    rl.on("error", () => removeClient("errored"));
     attachLineHandler(rl, socket);
     write(readyMessage(), socket);
-    socket.on("close", () => {
-      clients.delete(socket);
-      rl.close();
-    });
-    socket.on("error", () => {
-      clients.delete(socket);
-    });
+    socket.on("close", () => removeClient("closed"));
+    socket.on("error", () => removeClient("errored"));
   });
   server.on("error", (error) => {
     console.error(`[runtime-server] ${error instanceof Error ? error.message : String(error)}`);
@@ -878,6 +955,7 @@ async function handleChatRequest(request, responseTarget = null) {
   setRunCwdBlockEnabled(runId, cwdBlockEnabled);
   const runRuntimeState = runtimeState;
   activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, input: request.input, controller, runtime: runRuntimeState.runtime, target: responseTarget, cwdBlockEnabled });
+  cancelIdleShutdown(`visible run started ${runId}`);
   write({ type: "run_started", id: request.id, runId, sessionId: runSessionId }, responseTarget);
 
   try {
@@ -928,6 +1006,7 @@ async function handleChatRequest(request, responseTarget = null) {
     }
   } finally {
     activeRuns.delete(runId);
+    maybeScheduleIdleShutdown(`visible run finished ${runId}`);
     clearRunCwdBlockEnabled(runId);
     latestCodexUsageByRun.delete(runId);
   }
@@ -1007,6 +1086,7 @@ async function runSubagentTask({ task, index, context, parentRun, parentSessionI
 
     const cwdBlockEnabled = parentRun?.cwdBlockEnabled !== false;
     hiddenRuns.set(runId, { runId, parentRunId, parentSessionId, sessionId: childSession.id, depth, autoAllowPermissions: true, cwdBlockEnabled, runtime: runtimeStateForChild.runtime });
+    cancelIdleShutdown(`hidden run started ${runId}`);
     setRunCwdBlockEnabled(runId, cwdBlockEnabled);
     const result = await runtimeStateForChild.runtime.run({
       runId,
@@ -1044,6 +1124,7 @@ async function runSubagentTask({ task, index, context, parentRun, parentSessionI
     return subagentTaskFailure(index, task, childSession?.id || "", runId, providerName, selectedModel, durationMs, errorMessage);
   } finally {
     hiddenRuns.delete(runId);
+    maybeScheduleIdleShutdown(`hidden run finished ${runId}`);
     clearRunCwdBlockEnabled(runId);
     latestCodexUsageByRun.delete(runId);
   }
@@ -1259,27 +1340,6 @@ async function createRuntimeStateFor({ providerName, model: modelName, instructi
     hooks,
   });
   return { runtime, promptMode: normalizedPromptMode, model: normalizedModel, ...providerConfig };
-}
-
-class QubitAgentRuntime extends AgentRuntime {
-  async executeToolCalls(sessionId, runId, signal, step, toolCalls) {
-    const messages = await super.executeToolCalls(sessionId, runId, signal, step, toolCalls);
-    return messages.map((message) => {
-      if (message?.role !== "tool" || message.name !== "planMd") return message;
-      const parsed = parseStoredToolResult(message.content);
-      const payload = resultPayload(parsed);
-      const data = plainObject(payload);
-      if (data.displayed !== true || typeof data.modelContent !== "string") return message;
-      return {
-        ...message,
-        content: JSON.stringify({ ok: Boolean(parsed?.ok), data: { displayed: true, exists: data.exists !== false, name: data.name, path: data.path, message: data.modelContent } }),
-      };
-    });
-  }
-}
-
-function createQubitRuntime(config) {
-  return new QubitAgentRuntime(config);
 }
 
 function providerReasoningOptions() {

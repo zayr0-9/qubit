@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/sha1"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,17 +12,24 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/qubit/graviton-cli/internal/tui/protocol"
 )
 
+var ErrDisconnected = errors.New("runtime disconnected")
+
 type Client struct {
-	cmd       *exec.Cmd
-	conn      io.ReadWriteCloser
-	stdin     io.WriteCloser
-	events    chan protocol.RuntimeEvent
-	errs      chan error
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	conn    io.ReadWriteCloser
+	stdin   io.WriteCloser
+	events  chan protocol.RuntimeEvent
+	errs    chan error
+	closed  bool
+	connSeq int
+
 	appRoot   string
 	launchCwd string
 	qubitDir  string
@@ -30,86 +38,170 @@ type Client struct {
 	attached  bool
 }
 
+type clientContext struct {
+	node        string
+	launchCwd   string
+	appRoot     string
+	qubitDir    string
+	logPath     string
+	runtimePath string
+	serverAddr  string
+	lockPath    string
+}
+
 func Start() (*Client, error) {
-	node, err := exec.LookPath("node")
+	ctx, err := newClientContext()
 	if err != nil {
 		return nil, err
+	}
+	rt := newClient(ctx)
+	if err := rt.attachOrStart(ctx); err != nil {
+		rt.cleanupFailedStart()
+		return nil, err
+	}
+	return rt, nil
+}
+
+func newClient(ctx clientContext) *Client {
+	return &Client{
+		events:    make(chan protocol.RuntimeEvent, 32),
+		errs:      make(chan error, 4),
+		appRoot:   ctx.appRoot,
+		launchCwd: ctx.launchCwd,
+		qubitDir:  ctx.qubitDir,
+		logPath:   ctx.logPath,
+		lockPath:  ctx.lockPath,
+	}
+}
+
+func newClientContext() (clientContext, error) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		return clientContext{}, err
 	}
 	launchCwd, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("get launch cwd: %w", err)
+		return clientContext{}, fmt.Errorf("get launch cwd: %w", err)
 	}
 	appRoot, err := findAppRoot()
 	if err != nil {
-		return nil, err
+		return clientContext{}, err
 	}
 	qubitDir := filepath.Join(launchCwd, ".qubit")
 	if err := os.MkdirAll(qubitDir, 0755); err != nil {
-		return nil, fmt.Errorf("create project .qubit directory: %w", err)
+		return clientContext{}, fmt.Errorf("create project .qubit directory: %w", err)
 	}
+	return makeClientContext(node, launchCwd, appRoot, qubitDir)
+}
+
+func makeClientContext(node, launchCwd, appRoot, qubitDir string) (clientContext, error) {
 	logPath := filepath.Join(qubitDir, "runtime.log")
 	runtimePath := filepath.Join(appRoot, "dist", "runtime.js")
 	if _, err := os.Stat(runtimePath); err != nil {
-		return nil, fmt.Errorf("runtime not built at %s; run pnpm run build:runtime", runtimePath)
+		return clientContext{}, fmt.Errorf("runtime not built at %s; run pnpm run build:runtime", runtimePath)
 	}
-
 	serverAddr := runtimeServerAddress(qubitDir)
 	lockPath := filepath.Join(qubitDir, "runtime-server.lock")
-	if conn, err := connectRuntimeServer(serverAddr, 150*time.Millisecond); err == nil {
-		rt := &Client{conn: conn, stdin: conn, events: make(chan protocol.RuntimeEvent, 32), errs: make(chan error, 4), appRoot: appRoot, launchCwd: launchCwd, qubitDir: qubitDir, logPath: logPath, lockPath: lockPath, attached: true}
-		go rt.readStdout(conn)
-		return rt, nil
-	}
+	return clientContext{
+		node:        node,
+		launchCwd:   launchCwd,
+		appRoot:     appRoot,
+		qubitDir:    qubitDir,
+		logPath:     logPath,
+		runtimePath: runtimePath,
+		serverAddr:  serverAddr,
+		lockPath:    lockPath,
+	}, nil
+}
 
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+func (r *Client) context() (clientContext, error) {
+	node, err := exec.LookPath("node")
 	if err != nil {
-		if conn, connectErr := connectRuntimeServer(serverAddr, 5*time.Second); connectErr == nil {
-			rt := &Client{conn: conn, stdin: conn, events: make(chan protocol.RuntimeEvent, 32), errs: make(chan error, 4), appRoot: appRoot, launchCwd: launchCwd, qubitDir: qubitDir, logPath: logPath, lockPath: lockPath, attached: true}
-			go rt.readStdout(conn)
-			return rt, nil
+		return clientContext{}, err
+	}
+	if r.launchCwd == "" || r.appRoot == "" || r.qubitDir == "" {
+		return newClientContext()
+	}
+	if err := os.MkdirAll(r.qubitDir, 0755); err != nil {
+		return clientContext{}, fmt.Errorf("create project .qubit directory: %w", err)
+	}
+	return makeClientContext(node, r.launchCwd, r.appRoot, r.qubitDir)
+}
+
+func (r *Client) attachOrStart(ctx clientContext) error {
+	if err := r.connectExisting(ctx.serverAddr, 150*time.Millisecond); err == nil {
+		return nil
+	}
+	return r.startServer(ctx)
+}
+
+func (r *Client) connectExisting(address string, timeout time.Duration) error {
+	conn, err := connectRuntimeServer(address, timeout)
+	if err != nil {
+		return err
+	}
+	r.attachConn(conn, true)
+	return nil
+}
+
+func (r *Client) startServer(ctx clientContext) error {
+	lockFile, err := os.OpenFile(ctx.lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		if connectErr := r.connectExisting(ctx.serverAddr, 5*time.Second); connectErr == nil {
+			return nil
 		}
-		_ = os.Remove(lockPath)
-		lockFile, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+		_ = os.Remove(ctx.lockPath)
+		lockFile, err = os.OpenFile(ctx.lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 		if err != nil {
-			return nil, fmt.Errorf("acquire runtime server lock: %w", err)
+			return fmt.Errorf("acquire runtime server lock: %w", err)
 		}
 	}
-	_, _ = fmt.Fprintf(lockFile, "%d\n%s\n", os.Getpid(), serverAddr)
 	_ = lockFile.Close()
 
-	_ = os.WriteFile(logPath, []byte(""), 0644)
-	cmd := exec.Command(node, runtimePath)
-	cmd.Dir = appRoot
-	cmd.Env = append(os.Environ(), "QUBIT_WORKSPACE_CWD="+launchCwd, "QUBIT_PROJECT_DIR="+qubitDir, "QUBIT_RUNTIME_ADDR="+serverAddr)
-
-	stderr, err := cmd.StderrPipe()
+	logFile, err := os.OpenFile(ctx.logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil, err
+		_ = os.Remove(ctx.lockPath)
+		return fmt.Errorf("open runtime log: %w", err)
 	}
-	rt := &Client{cmd: cmd, events: make(chan protocol.RuntimeEvent, 32), errs: make(chan error, 4), appRoot: appRoot, launchCwd: launchCwd, qubitDir: qubitDir, logPath: logPath, lockPath: lockPath}
+
+	cmd := exec.Command(ctx.node, ctx.runtimePath)
+	cmd.Dir = ctx.appRoot
+	cmd.Env = append(os.Environ(),
+		"QUBIT_WORKSPACE_CWD="+ctx.launchCwd,
+		"QUBIT_PROJECT_DIR="+ctx.qubitDir,
+		"QUBIT_RUNTIME_ADDR="+ctx.serverAddr,
+		"QUBIT_RUNTIME_LOCK_PATH="+ctx.lockPath,
+	)
+	cmd.Stderr = logFile
+	configureDetachedProcess(cmd)
+
+	r.mu.Lock()
+	r.cmd = cmd
+	r.attached = false
+	r.mu.Unlock()
+
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		_ = logFile.Close()
+		r.cleanupFailedStart()
+		return err
 	}
-	go rt.readStderr(stderr)
+	_ = logFile.Close()
+	if cmd.Process != nil {
+		_ = os.WriteFile(ctx.lockPath, []byte(fmt.Sprintf("%d\n%s\n", cmd.Process.Pid, ctx.serverAddr)), 0644)
+	}
 
-	conn, err := connectRuntimeServer(serverAddr, 5*time.Second)
+	conn, err := connectRuntimeServer(ctx.serverAddr, 5*time.Second)
 	if err != nil {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		_ = os.Remove(lockPath)
-		return nil, fmt.Errorf("connect runtime server: %w", err)
+		r.cleanupFailedStart()
+		return fmt.Errorf("connect runtime server: %w", err)
 	}
-	rt.conn = conn
-	rt.stdin = conn
-	go rt.readStdout(conn)
-	go func() {
-		if err := cmd.Wait(); err != nil {
-			rt.errs <- fmt.Errorf("runtime exited: %w", err)
-		}
-		close(rt.events)
-	}()
-	return rt, nil
+	r.attachConn(conn, false)
+	go r.waitRuntimeProcess(cmd)
+	return nil
+}
+
+func (r *Client) waitRuntimeProcess(cmd *exec.Cmd) {
+	_ = cmd.Wait()
 }
 
 func runtimeServerAddress(qubitDir string) string {
@@ -135,38 +227,54 @@ func connectRuntimeServer(address string, timeout time.Duration) (net.Conn, erro
 	}
 }
 
-func (r *Client) readStdout(stdout io.Reader) {
+func (r *Client) attachConn(conn io.ReadWriteCloser, attached bool) {
+	r.mu.Lock()
+	r.conn = conn
+	r.stdin = conn
+	r.attached = attached
+	r.closed = false
+	r.connSeq++
+	seq := r.connSeq
+	r.mu.Unlock()
+	go r.readStdout(conn, seq)
+}
+
+func (r *Client) readStdout(stdout io.Reader, seq int) {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
+		if !r.shouldReportReader(seq) {
+			return
+		}
 		line := append([]byte(nil), scanner.Bytes()...)
 		r.appendLog("stdout", string(line))
 		var ev protocol.RuntimeEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
-			r.errs <- fmt.Errorf("bad runtime event: %s", string(line))
+			r.emitError(fmt.Errorf("bad runtime event: %s", string(line)))
 			continue
 		}
 		r.events <- ev
 	}
-	if err := scanner.Err(); err != nil {
-		r.errs <- err
+	if !r.shouldReportReader(seq) {
+		return
 	}
+	if err := scanner.Err(); err != nil {
+		r.emitError(fmt.Errorf("%w: %v", ErrDisconnected, err))
+		return
+	}
+	r.emitError(ErrDisconnected)
 }
 
-func (r *Client) readStderr(stderr io.Reader) {
-	scanner := bufio.NewScanner(stderr)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" {
-			r.appendLog("stderr", line)
-			// Opt-in OAuth diagnostics are intentionally written to stderr by the
-			// Node runtime, but they are not runtime failures. Keep them in
-			// .qubit/runtime.log without interrupting the TUI or hiding the auth URL.
-			if strings.HasPrefix(line, "[codex-oauth]") || strings.HasPrefix(line, "[codex-retry]") || strings.HasPrefix(line, "[codex-reasoning]") || strings.HasPrefix(line, "[runtime-server]") {
-				continue
-			}
-			r.errs <- fmt.Errorf("%s", line)
-		}
+func (r *Client) shouldReportReader(seq int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.closed && r.connSeq == seq
+}
+
+func (r *Client) emitError(err error) {
+	select {
+	case r.errs <- err:
+	default:
 	}
 }
 
@@ -183,22 +291,38 @@ func (r *Client) appendLog(stream string, line string) {
 	_, _ = f.WriteString(entry)
 }
 
+func (r *Client) closeConnectionOnly(markClosed bool) {
+	r.mu.Lock()
+	if markClosed {
+		r.closed = true
+	}
+	conn := r.conn
+	r.conn = nil
+	r.stdin = nil
+	r.connSeq++
+	r.mu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
+func (r *Client) cleanupFailedStart() {
+	r.closeConnectionOnly(false)
+	r.mu.Lock()
+	cmd := r.cmd
+	lockPath := r.lockPath
+	r.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	}
+	if lockPath != "" {
+		_ = os.Remove(lockPath)
+	}
+}
+
 func (r *Client) shutdown() {
-	if r.attached {
-		if r.conn != nil {
-			_ = r.conn.Close()
-		}
-		return
-	}
-	if r.conn != nil {
-		_ = r.conn.Close()
-	}
-	if r.cmd != nil && r.cmd.Process != nil {
-		_ = r.cmd.Process.Kill()
-	}
-	if r.lockPath != "" {
-		_ = os.Remove(r.lockPath)
-	}
+	r.closeConnectionOnly(true)
 }
 
 func (r *Client) send(v any) error {
@@ -206,8 +330,27 @@ func (r *Client) send(v any) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(r.stdin, "%s\n", payload)
+	r.mu.Lock()
+	stdin := r.stdin
+	closed := r.closed
+	r.mu.Unlock()
+	if closed || stdin == nil {
+		return ErrDisconnected
+	}
+	_, err = fmt.Fprintf(stdin, "%s\n", payload)
 	return err
+}
+
+func (r *Client) Reconnect() error {
+	r.closeConnectionOnly(false)
+	ctx, err := r.context()
+	if err != nil {
+		return err
+	}
+	if err := r.connectExisting(ctx.serverAddr, 750*time.Millisecond); err == nil {
+		return nil
+	}
+	return r.startServer(ctx)
 }
 
 func (r *Client) Events() <-chan protocol.RuntimeEvent { return r.events }
