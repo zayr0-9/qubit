@@ -116,7 +116,11 @@ func TestShowFileMentionPaletteFalseForSlashBusyNotReady(t *testing.T) {
 	m.ready = true
 	m.busy = true
 	if m.showFileMentionPalette() {
-		t.Fatal("file mention palette visible when busy")
+		t.Fatal("file mention palette visible when busy before streaming")
+	}
+	m.streaming = true
+	if !m.showFileMentionPalette() {
+		t.Fatal("file mention palette hidden while streaming")
 	}
 }
 

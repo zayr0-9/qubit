@@ -27,29 +27,14 @@ func (m model) renderModalPanel(modal modalState, height int) string {
 	panelWidth := min(max(48, m.width-12), 92)
 	contentWidth := max(20, panelWidth-6)
 
-	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Foreground(accent).Bold(true).Render(modal.Title))
-	if modal.Description != "" {
-		b.WriteString("\n")
-		b.WriteString(wrap(modal.Description, contentWidth))
-	}
+	header := m.renderModalHeader(modal, contentWidth)
+	body := m.renderModalBody(modal, contentWidth)
 
-	if len(modal.Fields) > 0 {
+	var b strings.Builder
+	b.WriteString(header)
+	if body != "" {
 		b.WriteString("\n\n")
-		for i, field := range modal.Fields {
-			label := mutedSt.Render(field.Label + ":")
-			value := field.Value
-			if strings.Contains(value, "\n") {
-				b.WriteString(label)
-				b.WriteString("\n")
-				b.WriteString(truncateModalLines(value, contentWidth, 12))
-			} else {
-				b.WriteString(fmt.Sprintf("%s %s", label, oneLine(value, max(8, contentWidth-lipgloss.Width(field.Label)-2))))
-			}
-			if i < len(modal.Fields)-1 {
-				b.WriteString("\n")
-			}
-		}
+		b.WriteString(body)
 	}
 
 	if len(modal.Options) > 0 {
@@ -114,4 +99,76 @@ func descriptionSuffix(description string) string {
 		return ""
 	}
 	return "  " + description
+}
+
+func (m model) renderModalHeader(modal modalState, contentWidth int) string {
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Foreground(accent).Bold(true).Render(modal.Title))
+	if modal.Description != "" {
+		b.WriteString("\n")
+		b.WriteString(wrap(modal.Description, contentWidth))
+	}
+	return b.String()
+}
+
+func (m model) renderModalBody(modal modalState, contentWidth int) string {
+	lines := m.modalContentLinesFor(modal, contentWidth)
+	if len(lines) == 0 {
+		return ""
+	}
+	visibleRows := m.modalScrollableRows(modal)
+	if visibleRows >= len(lines) {
+		return strings.Join(lines, "\n")
+	}
+	offset := min(max(modal.ScrollOffset, 0), max(0, len(lines)-visibleRows))
+	visible := append([]string{}, lines[offset:offset+visibleRows]...)
+	if offset > 0 {
+		visible[0] = mutedSt.Render(fmt.Sprintf("↑ more above (%d)", offset))
+	}
+	if below := len(lines) - offset - visibleRows; below > 0 {
+		visible[len(visible)-1] = mutedSt.Render(fmt.Sprintf("↓ more below (%d)", below))
+	}
+	return strings.Join(visible, "\n")
+}
+
+func (m model) modalScrollableRows(modal modalState) int {
+	panelHeight := max(1, m.height)
+	headerRows := renderedLineCount(m.renderModalHeader(modal, max(20, min(max(48, m.width-12), 92)-6)))
+	actionRows := 0
+	if len(modal.Actions) > 0 {
+		actionRows = 2
+	}
+	bodySeparatorRows := 2
+	paddingRows := 2
+	return max(1, panelHeight-headerRows-actionRows-bodySeparatorRows-paddingRows)
+}
+
+func (m model) modalContentLines() []string {
+	if m.modal == nil {
+		return nil
+	}
+	panelWidth := min(max(48, m.width-12), 92)
+	contentWidth := max(20, panelWidth-6)
+	return m.modalContentLinesFor(*m.modal, contentWidth)
+}
+
+func (m model) modalContentLinesFor(modal modalState, contentWidth int) []string {
+	if len(modal.Fields) == 0 {
+		return nil
+	}
+	var lines []string
+	for i, field := range modal.Fields {
+		label := mutedSt.Render(field.Label + ":")
+		value := field.Value
+		if strings.Contains(value, "\n") {
+			lines = append(lines, label)
+			lines = append(lines, strings.Split(wrap(value, contentWidth), "\n")...)
+		} else {
+			lines = append(lines, fmt.Sprintf("%s %s", label, oneLine(value, max(8, contentWidth-lipgloss.Width(field.Label)-2))))
+		}
+		if i < len(modal.Fields)-1 {
+			lines = append(lines, "")
+		}
+	}
+	return lines
 }

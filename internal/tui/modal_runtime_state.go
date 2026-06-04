@@ -10,5 +10,6 @@ type modalState struct {
 	OptionCursor int
 	Actions      []modalAction
 	Cursor       int
+	ScrollOffset int
 	Payload      map[string]any
 }

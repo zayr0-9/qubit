@@ -14,7 +14,7 @@ func (m model) openToolPermissionModal(ev runtimeEvent) model {
 		{Label: "Tool", Value: fallback(ev.ToolName, "unknown")},
 	}
 	if len(ev.Args) > 0 {
-		fields = append(fields, modalField{Label: "Args", Value: compactJSON(ev.Args, 900)})
+		fields = append(fields, modalField{Label: "Args", Value: formatFullJSON(ev.Args)})
 	}
 	if modalDevDetailsEnabled() {
 		fields = append(fields,
@@ -25,7 +25,7 @@ func (m model) openToolPermissionModal(ev runtimeEvent) model {
 			fields = append(fields, modalField{Label: "Step", Value: fmt.Sprintf("%d", ev.Step)})
 		}
 		if len(ev.Metadata) > 0 {
-			fields = append(fields, modalField{Label: "Metadata", Value: compactJSON(ev.Metadata, 500)})
+			fields = append(fields, modalField{Label: "Metadata", Value: formatFullJSON(ev.Metadata)})
 		}
 	}
 
@@ -231,6 +231,8 @@ func (m model) updateModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "up", "ctrl+p":
 		if len(m.modal.Options) > 0 {
 			m.moveModalOptionCursor(-1)
+		} else if m.modalHasScrollableContent() {
+			m.scrollModalContent(-1)
 		} else {
 			m.moveModalCursor(-1)
 		}
@@ -238,9 +240,17 @@ func (m model) updateModal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "down", "ctrl+n":
 		if len(m.modal.Options) > 0 {
 			m.moveModalOptionCursor(1)
+		} else if m.modalHasScrollableContent() {
+			m.scrollModalContent(1)
 		} else {
 			m.moveModalCursor(1)
 		}
+		return m, nil
+	case "pgup":
+		m.scrollModalContent(-m.modalContentPageSize())
+		return m, nil
+	case "pgdown":
+		m.scrollModalContent(m.modalContentPageSize())
 		return m, nil
 	case "left", "shift+tab":
 		m.moveModalCursor(-1)
@@ -266,6 +276,25 @@ func (m *model) moveModalOptionCursor(delta int) {
 		return
 	}
 	m.modal.OptionCursor = (m.modal.OptionCursor + delta + len(m.modal.Options)) % len(m.modal.Options)
+}
+
+func (m model) modalHasScrollableContent() bool {
+	return m.modal != nil && len(m.modal.Options) == 0 && len(m.modalContentLines()) > m.modalContentPageSize()
+}
+
+func (m model) modalContentPageSize() int {
+	if m.modal == nil {
+		return 1
+	}
+	return max(1, m.modalScrollableRows(*m.modal)-1)
+}
+
+func (m *model) scrollModalContent(delta int) {
+	if m.modal == nil || len(m.modal.Options) > 0 {
+		return
+	}
+	maxOffset := max(0, len(m.modalContentLines())-m.modalScrollableRows(*m.modal))
+	m.modal.ScrollOffset = min(max(m.modal.ScrollOffset+delta, 0), maxOffset)
 }
 
 func (m model) selectedModalOptionID() string {
@@ -446,6 +475,17 @@ func compactJSON(v any, maxLen int) string {
 		return oneLine(fmt.Sprintf("%v", v), maxLen)
 	}
 	return truncateRunes(string(data), maxLen)
+}
+
+func formatFullJSON(v any) string {
+	if v == nil {
+		return ""
+	}
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return strings.TrimSpace(fmt.Sprintf("%v", v))
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func truncateRunes(s string, maxLen int) string {

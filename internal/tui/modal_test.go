@@ -545,3 +545,49 @@ func TestSubagentProviderSelectorSendsSubagentProviderUse(t *testing.T) {
 		t.Fatalf("provider = %#v, want codex", payload["provider"])
 	}
 }
+
+func TestPermissionModalShowsFullArgsWithScrollableContent(t *testing.T) {
+	m := model{width: 80, height: 12, mode: modeChat}
+	m = m.openToolPermissionModal(runtimeEvent{
+		ID:       "perm_full_args",
+		ToolName: "editFile",
+		Args: map[string]any{
+			"path":        "demo.txt",
+			"replacement": strings.Repeat("replacement-line\n", 30),
+		},
+	})
+
+	args := ""
+	for _, field := range m.modal.Fields {
+		if field.Label == "Args" {
+			args = field.Value
+		}
+	}
+	if args == "" {
+		t.Fatal("permission modal missing Args field")
+	}
+	if strings.HasSuffix(args, "…") || strings.Contains(args, "...") {
+		t.Fatalf("args were truncated: %q", args)
+	}
+	if strings.Count(args, "replacement-line") != 30 {
+		t.Fatalf("args did not preserve full replacement details: %q", args)
+	}
+
+	rendered := plainText(m.renderModal(8))
+	if !strings.Contains(rendered, "more below") {
+		t.Fatalf("rendered modal missing scroll hint:\n%s", rendered)
+	}
+
+	updated, cmd := m.updateModal(tea.KeyPressMsg{Code: tea.KeyDown})
+	if cmd != nil {
+		t.Fatal("down returned command, want nil while scrolling")
+	}
+	m = updated.(model)
+	if m.modal.ScrollOffset == 0 {
+		t.Fatal("ScrollOffset = 0, want scrolled content")
+	}
+	rendered = plainText(m.renderModal(8))
+	if !strings.Contains(rendered, "more above") {
+		t.Fatalf("rendered modal missing above scroll hint after scrolling:\n%s", rendered)
+	}
+}
