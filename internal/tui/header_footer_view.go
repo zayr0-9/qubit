@@ -93,8 +93,10 @@ func (m model) renderFooter() string {
 		}
 	} else if m.mode == modeMdEditor {
 		switch m.mdEditor.View {
+		case mdEditorPreview:
+			footer = "ctrl+e edit | ctrl+c copy | wheel scroll | esc close"
 		case mdEditorEdit:
-			footer = "enter newline | ctrl+s save | ctrl+r rename | esc close"
+			footer = "enter newline | ctrl+e preview | ctrl+s save | ctrl+r rename | esc close"
 		case mdEditorRename:
 			footer = "enter rename | esc cancel"
 		case mdEditorDiscardConfirm:

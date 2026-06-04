@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 )
@@ -77,6 +78,15 @@ func (m *model) layout() {
 
 func (m *model) appendSystem(content string) {
 	m.appendLocalStatus(content)
+}
+
+func (m *model) appendSystemDirect(content string) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
+	m.messages = append(m.messages, localStatusMessage(content))
+	m.refreshViewport()
 }
 
 func (m *model) applyPlanView(ev runtimeEvent) {

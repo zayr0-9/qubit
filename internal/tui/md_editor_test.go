@@ -89,6 +89,16 @@ func TestMdEditorEditPlainEnterInsertsNewline(t *testing.T) {
 	m.mdEditor = newMdEditorState()
 	m.applyMdRead(runtimeEvent{Type: "md.read", File: &mdFileInfo{Section: "plans", Name: "launch", Path: `D:\\repo\\.qubit\\plans\\launch.md`}, Content: "# Launch"})
 
+	updated, _ := m.updateMdEditor(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(model)
+	if m.mdEditor.View != mdEditorPreview {
+		t.Fatalf("view = %q, want preview by default", m.mdEditor.View)
+	}
+	updated, _ = m.updateMdEditor(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	m = updated.(model)
+	if m.mdEditor.View != mdEditorEdit {
+		t.Fatalf("view = %q, want edit after ctrl+e", m.mdEditor.View)
+	}
 	updated, cmd := m.updateMdEditor(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(model)
 	if cmd != nil {
@@ -100,6 +110,11 @@ func TestMdEditorEditPlainEnterInsertsNewline(t *testing.T) {
 	if !m.mdEditor.Dirty {
 		t.Fatal("dirty = false, want true after newline insert")
 	}
+	updated, _ = m.updateMdEditor(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	m = updated.(model)
+	if m.mdEditor.View != mdEditorPreview {
+		t.Fatalf("view = %q, want preview after second ctrl+e", m.mdEditor.View)
+	}
 }
 
 func TestMdEditorPasteInsertsRawMarkdown(t *testing.T) {
@@ -109,6 +124,8 @@ func TestMdEditorPasteInsertsRawMarkdown(t *testing.T) {
 	m.mode = modeMdEditor
 	m.mdEditor = newMdEditorState()
 	m.applyMdRead(runtimeEvent{Type: "md.read", File: &mdFileInfo{Section: "plans", Name: "launch", Path: `D:\\repo\\.qubit\\plans\\launch.md`}, Content: "# Launch"})
+	updated, _ := m.updateMdEditor(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	m = updated.(model)
 
 	m = m.updateMdEditorTeaPaste(tea.PasteMsg{Content: "\r\n- pasted\r\n```go\r\nfmt.Println(1)\r\n```"})
 	want := "# Launch\n- pasted\n```go\nfmt.Println(1)\n```"
@@ -129,15 +146,20 @@ func TestMdEditorReadEditsRawMarkdownAndSaves(t *testing.T) {
 	m.mdEditor = newMdEditorState()
 	m.applyMdRead(runtimeEvent{Type: "md.read", File: &mdFileInfo{Section: "plans", Name: "launch", Path: `D:\repo\.qubit\plans\launch.md`}, Content: "# Launch\n\n- step"})
 
-	if m.mdEditor.View != mdEditorEdit || m.mdEditor.Dirty {
-		t.Fatalf("view/dirty = %q/%v, want edit/clean", m.mdEditor.View, m.mdEditor.Dirty)
+	if m.mdEditor.View != mdEditorPreview || m.mdEditor.Dirty {
+		t.Fatalf("view/dirty = %q/%v, want preview/clean", m.mdEditor.View, m.mdEditor.Dirty)
 	}
 	rendered := plainText(m.renderMdEditor(20))
-	if !strings.Contains(rendered, "# Launch") || !strings.Contains(rendered, "- step") {
-		t.Fatalf("rendered editor = %q, want raw markdown markers", rendered)
+	if !strings.Contains(rendered, "Launch") || !strings.Contains(rendered, "step") {
+		t.Fatalf("rendered preview = %q, want rendered markdown content", rendered)
 	}
 
-	updated, _ := m.updateMdEditor(tea.KeyPressMsg{Text: "!", Code: '!'})
+	updated, _ := m.updateMdEditor(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	m = updated.(model)
+	if m.mdEditor.View != mdEditorEdit {
+		t.Fatalf("view = %q, want edit after ctrl+e", m.mdEditor.View)
+	}
+	updated, _ = m.updateMdEditor(tea.KeyPressMsg{Text: "!", Code: '!'})
 	m = updated.(model)
 	if !m.mdEditor.Dirty || !strings.HasSuffix(m.mdEditor.Editor.Value(), "!") {
 		t.Fatalf("dirty/value = %v/%q, want dirty appended raw text", m.mdEditor.Dirty, m.mdEditor.Editor.Value())
@@ -157,6 +179,11 @@ func TestMdEditorReadEditsRawMarkdownAndSaves(t *testing.T) {
 	if got.mdEditor.Dirty || got.mdEditor.OriginalContent != "# Launch\n\n- step!" {
 		t.Fatalf("dirty/original = %v/%q, want saved clean state", got.mdEditor.Dirty, got.mdEditor.OriginalContent)
 	}
+	updated, _ = got.updateMdEditor(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	got = updated.(model)
+	if got.mdEditor.View != mdEditorPreview {
+		t.Fatalf("view = %q, want preview after second ctrl+e", got.mdEditor.View)
+	}
 }
 
 func TestMdEditorCreateAndRenameFlow(t *testing.T) {
@@ -172,10 +199,14 @@ func TestMdEditorCreateAndRenameFlow(t *testing.T) {
 	assertPayload(t, payload, "md.create", "")
 
 	m.applyMdCreated(runtimeEvent{Type: "md.created", File: &mdFileInfo{Section: "user-docs", Name: "note-1", Path: `D:\repo\.qubit\user-docs\note-1.md`}, Content: ""})
-	if m.mdEditor.View != mdEditorEdit || m.mdEditor.Current == nil || m.mdEditor.Current.Section != "user-docs" {
-		t.Fatalf("created state = view %q current %#v, want opened user doc", m.mdEditor.View, m.mdEditor.Current)
+	if m.mdEditor.View != mdEditorPreview || m.mdEditor.Current == nil || m.mdEditor.Current.Section != "user-docs" {
+		t.Fatalf("created state = view %q current %#v, want opened user doc in preview", m.mdEditor.View, m.mdEditor.Current)
 	}
-
+	updated, _ = m.updateMdEditor(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	m = updated.(model)
+	if m.mdEditor.View != mdEditorEdit {
+		t.Fatalf("view = %q, want edit for rename", m.mdEditor.View)
+	}
 	updated, _ = m.updateMdEditor(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	m = updated.(model)
 	if m.mdEditor.View != mdEditorRename || m.mdEditor.Rename.Value() != "note-1" {
@@ -201,7 +232,9 @@ func TestMdEditorDirtyEscRequiresDiscardConfirmation(t *testing.T) {
 	m.mode = modeMdEditor
 	m.mdEditor = newMdEditorState()
 	m.applyMdRead(runtimeEvent{Type: "md.read", File: &mdFileInfo{Section: "plans", Name: "launch", Path: `D:\repo\.qubit\plans\launch.md`}, Content: "# Launch"})
-	updated, _ := m.updateMdEditor(tea.KeyPressMsg{Text: "!", Code: '!'})
+	updated, _ := m.updateMdEditor(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	m = updated.(model)
+	updated, _ = m.updateMdEditor(tea.KeyPressMsg{Text: "!", Code: '!'})
 	m = updated.(model)
 
 	updated, cmd := m.updateMdEditor(tea.KeyPressMsg{Code: tea.KeyEsc})

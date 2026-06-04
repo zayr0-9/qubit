@@ -729,7 +729,6 @@ const editFileOptionProperties = {
   cwd: { type: 'string' },
   createBackup: { type: 'boolean' },
   encoding: { type: 'string' },
-  enableFuzzyMatching: { type: 'boolean' },
   fuzzyThreshold: { type: 'number' },
   preserveIndentation: { type: 'boolean' },
   interpretEscapeSequences: { type: 'boolean' },

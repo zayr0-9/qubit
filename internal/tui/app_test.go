@@ -3115,3 +3115,61 @@ func TestHiddenSessionsIgnoredBySessionPicker(t *testing.T) {
 		t.Fatalf("sessions = %#v, want only visible session", sessions)
 	}
 }
+
+func TestCodexLoginStartedRendersDirectlyWithoutQueueing(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.status = "ready"
+	m.messages = []chatMessage{{Role: "assistant", Content: "existing"}}
+
+	m.applyCodexEvent(runtimeEvent{Type: "codex.login.started", AuthURL: "https://example.com/auth", Status: "starting Codex login"})
+
+	if len(m.queuedMessages) != 0 {
+		t.Fatalf("queuedMessages = %#v, want none", m.queuedMessages)
+	}
+	if len(m.messages) != 2 {
+		t.Fatalf("messages = %#v, want sign-in banner appended directly", m.messages)
+	}
+	last := m.messages[1]
+	if last.Role != "status" || !last.LocalOnly || !strings.Contains(last.Content, "sign in to ChatGPT Codex") {
+		t.Fatalf("last message = %#v, want direct Codex sign-in banner", last)
+	}
+}
+
+func TestCodexStatusRendersDirectlyWithoutQueueing(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.status = "ready"
+	m.messages = []chatMessage{{Role: "assistant", Content: "existing"}}
+
+	m.applyCodexEvent(runtimeEvent{Type: "codex.status", Status: "signed in", AccountEmail: "user@example.com", Storage: "keychain"})
+
+	if len(m.queuedMessages) != 0 {
+		t.Fatalf("queuedMessages = %#v, want none", m.queuedMessages)
+	}
+	if len(m.messages) != 2 {
+		t.Fatalf("messages = %#v, want direct status appended", m.messages)
+	}
+	last := m.messages[1]
+	if last.Role != "status" || !last.LocalOnly || !strings.Contains(last.Content, "signed in") || !strings.Contains(last.Content, "Account: user@example.com") {
+		t.Fatalf("last message = %#v, want direct Codex status message", last)
+	}
+}
+
+func TestCodexLoginWhileStreamingStillQueuesDisplayStatus(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.busy = true
+	m.activeRunID = "run_1"
+	m.streaming = true
+	m.messages = []chatMessage{{Role: "assistant", Content: "assistant"}}
+
+	m.appendSystem("During stream")
+
+	if len(m.queuedMessages) != 1 {
+		t.Fatalf("queuedMessages = %#v, want queued local status while streaming", m.queuedMessages)
+	}
+	if len(m.messages) != 1 {
+		t.Fatalf("messages = %#v, want no direct append while streaming", m.messages)
+	}
+}

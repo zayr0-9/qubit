@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 )
 
 func newMdEditorState() mdEditorState {
-	return mdEditorState{View: mdEditorList, Loading: true, Editor: newMdDocumentComposer(), Rename: newMdRenameComposer()}
+	return mdEditorState{View: mdEditorList, Loading: true, Editor: newMdDocumentComposer(), Preview: viewport.New(), Rename: newMdRenameComposer()}
 }
 
 func newMdDocumentComposer() composerModel {
@@ -47,6 +49,8 @@ func (m model) closeMdEditor() model {
 
 func (m model) updateMdEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch m.mdEditor.View {
+	case mdEditorPreview:
+		return m.updateMdEditorPreview(msg)
 	case mdEditorEdit:
 		return m.updateMdEditorEdit(msg)
 	case mdEditorRename:
@@ -103,6 +107,9 @@ func (m model) updateMdEditorEdit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
+	case "ctrl+e":
+		m.switchMdEditorPreview()
+		return m, nil
 	case "ctrl+s":
 		if m.mdEditor.Current == nil {
 			return m, nil
@@ -257,14 +264,24 @@ func (m model) updateMdEditorDiscardConfirm(msg tea.KeyPressMsg) (tea.Model, tea
 }
 
 func (m model) updateMdEditorMouseWheel(msg tea.MouseWheelMsg) model {
-	if m.mdEditor.View != mdEditorList {
-		return m
-	}
-	switch msg.Mouse().Button {
-	case tea.MouseWheelUp:
-		m.moveMdEditorCursor(-1)
-	case tea.MouseWheelDown:
-		m.moveMdEditorCursor(1)
+	switch m.mdEditor.View {
+	case mdEditorPreview:
+		switch msg.Mouse().Button {
+		case tea.MouseWheelUp:
+			m.mdEditor.Preview.ScrollUp(max(1, m.mdEditor.Preview.MouseWheelDelta))
+		case tea.MouseWheelDown:
+			m.mdEditor.Preview.ScrollDown(max(1, m.mdEditor.Preview.MouseWheelDelta))
+		}
+		m.mdEditor.PreviewSelect.Cursor.Line = m.mdEditor.Preview.YOffset()
+		m.mdEditor.PreviewSelect.Cursor.Col = 0
+		m.repaintMdEditorPreviewSelection()
+	case mdEditorList:
+		switch msg.Mouse().Button {
+		case tea.MouseWheelUp:
+			m.moveMdEditorCursor(-1)
+		case tea.MouseWheelDown:
+			m.moveMdEditorCursor(1)
+		}
 	}
 	return m
 }
@@ -382,14 +399,14 @@ func (m *model) applyMdRenamed(ev runtimeEvent) {
 func (m *model) openMdEditorFile(file mdFileInfo, content string) {
 	m.mdEditor.Current = &file
 	m.mdEditor.Editor = newMdDocumentComposer()
-	m.layoutMdEditorComposer()
+	m.mdEditor.Preview = viewport.New()
+	m.mdEditor.PreviewSelect = transcriptSelectionState{}
 	m.mdEditor.Editor.SetValue(content)
 	m.mdEditor.OriginalContent = content
 	m.mdEditor.Dirty = false
-	m.mdEditor.View = mdEditorEdit
 	m.mdEditor.Loading = false
 	m.mdEditor.Status = ""
-	m.status = "editing markdown"
+	m.switchMdEditorPreview()
 }
 
 func (m *model) upsertMdEditorFile(file mdFileInfo) {
@@ -413,6 +430,8 @@ func cloneMdFileInfo(file *mdFileInfo) *mdFileInfo {
 
 func (m model) renderMdEditor(height int) string {
 	switch m.mdEditor.View {
+	case mdEditorPreview:
+		return m.renderMdEditorPreview(height)
 	case mdEditorEdit:
 		return m.renderMdEditorEdit(height)
 	case mdEditorRename:
@@ -541,4 +560,205 @@ func (m model) renderMdEditorDiscardConfirm(height int) string {
 	}
 	confirm := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("Unsaved changes") + "\n" + mutedSt.Render("Discard changes and return to the list?") + "\n\n" + strings.Join(rendered, "  ")
 	return renderFixedHeight(base+"\n\n"+confirm, height)
+}
+
+func (m *model) switchMdEditorPreview() {
+	m.layoutMdEditorComposer()
+	m.mdEditor.View = mdEditorPreview
+	m.mdEditor.Status = "preview mode"
+	m.status = "preview markdown"
+	m.updateMdEditorPreviewViewport()
+}
+
+func (m *model) switchMdEditorEdit() {
+	m.layoutMdEditorComposer()
+	m.mdEditor.View = mdEditorEdit
+	m.mdEditor.Status = "edit mode"
+	m.status = "editing markdown"
+}
+
+func (m *model) updateMdEditorPreviewViewport() {
+	if m.mdEditor.Current == nil {
+		m.mdEditor.PreviewContent = ""
+		m.mdEditor.PreviewLines = nil
+		m.mdEditor.Preview.SetContent("")
+		return
+	}
+	width := max(20, m.width-8)
+	height := m.mdEditorVisibleEditorHeight()
+	m.mdEditor.Preview.SetWidth(width)
+	m.mdEditor.Preview.SetHeight(height)
+	m.mdEditor.PreviewContent = m.renderMdEditorPreviewContent(width)
+	m.mdEditor.PreviewLines = transcriptRenderLines(m.mdEditor.PreviewContent)
+	content := m.mdEditor.PreviewContent
+	if m.mdEditor.PreviewSelect.Active {
+		content = applyTranscriptSelection(content, m.mdEditorPreviewSelectedRanges())
+	}
+	m.mdEditor.Preview.SetContent(content)
+	m.mdEditor.Preview.SetYOffset(clampInt(m.mdEditor.Preview.YOffset(), 0, max(0, m.mdEditor.Preview.TotalLineCount()-height)))
+}
+
+func (m model) renderMdEditorPreviewContent(width int) string {
+	if m.mdEditor.Editor.Value() == "" {
+		return mutedSt.Render("empty markdown document")
+	}
+	rendered, err := renderMarkdown(m.mdEditor.Editor.Value(), width)
+	if err != nil {
+		return errSt.Render(err.Error())
+	}
+	return strings.TrimRight(stripBackgroundANSI(rendered), "\n")
+}
+
+func (m model) updateMdEditorPreview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+e":
+		m.switchMdEditorEdit()
+		return m, nil
+	case "ctrl+c":
+		if text := m.mdEditorPreviewSelectedText(); text != "" {
+			m.mdEditor.Status = "copied selection"
+			return m, copyClipboardCmd(text)
+		}
+		return m, tea.Quit
+	case "esc":
+		m.mdEditor.View = mdEditorList
+		m.mdEditor.Current = nil
+		m.mdEditor.Status = ""
+		m.status = "markdown docs"
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) mdEditorPreviewSelectedText() string {
+	ranges := m.mdEditorPreviewSelectedRanges()
+	if len(ranges) == 0 {
+		return ""
+	}
+	selected := make([]string, 0, len(ranges))
+	for _, r := range ranges {
+		if r.Line < 0 || r.Line >= len(m.mdEditor.PreviewLines) {
+			continue
+		}
+		line := m.mdEditor.PreviewLines[r.Line].Text
+		part := strings.TrimRight(sliceStringByCells(line, r.StartCol, r.EndCol), " ")
+		selected = append(selected, part)
+	}
+	return strings.TrimRight(strings.Join(selected, "\n"), "\n")
+}
+
+func (m model) mdEditorPreviewSelectedRanges() []transcriptSelectedLineRange {
+	if !m.mdEditor.PreviewSelect.Active || len(m.mdEditor.PreviewLines) == 0 {
+		return nil
+	}
+	start := m.mdEditor.PreviewSelect.Anchor
+	end := m.mdEditor.PreviewSelect.Cursor
+	if compareTranscriptPoints(end, start) < 0 {
+		start, end = end, start
+	}
+	start.Line = clampInt(start.Line, 0, len(m.mdEditor.PreviewLines)-1)
+	end.Line = clampInt(end.Line, 0, len(m.mdEditor.PreviewLines)-1)
+	if start.Line == end.Line && start.Col == end.Col {
+		return nil
+	}
+	ranges := make([]transcriptSelectedLineRange, 0, end.Line-start.Line+1)
+	for line := start.Line; line <= end.Line; line++ {
+		lineWidth := runewidth.StringWidth(m.mdEditor.PreviewLines[line].Text)
+		startCol := 0
+		endCol := lineWidth
+		if line == start.Line {
+			startCol = clampInt(start.Col, 0, lineWidth)
+		}
+		if line == end.Line {
+			endCol = clampInt(end.Col, 0, lineWidth)
+		}
+		if endCol < startCol {
+			startCol, endCol = endCol, startCol
+		}
+		if startCol == endCol {
+			continue
+		}
+		ranges = append(ranges, transcriptSelectedLineRange{Line: line, StartCol: startCol, EndCol: endCol})
+	}
+	return ranges
+}
+
+func (m *model) repaintMdEditorPreviewSelection() {
+	if m.mdEditor.View != mdEditorPreview {
+		return
+	}
+	m.updateMdEditorPreviewViewport()
+}
+
+func (m model) renderMdEditorPreview(height int) string {
+	m.updateMdEditorPreviewViewport()
+	header := m.mdEditorPreviewHeader()
+	bodyHeight := max(1, height-renderedLineCount(header)-2)
+	preview := m.mdEditor.Preview.View()
+	preview = renderFixedHeight(preview, bodyHeight)
+	return lipgloss.NewStyle().Padding(1, 2).Width(max(20, m.width-4)).Render(header + "\n\n" + preview)
+}
+
+func (m model) mdEditorPreviewHeader() string {
+	fileLabel := "untitled.md"
+	if m.mdEditor.Current != nil {
+		fileLabel = m.mdEditor.Current.Section + "/" + m.mdEditor.Current.Name + ".md"
+	}
+	header := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("md preview") + mutedSt.Render(" · ") + lipgloss.NewStyle().Foreground(cyan).Render(fileLabel)
+	if m.mdEditor.Status != "" {
+		header += "\n" + mutedSt.Render(m.mdEditor.Status)
+	}
+	return header
+}
+
+func (m model) mouseToMdEditorPreviewPoint(mouse tea.Mouse) (transcriptSelectionPoint, bool) {
+	previewTopY := m.mdEditorPreviewScreenTopY()
+	if mouse.Y < previewTopY || mouse.Y >= previewTopY+m.mdEditor.Preview.Height() {
+		return transcriptSelectionPoint{}, false
+	}
+	line := m.mdEditor.Preview.YOffset() + mouse.Y - previewTopY
+	if line < 0 || line >= len(m.mdEditor.PreviewLines) {
+		return transcriptSelectionPoint{}, false
+	}
+	plain := m.mdEditor.PreviewLines[line].Text
+	col := clampInt(mouse.X-m.mdEditorPreviewScreenLeftX(), 0, runewidth.StringWidth(plain))
+	return transcriptSelectionPoint{Line: line, Col: col}, true
+}
+
+func (m model) clampMouseToMdEditorPreviewPoint(mouse tea.Mouse) transcriptSelectionPoint {
+	if len(m.mdEditor.PreviewLines) == 0 {
+		return transcriptSelectionPoint{}
+	}
+	line := m.mdEditor.Preview.YOffset() + mouse.Y - m.mdEditorPreviewScreenTopY()
+	line = clampInt(line, 0, len(m.mdEditor.PreviewLines)-1)
+	plain := m.mdEditor.PreviewLines[line].Text
+	col := clampInt(mouse.X-m.mdEditorPreviewScreenLeftX(), 0, runewidth.StringWidth(plain))
+	return transcriptSelectionPoint{Line: line, Col: col}
+}
+
+func (m model) mdEditorPreviewScreenTopY() int {
+	// renderMdEditorPreview wraps the preview in Padding(1, 2) and renders
+	// header + blank separator before the viewport content.
+	return m.chatTopY + 1 + renderedLineCount(m.mdEditorPreviewHeader()) + 1
+}
+
+func (m model) mdEditorPreviewScreenLeftX() int {
+	// Keep mouse column mapping aligned with renderMdEditorPreview's left padding.
+	return 2
+}
+
+func (m model) scrollMdEditorPreviewAtEdges(mouse tea.Mouse) model {
+	if m.mdEditor.Preview.Height() <= 0 {
+		return m
+	}
+	previewTopY := m.mdEditorPreviewScreenTopY()
+	if mouse.Y <= previewTopY {
+		m.mdEditor.Preview.ScrollUp(max(1, m.mdEditor.Preview.MouseWheelDelta))
+		m.mdEditor.PreviewSelect.Cursor = m.clampMouseToMdEditorPreviewPoint(tea.Mouse{X: mouse.X, Y: previewTopY})
+	} else if mouse.Y >= previewTopY+m.mdEditor.Preview.Height()-1 {
+		m.mdEditor.Preview.ScrollDown(max(1, m.mdEditor.Preview.MouseWheelDelta))
+		m.mdEditor.PreviewSelect.Cursor = m.clampMouseToMdEditorPreviewPoint(tea.Mouse{X: mouse.X, Y: previewTopY + m.mdEditor.Preview.Height() - 1})
+	}
+	m.repaintMdEditorPreviewSelection()
+	return m
 }

@@ -116,7 +116,27 @@ func (m model) updateMouseClick(msg tea.MouseClickMsg) tea.Model {
 	if updated, ok := m.updateTodoOverlayMouseClick(mouse); ok {
 		return updated
 	}
-	if m.mode != modeChat || mouse.Button != tea.MouseLeft {
+	if mouse.Button != tea.MouseLeft {
+		return m
+	}
+	if m.mode == modeMdEditor && m.mdEditor.View == mdEditorPreview {
+		point, ok := m.mouseToMdEditorPreviewPoint(mouse)
+		if !ok {
+			return m
+		}
+		m.mdEditor.PreviewSelect = transcriptSelectionState{
+			Active:       true,
+			Anchor:       point,
+			Cursor:       point,
+			MouseDownX:   mouse.X,
+			MouseDownY:   mouse.Y,
+			PendingClick: true,
+		}
+		m.mdEditor.Status = "select markdown preview"
+		m.repaintMdEditorPreviewSelection()
+		return m
+	}
+	if m.mode != modeChat {
 		return m
 	}
 	point, ok := m.mouseToTranscriptPoint(mouse)
@@ -137,10 +157,28 @@ func (m model) updateMouseClick(msg tea.MouseClickMsg) tea.Model {
 }
 
 func (m model) updateMouseMotion(msg tea.MouseMotionMsg) tea.Model {
+	mouse := msg.Mouse()
+	if m.mode == modeMdEditor && m.mdEditor.View == mdEditorPreview && m.mdEditor.PreviewSelect.Active {
+		if mouse.Button != tea.MouseLeft && !m.mdEditor.PreviewSelect.Dragging {
+			return m
+		}
+		point, ok := m.mouseToMdEditorPreviewPoint(mouse)
+		if !ok {
+			point = m.clampMouseToMdEditorPreviewPoint(mouse)
+		}
+		if absInt(mouse.X-m.mdEditor.PreviewSelect.MouseDownX) > 1 || absInt(mouse.Y-m.mdEditor.PreviewSelect.MouseDownY) > 0 {
+			m.mdEditor.PreviewSelect.Dragging = true
+			m.mdEditor.PreviewSelect.PendingClick = false
+		}
+		m.mdEditor.PreviewSelect.Cursor = point
+		m = m.scrollMdEditorPreviewAtEdges(mouse)
+		m.repaintMdEditorPreviewSelection()
+		return m
+	}
 	if m.mode != modeChat || !m.transcriptSelection.Active {
 		return m
 	}
-	mouse := msg.Mouse()
+	mouse = msg.Mouse()
 	if mouse.Button != tea.MouseLeft && !m.transcriptSelection.Dragging {
 		return m
 	}
@@ -162,6 +200,30 @@ func (m model) updateMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 	mouse := msg.Mouse()
 	if updated, ok := m.updateTodoOverlayMouseRelease(mouse); ok {
 		return updated, nil
+	}
+	if m.mode == modeMdEditor && m.mdEditor.View == mdEditorPreview && m.mdEditor.PreviewSelect.Active {
+		if !m.mdEditor.PreviewSelect.Dragging {
+			if mouse.Mod&tea.ModCtrl != 0 {
+				if text := m.mdEditorPreviewSelectedText(); text != "" {
+					m.mdEditor.PreviewSelect = transcriptSelectionState{}
+					m.mdEditor.Status = "copied selection"
+					m.repaintMdEditorPreviewSelection()
+					return m, copyClipboardCmd(text)
+				}
+			}
+			m.mdEditor.PreviewSelect = transcriptSelectionState{}
+			m.mdEditor.Status = "preview mode"
+			m.repaintMdEditorPreviewSelection()
+			return m, nil
+		}
+		if m.mdEditorPreviewSelectedText() == "" {
+			m.mdEditor.PreviewSelect = transcriptSelectionState{}
+			m.mdEditor.Status = "preview mode"
+		} else {
+			m.mdEditor.Status = "markdown preview selection"
+		}
+		m.repaintMdEditorPreviewSelection()
+		return m, nil
 	}
 	if m.mode != modeChat || !m.transcriptSelection.Active {
 		return m, nil

@@ -314,9 +314,9 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.status = "loading subagent models"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "subagent.config"})
 	case "codex-login", "codexlogin":
-		m.busy = true
 		m.status = "starting Codex login"
-		m.appendSystem("Starting ChatGPT Codex sign-in...")
+		m.appendSystemDirect("Starting ChatGPT Codex sign-in...")
+		m.busy = true
 		return m, sendRuntime(m.runtime, map[string]any{"type": "codex.login.start"})
 	case "codex-status", "codexstatus":
 		m.busy = true

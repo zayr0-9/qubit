@@ -33,6 +33,7 @@ func (m *model) applyCodexEvent(ev runtimeEvent) {
 	if ev.Model != "" {
 		m.model = ev.Model
 	}
+
 	switch ev.Type {
 	case "codex.login.started":
 		copyStatus := ""
@@ -43,7 +44,7 @@ func (m *model) applyCodexEvent(ev runtimeEvent) {
 				copyStatus = "\n\nCould not copy the URL to clipboard automatically; select/copy the full URL below and paste it into your browser."
 			}
 		}
-		m.appendSystem(fmt.Sprintf("Open this URL to sign in to ChatGPT Codex:\n%s%s", ev.AuthURL, copyStatus))
+		m.appendSystemDirect(fmt.Sprintf("Open this URL to sign in to ChatGPT Codex:\n%s%s", ev.AuthURL, copyStatus))
 	case "codex.error":
 		m.err = ev.Error
 		m.status = "Codex error"
@@ -57,7 +58,7 @@ func (m *model) applyCodexEvent(ev runtimeEvent) {
 		if ev.Storage != "" {
 			detail += "\nStorage: " + ev.Storage
 		}
-		m.appendSystem(detail)
+		m.appendSystemDirect(detail)
 	}
 }
 
