@@ -25,6 +25,7 @@ Qubit's terminal interface should stay clean, minimal, and calm. Prefer readable
 - Preserve terminal transparency where possible. Do not paint large rectangular areas behind content.
 - User-selected themes are the explicit exception to the default no-background preference: `/theme` may apply a background/text palette across the app, while new UI features should still avoid extra decorative backgrounds unless requested.
 - The selected `/theme` palette persists in user-global `<config>/theme.json` and should be loaded during model initialization before styles and spinner colors are created.
+- Reasoning text colour should be distinct and unique from tool text colours across all themes.
 
 ## Layout Rules
 

@@ -57,20 +57,18 @@ func TestMdEditorListRendersPlansAndUserDocsAndOpensSelection(t *testing.T) {
 	m.mode = modeMdEditor
 	m.mdEditor = newMdEditorState()
 	m.applyMdList(runtimeEvent{Type: "md.list", Files: []mdFileInfo{
-		{Section: "plans", Name: "launch", Title: "Launch Plan", Path: `D:\repo\.qubit\plans\launch.md`},
-		{Section: "user-docs", Name: "notes", Title: "Notes", Path: `D:\repo\.qubit\user-docs\notes.md`},
+		{Section: "user-docs", Name: "notes", Title: "Notes", Path: `D:\\repo\\.qubit\\user-docs\\notes.md`},
+		{Section: "plans", Name: "launch", Title: "Launch Plan", Path: `D:\\repo\\.qubit\\plans\\launch.md`},
 	}})
 
 	rendered := plainText(m.renderMdEditor(20))
-	if !strings.Contains(rendered, "launch.md") || !strings.Contains(rendered, "plans") || !strings.Contains(rendered, "notes.md") || !strings.Contains(rendered, "user-docs") {
-		t.Fatalf("rendered list = %q, want plan and user-doc rows", rendered)
+	if !strings.Contains(rendered, "notes.md") || !strings.Contains(rendered, "User notes") || !strings.Contains(rendered, "launch.md") || !strings.Contains(rendered, "Agent plans") {
+		t.Fatalf("rendered list = %q, want separated user notes and agent plans sections", rendered)
+	}
+	if strings.Index(rendered, "User notes") > strings.Index(rendered, "Agent plans") {
+		t.Fatalf("rendered list = %q, want user notes section before agent plans", rendered)
 	}
 
-	updated, _ := m.updateMdEditor(tea.KeyPressMsg{Code: tea.KeyDown})
-	m = updated.(model)
-	if m.mdEditor.Cursor != 1 {
-		t.Fatalf("cursor = %d, want 1", m.mdEditor.Cursor)
-	}
 	updated, cmd := m.updateMdEditor(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(model)
 	if !got.mdEditor.Loading {
@@ -78,7 +76,7 @@ func TestMdEditorListRendersPlansAndUserDocsAndOpensSelection(t *testing.T) {
 	}
 	payload := runSendCommand(t, cmd, stdin)
 	assertPayload(t, payload, "md.read", "")
-	if payload["path"] != `D:\repo\.qubit\user-docs\notes.md` {
+	if payload["path"] != `D:\\repo\\.qubit\\user-docs\\notes.md` {
 		t.Fatalf("path = %#v, want selected user doc", payload["path"])
 	}
 }

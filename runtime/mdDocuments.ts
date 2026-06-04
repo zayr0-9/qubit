@@ -98,7 +98,15 @@ export async function listMdDocuments(dataDir: string): Promise<MdFileInfo[]> {
       throw error;
     }
   }));
-  return all.flat().sort((a, b) => String(b.modifiedAt || "").localeCompare(String(a.modifiedAt || "")));
+  return all.flat().sort((a, b) => {
+    const sectionOrder = sectionListOrder(a.section) - sectionListOrder(b.section);
+    if (sectionOrder !== 0) return sectionOrder;
+    return String(b.modifiedAt || "").localeCompare(String(a.modifiedAt || ""));
+  });
+}
+
+function sectionListOrder(section: MdSection): number {
+  return section === "user-docs" ? 0 : 1;
 }
 
 export async function readMdDocument(dataDir: string, request: { path?: string; section?: string; name?: string }) {

@@ -92,7 +92,7 @@ const providerDefinitions = {
     aliases: ["openai-codex", "chatgpt-codex", "chatgpt"],
     envKeys: ["CODEX_ACCESS_TOKEN"],
     modelEnvKeys: ["CODEX_MODEL", "QUBIT_MODEL"],
-    defaultModel: "gpt-5.2-codex",
+    defaultModel: "gpt-5.5",
   },
 };
 const providerAliasMap = new Map(Object.entries(providerDefinitions).flatMap(([name, definition]) => [name, ...(definition.aliases || [])].map((alias) => [alias, name])));
@@ -152,6 +152,7 @@ const providerModelLists = {
   ],
   codex: [
     { id: "gpt-5.5", name: "GPT-5.5", description: "ChatGPT/Codex backend frontier model", maxContext: 400000 },
+    { id: "gpt-5.4-mini", name: "GPT-5.4 mini", description: "Fast ChatGPT/Codex backend model", maxContext: 400000 },
     { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", description: "Current ChatGPT Codex coding model", maxContext: 400000 },
     { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", description: "ChatGPT Codex Responses backend via local OAuth", maxContext: 400000 },
     { id: "gpt-5.2", name: "GPT-5.2", description: "ChatGPT/Codex backend model", maxContext: 400000 },

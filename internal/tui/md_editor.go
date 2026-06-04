@@ -448,6 +448,12 @@ func (m model) renderMdEditorList(height int) string {
 		b.WriteString(mutedSt.Render(fmt.Sprintf("  more above (%d)", window.Start)) + "\n")
 	}
 	for i := window.Start; i < window.End; i++ {
+		if i == window.Start || m.mdEditor.Files[i].Section != m.mdEditor.Files[i-1].Section {
+			if i != window.Start {
+				b.WriteString("\n")
+			}
+			b.WriteString(renderMdSectionHeader(m.mdEditor.Files[i].Section) + "\n")
+		}
 		line := renderMdFileRow(m.mdEditor.Files[i], contentWidth-2)
 		if i == m.mdEditor.Cursor {
 			line = selectSt.Render("› ") + selectSt.Render(line)
@@ -465,14 +471,23 @@ func (m model) renderMdEditorList(height int) string {
 	return lipgloss.NewStyle().Padding(1, 2).Width(panelWidth).Render(b.String())
 }
 
+func renderMdSectionHeader(section string) string {
+	switch section {
+	case "user-docs":
+		return mutedSt.Render("User notes")
+	case "plans":
+		return mutedSt.Render("Agent plans")
+	default:
+		return mutedSt.Render(section)
+	}
+}
+
 func renderMdFileRow(file mdFileInfo, width int) string {
 	label := file.Name + ".md"
 	if strings.TrimSpace(file.Title) != "" {
 		label += " · " + file.Title
 	}
-	meta := mutedSt.Render("  " + file.Section)
-	available := max(8, width-lipgloss.Width(stripANSI(meta))-2)
-	return lipgloss.NewStyle().Foreground(cyan).Render(oneLine(label, available)) + meta
+	return lipgloss.NewStyle().Foreground(cyan).Render(oneLine(label, max(8, width)))
 }
 
 func (m model) renderMdEditorEdit(height int) string {
