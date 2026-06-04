@@ -18,8 +18,32 @@ func TestMdEditorSlashCommandOpensListAndRequestsFiles(t *testing.T) {
 	if got.mode != modeMdEditor || got.mdEditor.View != mdEditorList {
 		t.Fatalf("mode/view = %v/%q, want md editor list", got.mode, got.mdEditor.View)
 	}
-	if !got.busy || !got.mdEditor.Loading {
-		t.Fatalf("busy/loading = %v/%v, want true/true", got.busy, got.mdEditor.Loading)
+	if !got.mdEditor.Loading {
+		t.Fatalf("loading = %v, want true", got.mdEditor.Loading)
+	}
+	payload := runSendCommand(t, cmd, stdin)
+	assertPayload(t, payload, "md.list", "")
+}
+
+func TestMdEditorSlashCommandOpensDuringActiveRun(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.busy = true
+	m.streaming = true
+	m.activeRunID = "run_1"
+	m.composer.SetValue("/md-editor")
+
+	updated, cmd := m.submitInput()
+	got := updated.(model)
+	if got.mode != modeMdEditor || got.mdEditor.View != mdEditorList {
+		t.Fatalf("mode/view = %v/%q, want md editor overlay while streaming", got.mode, got.mdEditor.View)
+	}
+	if !got.busy || !got.streaming || got.activeRunID != "run_1" {
+		t.Fatalf("active run changed: busy=%v streaming=%v activeRunID=%q", got.busy, got.streaming, got.activeRunID)
+	}
+	if !got.mdEditor.Loading {
+		t.Fatal("md editor loading = false, want true")
 	}
 	payload := runSendCommand(t, cmd, stdin)
 	assertPayload(t, payload, "md.list", "")
@@ -49,8 +73,8 @@ func TestMdEditorListRendersPlansAndUserDocsAndOpensSelection(t *testing.T) {
 	}
 	updated, cmd := m.updateMdEditor(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(model)
-	if !got.busy || !got.mdEditor.Loading {
-		t.Fatalf("busy/loading = %v/%v, want true/true", got.busy, got.mdEditor.Loading)
+	if !got.mdEditor.Loading {
+		t.Fatalf("loading = %v, want true", got.mdEditor.Loading)
 	}
 	payload := runSendCommand(t, cmd, stdin)
 	assertPayload(t, payload, "md.read", "")
@@ -80,6 +104,24 @@ func TestMdEditorEditPlainEnterInsertsNewline(t *testing.T) {
 	}
 }
 
+func TestMdEditorPasteInsertsRawMarkdown(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.mode = modeMdEditor
+	m.mdEditor = newMdEditorState()
+	m.applyMdRead(runtimeEvent{Type: "md.read", File: &mdFileInfo{Section: "plans", Name: "launch", Path: `D:\\repo\\.qubit\\plans\\launch.md`}, Content: "# Launch"})
+
+	m = m.updateMdEditorTeaPaste(tea.PasteMsg{Content: "\r\n- pasted\r\n```go\r\nfmt.Println(1)\r\n```"})
+	want := "# Launch\n- pasted\n```go\nfmt.Println(1)\n```"
+	if got := m.mdEditor.Editor.Value(); got != want {
+		t.Fatalf("editor value = %q, want pasted markdown %q", got, want)
+	}
+	if !m.mdEditor.Dirty {
+		t.Fatal("dirty = false, want true after paste")
+	}
+}
+
 func TestMdEditorReadEditsRawMarkdownAndSaves(t *testing.T) {
 	rt, stdin := newTestRuntime(t)
 	m := initialModel(rt)
@@ -104,8 +146,8 @@ func TestMdEditorReadEditsRawMarkdownAndSaves(t *testing.T) {
 	}
 	updated, cmd := m.updateMdEditor(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	got := updated.(model)
-	if !got.busy {
-		t.Fatal("busy = false, want saving")
+	if !got.mdEditor.Loading {
+		t.Fatal("loading = false, want saving")
 	}
 	payload := runSendCommand(t, cmd, stdin)
 	assertPayload(t, payload, "md.save", "")

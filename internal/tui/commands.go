@@ -630,7 +630,7 @@ func (m model) showSlashPalette() bool {
 
 func slashCommandRunsDuringActiveRun(cmd string) bool {
 	switch strings.ToLower(strings.TrimSpace(cmd)) {
-	case "help", "h", "permission", "permissions", "perm", "cwd-remove-block", "cwd-enable-block", "cwd-unblock", "cwd-block", "cwd-open", "cwd-close", "theme", "themes", "colors", "color", "permission-test", "modal-test":
+	case "help", "h", "permission", "permissions", "perm", "cwd-remove-block", "cwd-enable-block", "cwd-unblock", "cwd-block", "cwd-open", "cwd-close", "theme", "themes", "colors", "color", "permission-test", "modal-test", "md-editor", "md", "docs":
 		return true
 	default:
 		return false

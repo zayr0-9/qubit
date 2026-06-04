@@ -31,7 +31,7 @@ func (m model) openMdEditor() (tea.Model, tea.Cmd) {
 	m.mode = modeMdEditor
 	m.previousMode = modeChat
 	m.mdEditor = newMdEditorState()
-	m.busy = true
+	m.mdEditor.Loading = true
 	m.status = "loading markdown docs"
 	return m, sendRuntime(m.runtime, map[string]any{"type": "md.list"})
 }
@@ -39,8 +39,9 @@ func (m model) openMdEditor() (tea.Model, tea.Cmd) {
 func (m model) closeMdEditor() model {
 	m.mode = modeChat
 	m.mdEditor = mdEditorState{}
-	m.busy = false
-	m.status = "ready"
+	if !m.inputSpinnerActive() {
+		m.status = "ready"
+	}
 	return m
 }
 
@@ -70,7 +71,6 @@ func (m model) updateMdEditorList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.moveMdEditorCursor(1)
 		return m, nil
 	case "n", "N":
-		m.busy = true
 		m.mdEditor.Loading = true
 		m.mdEditor.Status = "creating user doc"
 		m.status = "creating markdown doc"
@@ -81,7 +81,6 @@ func (m model) updateMdEditorList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.ensureMdEditorCursor()
 		file := m.mdEditor.Files[m.mdEditor.Cursor]
-		m.busy = true
 		m.mdEditor.Loading = true
 		m.mdEditor.Status = "opening " + file.Name + ".md"
 		m.status = "opening markdown doc"
@@ -108,7 +107,7 @@ func (m model) updateMdEditorEdit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.mdEditor.Current == nil {
 			return m, nil
 		}
-		m.busy = true
+		m.mdEditor.Loading = true
 		m.mdEditor.Status = "saving " + m.mdEditor.Current.Name + ".md"
 		m.status = "saving markdown doc"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "md.save", "path": m.mdEditor.Current.Path, "content": m.mdEditor.Editor.Value()})
@@ -142,6 +141,30 @@ func (m model) updateMdEditorEdit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m model) updateMdEditorTeaPaste(msg tea.PasteMsg) model {
+	return m.insertMdEditorPaste(msg.Content)
+}
+
+func (m model) updateMdEditorPaste(msg composerPasteMsg) model {
+	if msg.Err != nil {
+		m.mdEditor.Status = "paste failed"
+		return m
+	}
+	return m.insertMdEditorPaste(msg.Text)
+}
+
+func (m model) insertMdEditorPaste(text string) model {
+	if m.mdEditor.View != mdEditorEdit || text == "" {
+		return m
+	}
+	m.layoutMdEditorComposer()
+	m.mdEditor.Editor.InsertString(normalizeInputNewlines(text))
+	m.updateMdEditorDirty()
+	m.layoutMdEditorComposer()
+	m.mdEditor.Status = "pasted"
+	return m
 }
 
 func (m model) openMdEditorRename() model {
@@ -183,7 +206,7 @@ func (m model) updateMdEditorRename(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.mdEditor.Status = "filename is required"
 			return m, nil
 		}
-		m.busy = true
+		m.mdEditor.Loading = true
 		m.mdEditor.Status = "renaming markdown file"
 		m.status = "renaming markdown file"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "md.rename", "path": m.mdEditor.Current.Path, "name": name})
@@ -290,7 +313,6 @@ func (m *model) applyMdList(ev runtimeEvent) {
 	m.mdEditor.Files = ev.Files
 	m.mdEditor.Loading = false
 	m.ensureMdEditorCursor()
-	m.busy = false
 	m.mdEditor.Status = fmt.Sprintf("%d %s", len(ev.Files), plural(len(ev.Files), "markdown file", "markdown files"))
 	m.status = "markdown docs"
 }
@@ -320,7 +342,7 @@ func (m *model) applyMdSaved(ev runtimeEvent) {
 	}
 	m.mdEditor.OriginalContent = ev.Content
 	m.mdEditor.Dirty = false
-	m.busy = false
+	m.mdEditor.Loading = false
 	m.mdEditor.Status = fallback(ev.Status, "saved")
 	m.status = "editing markdown"
 }
@@ -334,7 +356,7 @@ func (m *model) applyMdRenamed(ev runtimeEvent) {
 		if m.mdEditor.Files[i].Path == oldPath || (m.mdEditor.Current != nil && m.mdEditor.Files[i].Path == m.mdEditor.Current.Path) {
 			m.mdEditor.Files[i] = *ev.File
 			m.mdEditor.Current = cloneMdFileInfo(ev.File)
-			m.busy = false
+			m.mdEditor.Loading = false
 			m.mdEditor.View = mdEditorEdit
 			m.mdEditor.Status = fallback(ev.Status, "renamed")
 			m.status = "editing markdown"
@@ -343,7 +365,7 @@ func (m *model) applyMdRenamed(ev runtimeEvent) {
 	}
 	m.upsertMdEditorFile(*ev.File)
 	m.mdEditor.Current = cloneMdFileInfo(ev.File)
-	m.busy = false
+	m.mdEditor.Loading = false
 	m.mdEditor.View = mdEditorEdit
 	m.mdEditor.Status = fallback(ev.Status, "renamed")
 	m.status = "editing markdown"
@@ -358,7 +380,6 @@ func (m *model) openMdEditorFile(file mdFileInfo, content string) {
 	m.mdEditor.Dirty = false
 	m.mdEditor.View = mdEditorEdit
 	m.mdEditor.Loading = false
-	m.busy = false
 	m.mdEditor.Status = ""
 	m.status = "editing markdown"
 }

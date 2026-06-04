@@ -100,10 +100,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.hasPlanClarification() {
 			return m.updatePlanClarificationPaste(msg.String()), nil
 		}
+		if m.mode == modeMdEditor {
+			return m.updateMdEditorTeaPaste(msg), nil
+		}
 		if m.mode == modeThemeEntry {
 			return m.updateThemeEntryTeaPaste(msg), nil
 		}
-		return m.updateKeyEntryTeaPaste(msg), nil
+		if m.mode == modeKeyEntry {
+			return m.updateKeyEntryTeaPaste(msg), nil
+		}
 	case composerPasteMsg:
 		if m.hasPlanClarification() {
 			if msg.Err == nil {
@@ -111,10 +116,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.mode == modeMdEditor {
+			return m.updateMdEditorPaste(msg), nil
+		}
 		if m.mode == modeThemeEntry {
 			return m.updateThemeEntryPaste(msg), nil
 		}
-		return m.updateKeyEntryPaste(msg), nil
+		if m.mode == modeKeyEntry {
+			return m.updateKeyEntryPaste(msg), nil
+		}
 	}
 
 	return m.updateInputAndViewport(msg)

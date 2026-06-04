@@ -14,7 +14,7 @@ This file is mandatory when working on Qubit's `/md-editor` slash command, Markd
   User-created Markdown documents from the editor.
 ```
 
-The editor lets users list, open, create, edit, save, and rename Markdown files without leaving Qubit.
+The editor lets users list, open, create, edit, paste, save, and rename Markdown files without leaving Qubit. It may be opened while a model response is active; like the fork tree overlay, it must not cancel or clear active streaming state.
 
 ## Architecture Boundaries
 
@@ -94,6 +94,7 @@ List view:
 Edit view:
 
 - Uses a dedicated `composerModel` as the raw Markdown buffer.
+- Paste inserts raw Markdown into the editor buffer, preserving multiline content after normalizing CRLF/CR to `\n`.
 - `Ctrl+S`: save through `md.save`.
 - `Ctrl+R`: rename current file.
 - `Esc`: return to list if clean; open discard confirmation if dirty.
@@ -132,11 +133,11 @@ Follow `agent_design.md`:
 
 When changing `/md-editor`, add or update Go tests for the full model/protocol boundary:
 
-- Slash command opens `modeMdEditor` and sends `md.list`.
+- Slash command opens `modeMdEditor` and sends `md.list`, including while a model response is active without interrupting `busy`/`streaming`/`activeRunID`.
 - List renders both `plans` and `user-docs` entries.
 - Enter sends `md.read` for selected file.
 - `md.read` opens raw Markdown content and starts clean.
-- Typing marks dirty.
+- Typing and pasting raw Markdown mark dirty.
 - `Ctrl+S` sends exact raw `content` to `md.save`.
 - `md.saved` clears dirty and updates `OriginalContent`.
 - `n` sends `md.create`; `md.created` opens a user doc.
