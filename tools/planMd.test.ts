@@ -46,6 +46,7 @@ describe('planMd', () => {
     ) as any
     assert.equal(result.displayed, true)
     assert.equal(result.name, 'display-me')
+    assert.equal(result.modelContent, 'Plan "display-me" was displayed to the user in the chat view. Do not repeat the plan unless the user asks.')
     assert.equal(event.name, 'display-me')
     assert.equal(event.content, '# Display Me\n\nhello')
     assert.equal(event.sessionId, 'sess_1')

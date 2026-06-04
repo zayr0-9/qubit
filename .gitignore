@@ -38,3 +38,6 @@ coverage.out
 # Temporary files
 *.tmp
 *.temp
+
+# Local hyper-router package tarballs
+hyper-labs-hyper-router-*.tgz

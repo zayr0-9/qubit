@@ -9,7 +9,7 @@ import { basename, dirname, join } from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import {
-  createRuntime,
+  AgentRuntime,
   defineAgent,
   StubProvider,
 } from "@hyper-labs/hyper-router";
@@ -1249,7 +1249,7 @@ async function createRuntimeStateFor({ providerName, model: modelName, instructi
   const normalizedModel = normalizeModel(modelName || defaultModelForProvider(normalizedProvider));
   const providerConfig = await resolveProviderConfig(normalizedProvider, { requireRealProvider });
   const provider = createProvider(providerConfig);
-  const runtime = createRuntime({
+  const runtime = createQubitRuntime({
     agent: createQubitAgent({ name: agentName, instructions, model: normalizedModel, tools: qubitTools }),
     provider,
     storage,
@@ -1259,6 +1259,27 @@ async function createRuntimeStateFor({ providerName, model: modelName, instructi
     hooks,
   });
   return { runtime, promptMode: normalizedPromptMode, model: normalizedModel, ...providerConfig };
+}
+
+class QubitAgentRuntime extends AgentRuntime {
+  async executeToolCalls(sessionId, runId, signal, step, toolCalls) {
+    const messages = await super.executeToolCalls(sessionId, runId, signal, step, toolCalls);
+    return messages.map((message) => {
+      if (message?.role !== "tool" || message.name !== "planMd") return message;
+      const parsed = parseStoredToolResult(message.content);
+      const payload = resultPayload(parsed);
+      const data = plainObject(payload);
+      if (data.displayed !== true || typeof data.modelContent !== "string") return message;
+      return {
+        ...message,
+        content: JSON.stringify({ ok: Boolean(parsed?.ok), data: { displayed: true, exists: data.exists !== false, name: data.name, path: data.path, message: data.modelContent } }),
+      };
+    });
+  }
+}
+
+function createQubitRuntime(config) {
+  return new QubitAgentRuntime(config);
 }
 
 function providerReasoningOptions() {

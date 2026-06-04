@@ -101,6 +101,7 @@ export interface DisplayPlanResult {
   name: string
   path?: string
   message: string
+  modelContent?: string
 }
 
 export type PlanViewEvent = {
@@ -335,7 +336,14 @@ export async function displayPlan(name: string, cwd?: string, context?: AgentCon
     if (!isHiddenRun(context?.runId)) {
       await planViewEmitter?.({ name: normalized, path: filePath, cwd, content, sessionId: context?.sessionId, runId: context?.runId, step: context?.step })
     }
-    return { displayed: true, exists: true, name: normalized, path: filePath, message: isHiddenRun(context?.runId) ? `Displayed plan "${normalized}" in hidden subagent transcript.` : `Displayed plan "${normalized}" in the chat view.` }
+    return {
+      displayed: true,
+      exists: true,
+      name: normalized,
+      path: filePath,
+      message: isHiddenRun(context?.runId) ? `Displayed plan "${normalized}" in hidden subagent transcript.` : `Displayed plan "${normalized}" in the chat view.`,
+      modelContent: `Plan "${normalized}" was displayed to the user in the chat view. Do not repeat the plan unless the user asks.`,
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return { displayed: false, exists: false, name: normalized, message: `Plan "${normalized}" does not exist` }
