@@ -22,13 +22,16 @@ func (m model) View() tea.View {
 	input := m.renderInput()
 	status := m.renderInputStatus()
 	footer := m.renderFooter()
-	bottomHeight := lipgloss.Height(queuedStatus) + lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
+	preOverlayBottomHeight := lipgloss.Height(queuedStatus) + lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
+	todoOverlay := m.renderTodoOverlay(max(0, min(maxTodoOverlayRows+2, m.height-preOverlayBottomHeight-4)))
+	bottomHeight := preOverlayBottomHeight + lipgloss.Height(todoOverlay)
 	mainHeight := max(0, m.height-bottomHeight)
 	content := appStyle.Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
 			renderFixedHeight(m.renderMainArea(mainHeight), mainHeight),
 			queuedStatus,
+			todoOverlay,
 			input,
 			status,
 			footer,
@@ -548,16 +551,23 @@ func separatorBlankLineCount(separator string) int {
 
 func (m *model) renderViewMessage(message chatMessage) string {
 	title := fallback(message.Title, "View")
-	if message.ViewType == "plan" && !strings.HasPrefix(title, "Plan:") {
+	isPlan := message.ViewType == "plan"
+	if isPlan && !strings.HasPrefix(title, "Plan:") {
 		title = "Plan: " + title
 	}
+
+	width := max(20, m.viewport.Width()-2)
+	if isPlan {
+		return m.renderPlanViewMessage(message, title, width)
+	}
+
 	header := aiIcon.Render("◇") + " " + lipgloss.NewStyle().Foreground(accent).Bold(true).Render(title)
 	if message.Path != "" {
 		header += mutedSt.Render(" · " + oneLine(message.Path, max(12, m.viewport.Width()-lipgloss.Width(title)-8)))
 	}
-	content, err := renderMessageContentAtWidth(chatMessage{Role: "assistant", Content: message.Content}, max(20, m.viewport.Width()-2))
+	content, err := renderMessageContentAtWidth(chatMessage{Role: "assistant", Content: message.Content}, width)
 	if err != nil {
-		content = wrap(message.Content, max(20, m.viewport.Width()-2))
+		content = wrap(message.Content, width)
 	}
 	if strings.TrimSpace(content) == "" {
 		return header
@@ -567,6 +577,34 @@ func (m *model) renderViewMessage(message chatMessage) string {
 		lines[i] = "  " + lines[i]
 	}
 	return header + "\n" + strings.Join(lines, "\n")
+}
+
+func (m *model) renderPlanViewMessage(message chatMessage, title string, width int) string {
+	panelWidth := min(max(44, width), 96)
+	contentWidth := max(20, panelWidth-6)
+	header := aiIcon.Render("◇") + " " + lipgloss.NewStyle().Foreground(accent).Bold(true).Render(oneLine(title, contentWidth))
+	if message.Path != "" {
+		header += mutedSt.Render(" · " + oneLine(message.Path, max(12, contentWidth-lipgloss.Width(stripANSI(title))-3)))
+	}
+	content, err := renderMessageContentAtWidth(chatMessage{Role: "assistant", Content: message.Content}, contentWidth)
+	if err != nil {
+		content = wrap(message.Content, contentWidth)
+	}
+	body := header
+	if strings.TrimSpace(content) != "" {
+		body += "\n" + strings.Join(strings.Split(content, "\n"), "\n")
+	}
+	return renderAccentBorderedPanel(body, panelWidth)
+}
+
+func renderAccentBorderedPanel(body string, width int) string {
+	return lipgloss.NewStyle().
+		Foreground(text).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(accent).
+		Padding(0, 2).
+		Width(width).
+		Render(body)
 }
 
 func (m *model) renderReasoningBlock(message chatMessage, width int) string {

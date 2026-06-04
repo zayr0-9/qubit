@@ -2347,6 +2347,9 @@ func TestPlanDisplayEventAddsUiOnlyMarkdownMessage(t *testing.T) {
 	if !strings.Contains(viewport, "Plan: launch") || !strings.Contains(viewport, "Launch") || !strings.Contains(viewport, "step") {
 		t.Fatalf("viewport = %q, want rendered plan markdown", viewport)
 	}
+	if !strings.Contains(viewport, "╭") || !strings.Contains(viewport, "│") || !strings.Contains(viewport, "╰") {
+		t.Fatalf("viewport = %q, want bordered plan view", viewport)
+	}
 }
 
 func TestGeneratedImageEventAddsViewMessage(t *testing.T) {
@@ -2456,6 +2459,9 @@ func TestApplySessionMessagesPreservesPersistedPlanDisplayMessages(t *testing.T)
 	viewport := plainText(m.viewport.View())
 	if !strings.Contains(viewport, "Plan: distribution-plan") || !strings.Contains(viewport, "Distribution") || !strings.Contains(viewport, "package") {
 		t.Fatalf("viewport = %q, want persisted plan rendered", viewport)
+	}
+	if !strings.Contains(viewport, "╭") || !strings.Contains(viewport, "│") || !strings.Contains(viewport, "╰") {
+		t.Fatalf("viewport = %q, want bordered persisted plan view", viewport)
 	}
 }
 

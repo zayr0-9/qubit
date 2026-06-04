@@ -1679,7 +1679,7 @@ function summarizeToolResult(toolName, result) {
         return { ...compactObject(item, ["index", "tool", "ok", "permission", "error"]), result: summarizeToolResult(item.tool, { ok: item.ok, data: nestedPayload, error: item.error }) };
       }) : undefined };
     case "todoMd":
-      return { ...summary, ...compactObject(data, ["id", "created", "exists", "success", "message", "modifiedAt"]), contentPreview: previewText(data.content, 1600) };
+      return { ...summary, ...compactObject(data, ["id", "created", "exists", "success", "message", "modifiedAt"]), content: previewText(data.content, 1600), contentPreview: previewText(data.content, 1600) };
     case "planMd":
       return { ...summary, ...compactObject(data, ["name", "created", "exists", "success", "message", "modifiedAt", "displayed", "path"]), planCount: Array.isArray(payload) ? payload.length : undefined, contentPreview: data.displayed ? undefined : previewText(data.content, 1600) };
     default:
