@@ -3106,12 +3106,9 @@ function isAbortError(error) {
   return /\babort(?:ed)?\b|\bcancell?ed\b/i.test(message);
 }
 
-const sessionTitleMaxChars = 96;
-
 function titleFromInput(input) {
   const cleaned = input.replace(/\s+/g, " ").trim();
-  if (!cleaned) return "New chat";
-  return cleaned.length > sessionTitleMaxChars ? `${cleaned.slice(0, sessionTitleMaxChars - 3)}...` : cleaned;
+  return cleaned || "New chat";
 }
 
 function emitCodexUsage(event) {

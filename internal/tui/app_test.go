@@ -2017,14 +2017,27 @@ func TestSessionPickerUsesAvailableTerminalWidth(t *testing.T) {
 	}
 }
 
-func TestSessionPickerRowTruncatesForNarrowWidth(t *testing.T) {
-	row := renderSessionPickerRow(sessionInfo{ID: "sess", Title: "A very long session title", CreatedAt: "2026-06-02T13:45:00Z", MessageCount: 123}, false, 24, 20, 2)
+func TestSessionPickerRowAllowsTwoLinesForLongTitle(t *testing.T) {
+	rows := renderSessionPickerRow(sessionInfo{ID: "sess", Title: "A very long session title", CreatedAt: "2026-06-02T13:45:00Z", MessageCount: 123}, false, 60, 20, 2)
 
-	if !strings.Contains(row, "…") {
-		t.Fatalf("row = %q, want truncated title or stats", row)
+	if len(rows) != 2 {
+		t.Fatalf("row count = %d, want 2; rows=%q", len(rows), rows)
 	}
-	if got := len([]rune(row)); got > 24 {
-		t.Fatalf("row width = %d, want <= 24; row=%q", got, row)
+	if strings.TrimSpace(rows[1]) == "" {
+		t.Fatalf("second row = %q, want continuation title", rows[1])
+	}
+	for _, row := range rows {
+		if got := len([]rune(row)); got > 60 {
+			t.Fatalf("row width = %d, want <= 60; row=%q", got, row)
+		}
+	}
+}
+
+func TestTitleFromInputKeepsFullFirstMessage(t *testing.T) {
+	input := "This is a long first message that should be saved completely as the session name instead of being truncated at the old fixed limit."
+
+	if got := titleFromInput(input); got != input {
+		t.Fatalf("titleFromInput() = %q, want %q", got, input)
 	}
 }
 

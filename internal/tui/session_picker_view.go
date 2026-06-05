@@ -47,15 +47,17 @@ func (m model) renderSessionPicker(height int) string {
 	}
 	for i := window.Start; i < window.End; i++ {
 		session := sessions[i]
-		line := renderSessionPickerRow(session, session.ID == m.session, rowWidth, statsWidth, m.sessionForkCount(session.ID))
-		if i == m.sessionCursor {
-			line = selectSt.Render("  " + line)
-		} else {
-			line = mutedSt.Render("  ") + line
-		}
-		b.WriteString(line)
-		if i < window.End-1 || window.HasBelow {
-			b.WriteString("\n")
+		lines := renderSessionPickerRow(session, session.ID == m.session, rowWidth, statsWidth, m.sessionForkCount(session.ID))
+		for lineIndex, line := range lines {
+			if i == m.sessionCursor {
+				line = selectSt.Render("  " + line)
+			} else {
+				line = mutedSt.Render("  ") + line
+			}
+			b.WriteString(line)
+			if lineIndex < len(lines)-1 || i < window.End-1 || window.HasBelow {
+				b.WriteString("\n")
+			}
 		}
 	}
 	if window.HasBelow {
@@ -101,7 +103,7 @@ func (m model) parentSessionID(sessionID string) string {
 	}
 	return ""
 }
-func renderSessionPickerRow(session sessionInfo, active bool, width int, statsWidth int, forkCount int) string {
+func renderSessionPickerRow(session sessionInfo, active bool, width int, statsWidth int, forkCount int) []string {
 	activeMarker := " "
 	if active {
 		activeMarker = "•"
@@ -119,8 +121,38 @@ func renderSessionPickerRow(session sessionInfo, active bool, width int, statsWi
 		statsWidth = lipgloss.Width(stats)
 		titleWidth = max(1, width-lipgloss.Width(prefix)-statsWidth-3)
 	}
-	title := oneLine(session.Title, titleWidth)
-	return fmt.Sprintf("%s %-*s %*s", prefix, titleWidth, title, statsWidth, stats)
+	titleLines := sessionPickerTitleLines(session.Title, titleWidth)
+	firstTitle := ""
+	if len(titleLines) > 0 {
+		firstTitle = titleLines[0]
+	}
+	lines := []string{fmt.Sprintf("%s %-*s %*s", prefix, titleWidth, firstTitle, statsWidth, stats)}
+	if len(titleLines) > 1 {
+		continuationPrefix := strings.Repeat(" ", lipgloss.Width(prefix))
+		lines = append(lines, fmt.Sprintf("%s %-*s %*s", continuationPrefix, titleWidth, titleLines[1], statsWidth, ""))
+	}
+	return lines
+}
+
+func sessionPickerTitleLines(title string, width int) []string {
+	cleaned := strings.Join(strings.Fields(title), " ")
+	if cleaned == "" {
+		cleaned = "New chat"
+	}
+	if width <= 0 {
+		return []string{cleaned}
+	}
+	if lipgloss.Width(cleaned) <= width {
+		return []string{cleaned}
+	}
+	runes := []rune(cleaned)
+	firstCut := min(len(runes), max(0, width-1))
+	first := oneLine(cleaned, width)
+	remaining := strings.TrimSpace(string(runes[firstCut:]))
+	if remaining == "" {
+		return []string{first}
+	}
+	return []string{first, oneLine(remaining, width)}
 }
 func formatSessionPickerStats(session sessionInfo, forkCount int) string {
 	parts := []string{formatSessionCreatedAt(session.CreatedAt)}

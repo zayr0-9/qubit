@@ -135,10 +135,6 @@ func titleFromInput(input string) string {
 	if cleaned == "" {
 		return "New chat"
 	}
-	if len([]rune(cleaned)) > 48 {
-		runes := []rune(cleaned)
-		return string(runes[:45]) + "..."
-	}
 	return cleaned
 }
 
