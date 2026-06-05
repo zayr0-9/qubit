@@ -71,8 +71,14 @@ func (m model) updateMdEditorList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "up", "k", "ctrl+p":
 		m.moveMdEditorCursor(-1)
 		return m, nil
+	case "left":
+		m.moveMdEditorCursor(-5)
+		return m, nil
 	case "down", "j", "ctrl+n":
 		m.moveMdEditorCursor(1)
+		return m, nil
+	case "right":
+		m.moveMdEditorCursor(5)
 		return m, nil
 	case "n", "N":
 		m.mdEditor.Loading = true
@@ -291,7 +297,7 @@ func (m *model) moveMdEditorCursor(delta int) {
 		m.mdEditor.Cursor = 0
 		return
 	}
-	m.mdEditor.Cursor = (m.mdEditor.Cursor + delta + len(m.mdEditor.Files)) % len(m.mdEditor.Files)
+	m.mdEditor.Cursor = moveListCursor(m.mdEditor.Cursor, len(m.mdEditor.Files), delta)
 }
 
 func (m *model) ensureMdEditorCursor() {

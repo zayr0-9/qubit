@@ -107,6 +107,7 @@ func (m model) finishIdleAndMaybeStartQueuedUser(notifyCmd tea.Cmd) (model, tea.
 	m.busy = false
 	m.lastRunStartedSession = ""
 	m.activeRunID = ""
+	m.clearActiveRunStartedAt()
 	m.flushDisplayQueue()
 	if input, ok := m.popQueuedUserMessage(); ok {
 		// A queued user message immediately starts the next run; suppress the

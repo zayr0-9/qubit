@@ -26,8 +26,9 @@ func (m *model) applySessionList(ev runtimeEvent) {
 		m.busy = false
 		m.lastRunStartedSession = ""
 		m.activeRunID = ""
+		m.clearActiveRunStartedAt()
 	}
-	m.ensureSessionCursor()
+	m.ensureSessionCursorInBounds()
 }
 
 func (m *model) touchLocalSessionActivity(sessionID string, title string) {

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/viewport"
 )
@@ -45,6 +47,7 @@ type model struct {
 	autoNewSessionOnChat  bool
 	lastRunStartedSession string
 	activeRunID           string
+	activeRunStartedAt    time.Time
 	activeReasoningRunID  string
 	activeReasoningIndex  int
 	activeReasoningStart  int

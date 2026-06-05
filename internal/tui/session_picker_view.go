@@ -63,7 +63,11 @@ func (m model) renderSessionPicker(height int) string {
 		lines := renderSessionPickerRow(session, session.ID == m.session, rowWidth, statsWidth, m.sessionForkCount(session.ID))
 		for lineIndex, line := range lines {
 			if i == m.sessionCursor {
-				line = selectSt.Render("  " + line)
+				marker := "  "
+				if lineIndex == 0 {
+					marker = "› "
+				}
+				line = selectSt.Render(marker + line)
 			} else {
 				line = mutedSt.Render("  ") + line
 			}

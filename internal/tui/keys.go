@@ -27,8 +27,14 @@ func (m model) updateKeyPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "up", "k", "ctrl+p":
 		m.moveApiKeyCursor(-1)
 		return m, nil
+	case "left":
+		m.moveApiKeyCursor(-5)
+		return m, nil
 	case "down", "j", "ctrl+n":
 		m.moveApiKeyCursor(1)
+		return m, nil
+	case "right":
+		m.moveApiKeyCursor(5)
 		return m, nil
 	case "a":
 		return m.openKeyEntry(), nil
@@ -318,7 +324,7 @@ func (m *model) moveApiKeyCursor(delta int) {
 		m.apiKeyCursor = 0
 		return
 	}
-	m.apiKeyCursor = (m.apiKeyCursor + delta + len(m.apiKeys)) % len(m.apiKeys)
+	m.apiKeyCursor = moveListCursor(m.apiKeyCursor, len(m.apiKeys), delta)
 }
 
 func (m model) selectedApiKey() (apiKeyInfo, bool) {

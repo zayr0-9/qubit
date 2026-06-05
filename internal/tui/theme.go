@@ -136,7 +136,7 @@ func (m *model) moveThemePreset(delta int) {
 		return
 	}
 	count := len(builtinThemes) + 1
-	m.themeEntry.Preset = (m.themeEntry.Preset + delta + count) % count
+	m.themeEntry.Preset = moveListCursor(m.themeEntry.Preset, count, delta)
 	m.themeEntry.Err = ""
 	if m.themeEntry.Preset < len(builtinThemes) {
 		m.setThemeEntryColors(builtinThemes[m.themeEntry.Preset])

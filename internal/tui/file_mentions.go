@@ -164,7 +164,7 @@ func (m *model) moveFileMentionCursor(delta int) {
 		m.fileMention.Cursor = 0
 		return
 	}
-	m.fileMention.Cursor = (m.fileMention.Cursor + delta + len(matches)) % len(matches)
+	m.fileMention.Cursor = moveListCursor(m.fileMention.Cursor, len(matches), delta)
 }
 
 func (m model) acceptFileMentionSelection() (model, bool) {

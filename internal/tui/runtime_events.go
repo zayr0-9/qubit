@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -33,6 +34,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 			return m, waitRuntimeEvent(m.runtime)
 		}
 		m.busy = true
+		m.activeRunStartedAt = time.Now()
 		if ev.RunID != "" {
 			m.activeRunID = ev.RunID
 		}
@@ -80,6 +82,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 			m.status = "responding"
 		} else {
 			m.status = finishStatus
+			m.appendRunDurationStatus(finishStatus, time.Now())
 			notifyCmd = m.runCompleteNotificationCmd(finishStatus)
 			m, notifyCmd = m.finishIdleAndMaybeStartQueuedUser(notifyCmd)
 		}
@@ -160,6 +163,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	case "session.created":
 		m.clearFakeStream()
 		m.activeRunID = ""
+		m.clearActiveRunStartedAt()
 		m.autoScroll = true
 		m.busy = false
 		m.session = ev.SessionID
@@ -171,6 +175,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	case "session.activated", "session.forked":
 		m.clearFakeStream()
 		m.activeRunID = ""
+		m.clearActiveRunStartedAt()
 		m.autoScroll = true
 		m.busy = true
 		m.session = ev.SessionID
@@ -204,6 +209,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.busy = false
 		m.lastRunStartedSession = ""
 		m.activeRunID = ""
+		m.clearActiveRunStartedAt()
 		m.err = ev.Error
 		m.status = "error"
 		m.messages = append(m.messages, chatMessage{Role: "error", Content: ev.Error})

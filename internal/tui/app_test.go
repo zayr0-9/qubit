@@ -210,6 +210,29 @@ func TestApplySessionMessagesIgnoresStaleSession(t *testing.T) {
 	}
 }
 
+func TestFormatWorkedDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration time.Duration
+		want     string
+	}{
+		{name: "under minute", duration: 20 * time.Second, want: "worked for 1 minute"},
+		{name: "one minute", duration: time.Minute, want: "worked for 1 minute"},
+		{name: "five minutes", duration: 5 * time.Minute, want: "worked for 5 minutes"},
+		{name: "one hour and five minutes", duration: 65 * time.Minute, want: "worked for 1 hr & 5 minutes"},
+		{name: "two hours and five minutes", duration: 125 * time.Minute, want: "worked for 2 hrs & 5 minutes"},
+		{name: "exact hours", duration: 2 * time.Hour, want: "worked for 2 hrs"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatWorkedDuration(tt.duration); got != tt.want {
+				t.Fatalf("formatWorkedDuration(%s) = %q, want %q", tt.duration, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAssistantEventStartsFakeStream(t *testing.T) {
 	m := model{busy: true, messages: []chatMessage{{Role: "user", Content: "hello"}}}
 
@@ -293,6 +316,33 @@ func TestFakeStreamTickCompletesAfterRunFinished(t *testing.T) {
 	}
 	if got.messages[0].Content != "ok" {
 		t.Fatalf("content = %q, want ok", got.messages[0].Content)
+	}
+}
+
+func TestFakeStreamCompletionAppendsWorkedDuration(t *testing.T) {
+	m := model{
+		busy:                  true,
+		activeRunID:           "run_1",
+		activeRunStartedAt:    time.Now().Add(-125 * time.Minute),
+		streaming:             true,
+		streamingMessageIndex: 0,
+		streamingFullContent:  "ok",
+		streamingFinished:     true,
+		streamingFinishStatus: "completed",
+		messages:              []chatMessage{{Role: "assistant", Content: ""}},
+	}
+
+	updated, _ := m.updateFakeStreamTick()
+	got := updated.(model)
+
+	if len(got.messages) != 2 {
+		t.Fatalf("messages = %#v, want assistant and duration status", got.messages)
+	}
+	if got.messages[0].Role != "assistant" || got.messages[0].Content != "ok" {
+		t.Fatalf("assistant message = %#v, want completed assistant content", got.messages[0])
+	}
+	if got.messages[1].Role != "status" || !got.messages[1].LocalOnly || got.messages[1].Content != "worked for 2 hrs & 5 minutes" {
+		t.Fatalf("duration message = %#v, want local worked duration", got.messages[1])
 	}
 }
 
@@ -2192,12 +2242,13 @@ func TestRunFinishedWithoutStreamingNotifiesImmediately(t *testing.T) {
 	rt, _ := newTestRuntime(t)
 	n := &recordingNotifier{}
 	m := model{
-		notifier:    n,
-		runtime:     rt,
-		busy:        true,
-		activeRunID: "run_1",
-		title:       "Direct finish",
-		messages:    []chatMessage{{Role: "user", Content: "hello"}},
+		notifier:           n,
+		runtime:            rt,
+		busy:               true,
+		activeRunID:        "run_1",
+		activeRunStartedAt: time.Now().Add(-5 * time.Minute),
+		title:              "Direct finish",
+		messages:           []chatMessage{{Role: "user", Content: "hello"}},
 	}
 
 	updated, cmd := m.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_1", Status: "completed"})
@@ -2209,6 +2260,9 @@ func TestRunFinishedWithoutStreamingNotifiesImmediately(t *testing.T) {
 	}
 	if len(n.payloads) != 1 || n.payloads[0].Kind != notificationKindRunComplete {
 		t.Fatalf("notifications = %#v, want one run-complete notification", n.payloads)
+	}
+	if len(got.messages) != 2 || got.messages[1].Role != "status" || !got.messages[1].LocalOnly || got.messages[1].Content != "worked for 5 minutes" {
+		t.Fatalf("messages = %#v, want local worked duration after user message", got.messages)
 	}
 }
 
@@ -3318,5 +3372,67 @@ func TestRuntimeErrorForClipboardFailureIsNonFatal(t *testing.T) {
 	}
 	if len(got.messages) != len(m.messages) {
 		t.Fatalf("messages changed after clipboard runtimeErrMsg: got %d want %d", len(got.messages), len(m.messages))
+	}
+}
+
+func TestSessionPickerLeftRightJumpByFive(t *testing.T) {
+	m := initialModel(nil)
+	m.mode = modeSessionPicker
+	for i := 0; i < 8; i++ {
+		m.sessions = append(m.sessions, sessionInfo{ID: fmt.Sprintf("sess_%02d", i), Title: fmt.Sprintf("Session %02d", i), CreatedAt: fmt.Sprintf("2026-01-%02dT00:00:00Z", 8-i)})
+	}
+	m.sessionCursor = 4
+
+	updated, _ := m.updateSessionPicker(tea.KeyPressMsg{Code: tea.KeyLeft})
+	got := updated.(model)
+	if got.sessionCursor != 0 {
+		t.Fatalf("sessionCursor after left = %d, want 0", got.sessionCursor)
+	}
+
+	updated, _ = got.updateSessionPicker(tea.KeyPressMsg{Code: tea.KeyRight})
+	got = updated.(model)
+	if got.sessionCursor != 5 {
+		t.Fatalf("sessionCursor after right = %d, want 5", got.sessionCursor)
+	}
+
+	updated, _ = got.updateSessionPicker(tea.KeyPressMsg{Code: tea.KeyRight})
+	got = updated.(model)
+	if got.sessionCursor != 7 {
+		t.Fatalf("sessionCursor after right near end = %d, want 7", got.sessionCursor)
+	}
+}
+
+func TestSessionPickerSelectedRowShowsChevron(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.mode = modeSessionPicker
+	m.sessions = []sessionInfo{{ID: "sess", Title: "Selected session", CreatedAt: "2026-01-01T00:00:00Z"}}
+
+	rendered := plainText(m.renderSessionPicker(20))
+	if !regexp.MustCompile(`›\s+Selected session`).MatchString(rendered) {
+		t.Fatalf("selected session row missing chevron:\n%s", rendered)
+	}
+}
+
+func TestSlashSessionsStartsCursorAtTop(t *testing.T) {
+	rt, _ := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.session = "sess_2"
+	m.sessionCursor = 1
+	m.sessions = []sessionInfo{
+		{ID: "sess_1", Title: "Newest", CreatedAt: "2026-01-02T00:00:00Z"},
+		{ID: "sess_2", Title: "Active", CreatedAt: "2026-01-01T00:00:00Z"},
+	}
+
+	updated, _ := m.handleSlashCommand("/sessions")
+	got := updated.(model)
+	if got.sessionCursor != 0 {
+		t.Fatalf("sessionCursor after opening sessions = %d, want 0", got.sessionCursor)
+	}
+
+	got.applySessionList(runtimeEvent{Type: "session.list", Sessions: got.sessions})
+	if got.sessionCursor != 0 {
+		t.Fatalf("sessionCursor after session.list = %d, want 0", got.sessionCursor)
 	}
 }

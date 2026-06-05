@@ -55,8 +55,14 @@ func (m model) updateSessionPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "up", "k", "ctrl+p":
 		m.moveSessionCursor(-1)
 		return m, nil
+	case "left":
+		m.moveSessionCursor(-5)
+		return m, nil
 	case "down", "j", "ctrl+n":
 		m.moveSessionCursor(1)
+		return m, nil
+	case "right":
+		m.moveSessionCursor(5)
 		return m, nil
 	case "d", "delete":
 		return m.openSessionDeleteConfirm()
@@ -83,8 +89,14 @@ func (m model) updateSessionPickerSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cm
 	case "up", "ctrl+p":
 		m.moveSessionCursor(-1)
 		return m, nil
+	case "left":
+		m.moveSessionCursor(-5)
+		return m, nil
 	case "down", "ctrl+n":
 		m.moveSessionCursor(1)
+		return m, nil
+	case "right":
+		m.moveSessionCursor(5)
 		return m, nil
 	case "backspace", "ctrl+h":
 		if m.sessionSearchQuery != "" {
@@ -251,7 +263,7 @@ func (m *model) moveSessionCursor(delta int) {
 		m.sessionCursor = 0
 		return
 	}
-	m.sessionCursor = (m.sessionCursor + delta + len(sessions)) % len(sessions)
+	m.sessionCursor = moveListCursor(m.sessionCursor, len(sessions), delta)
 }
 
 func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
@@ -285,7 +297,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		return m.openForkTree()
 	case "sessions", "session", "ls":
 		m.mode = modeSessionPicker
-		m.ensureSessionCursor()
+		m.sessionCursor = 0
 		m.busy = true
 		m.status = "loading sessions"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "session.list"})
@@ -672,7 +684,7 @@ func (m *model) moveSlashCursor(delta int) {
 		m.slashCursor = 0
 		return
 	}
-	m.slashCursor = (m.slashCursor + delta + len(matches)) % len(matches)
+	m.slashCursor = moveListCursor(m.slashCursor, len(matches), delta)
 }
 
 func (m model) acceptSlashSelection() (tea.Model, tea.Cmd) {

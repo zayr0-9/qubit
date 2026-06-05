@@ -112,6 +112,15 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if next, ok := m.cycleInputHistory(-1); ok {
 			return next, nil
 		}
+	case "left":
+		if m.showSlashPalette() {
+			m.moveSlashCursor(-5)
+			return m, nil
+		}
+		if m.showFileMentionPalette() {
+			m.moveFileMentionCursor(-5)
+			return m, nil
+		}
 	case "down", "ctrl+n":
 		if m.showSlashPalette() {
 			m.moveSlashCursor(1)
@@ -123,6 +132,15 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if next, ok := m.cycleInputHistory(1); ok {
 			return next, nil
+		}
+	case "right":
+		if m.showSlashPalette() {
+			m.moveSlashCursor(5)
+			return m, nil
+		}
+		if m.showFileMentionPalette() {
+			m.moveFileMentionCursor(5)
+			return m, nil
 		}
 	case "shift+tab":
 		if m.showSlashPalette() {

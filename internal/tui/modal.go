@@ -275,7 +275,7 @@ func (m *model) moveModalOptionCursor(delta int) {
 	if m.modal == nil || len(m.modal.Options) == 0 {
 		return
 	}
-	m.modal.OptionCursor = (m.modal.OptionCursor + delta + len(m.modal.Options)) % len(m.modal.Options)
+	m.modal.OptionCursor = moveListCursor(m.modal.OptionCursor, len(m.modal.Options), delta)
 }
 
 func (m model) modalHasScrollableContent() bool {

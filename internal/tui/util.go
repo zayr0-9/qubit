@@ -77,6 +77,16 @@ func min(a, b int) int {
 	return b
 }
 
+func moveListCursor(cursor int, count int, delta int) int {
+	if count <= 0 {
+		return 0
+	}
+	if delta == 1 || delta == -1 {
+		return (cursor + delta + count) % count
+	}
+	return clampInt(cursor+delta, 0, count-1)
+}
+
 func findAppRoot() (string, error) {
 	candidates := []string{}
 	if cwd, err := os.Getwd(); err == nil {

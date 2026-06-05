@@ -176,6 +176,7 @@ func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {
 		m.status = "ready"
 		m.lastRunStartedSession = ""
 		m.activeRunID = ""
+		m.clearActiveRunStartedAt()
 		return m, nil
 	}
 
@@ -194,6 +195,7 @@ func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {
 	var notifyCmd tea.Cmd
 	if finished {
 		m.status = fallback(finishStatus, "ready")
+		m.appendRunDurationStatus(finishStatus, time.Now())
 		notifyCmd = m.runCompleteNotificationCmd(finishStatus)
 		m, notifyCmd = m.finishIdleAndMaybeStartQueuedUser(notifyCmd)
 	} else {
@@ -224,6 +226,7 @@ func (m *model) abortActiveRun() {
 	m.status = "aborted"
 	m.lastRunStartedSession = ""
 	m.activeRunID = ""
+	m.clearActiveRunStartedAt()
 	m.refreshViewport()
 }
 
@@ -266,4 +269,52 @@ func fakeStreamChunkSize(totalRunes int, visibleRunes int) int {
 		size = 6
 	}
 	return min(size, remaining)
+}
+
+func (m *model) appendRunDurationStatus(status string, now time.Time) bool {
+	if m.activeRunStartedAt.IsZero() {
+		return false
+	}
+	startedAt := m.activeRunStartedAt
+	m.clearActiveRunStartedAt()
+	if !shouldNotifyRunComplete(status) {
+		return false
+	}
+	m.messages = append(m.messages, localStatusMessage(formatWorkedDuration(now.Sub(startedAt))))
+	m.refreshViewport()
+	return true
+}
+
+func (m *model) clearActiveRunStartedAt() {
+	m.activeRunStartedAt = time.Time{}
+}
+
+func formatWorkedDuration(duration time.Duration) string {
+	minutes := int(duration.Round(time.Minute) / time.Minute)
+	if minutes < 1 {
+		minutes = 1
+	}
+
+	hours := minutes / 60
+	remainingMinutes := minutes % 60
+	minuteLabel := func(value int) string {
+		if value == 1 {
+			return "1 minute"
+		}
+		return fmt.Sprintf("%d minutes", value)
+	}
+	hourLabel := func(value int) string {
+		if value == 1 {
+			return "1 hr"
+		}
+		return fmt.Sprintf("%d hrs", value)
+	}
+
+	if hours == 0 {
+		return "worked for " + minuteLabel(minutes)
+	}
+	if remainingMinutes == 0 {
+		return "worked for " + hourLabel(hours)
+	}
+	return "worked for " + hourLabel(hours) + " & " + minuteLabel(remainingMinutes)
 }
