@@ -3137,6 +3137,22 @@ func TestCodexLoginStartedRendersDirectlyWithoutQueueing(t *testing.T) {
 	}
 }
 
+func TestCodexLoginStartedReturnsBrowserOpenCommand(t *testing.T) {
+	rt := &runtimeClient{events: make(chan runtimeEvent, 1), errs: make(chan error, 1)}
+	m := initialModel(rt)
+	m.ready = true
+
+	updated, cmd := m.updateRuntime(runtimeEvent{Type: "codex.login.started", AuthURL: "https://example.com/auth", Status: "starting Codex login"})
+	got := updated.(model)
+
+	if cmd == nil {
+		t.Fatal("cmd = nil, want browser open command batched with runtime wait")
+	}
+	if len(got.messages) == 0 || !strings.Contains(got.messages[len(got.messages)-1].Content, "https://example.com/auth") {
+		t.Fatalf("messages = %#v, want sign-in URL rendered", got.messages)
+	}
+}
+
 func TestCodexStatusRendersDirectlyWithoutQueueing(t *testing.T) {
 	m := initialModel(nil)
 	m.ready = true

@@ -122,6 +122,9 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.applyKeyUpdated(ev)
 	case "codex.login.started", "codex.login.completed", "codex.login.cancelled", "codex.logout.completed", "codex.status", "codex.error":
 		m.applyCodexEvent(ev)
+		if ev.Type == "codex.login.started" && ev.AuthURL != "" {
+			return m, tea.Batch(waitRuntimeEvent(m.runtime), openBrowserCmd(ev.AuthURL))
+		}
 	case "tool.permission.request":
 		if !m.acceptRunScopedEvent(ev) {
 			return m, waitRuntimeEvent(m.runtime)

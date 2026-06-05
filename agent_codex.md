@@ -39,6 +39,7 @@ The flow uses authorization code + PKCE (`S256`). Match the known-working YggCha
 
 - 32-character hex `state` from 16 random bytes.
 - `code_verifier` from 32 random bytes base64url encoded without padding.
+- Authorize param order: `response_type`, `client_id`, `redirect_uri`, `scope`, `code_challenge`, `code_challenge_method`, `state`, `id_token_add_organizations`, `codex_cli_simplified_flow`, `originator`.
 - Token exchange body order: `grant_type`, `client_id`, `code`, `code_verifier`, `redirect_uri`.
 - Token exchange header: `Content-Type: application/x-www-form-urlencoded`.
 - Authorize params include `id_token_add_organizations=true`, `codex_cli_simplified_flow=true`, and `originator=codex_cli_rs`.

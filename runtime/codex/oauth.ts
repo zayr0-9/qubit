@@ -25,9 +25,6 @@ export async function startCodexLogin(options: CodexOAuthOptions): Promise<Codex
   const fetchImpl = options.fetch || fetch;
   const codeVerifier = base64Url(randomBytes(32));
   const codeChallenge = base64Url(createHash("sha256").update(codeVerifier).digest());
-  // Match the working YggChat/Codex-style flow: 16 random bytes rendered as
-  // 32 hex characters. Longer base64url state values are valid OAuth, but the
-  // ChatGPT OAuth stub has proven sensitive to small shape differences.
   const state = randomHex(16);
 
   const serverState: { settled: boolean; resolve?: (value: CodexLoginCompleteResult) => void; reject?: (error: unknown) => void } = { settled: false };
@@ -125,9 +122,9 @@ export function buildAuthorizeUrl({ issuer, clientId, redirectUri, codeChallenge
   url.searchParams.set("scope", CODEX_SCOPES);
   url.searchParams.set("code_challenge", codeChallenge);
   url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("state", state);
   url.searchParams.set("id_token_add_organizations", "true");
   url.searchParams.set("codex_cli_simplified_flow", "true");
-  url.searchParams.set("state", state);
   url.searchParams.set("originator", originator);
   if (allowedWorkspaceId) url.searchParams.set("allowed_workspace_id", normalizeAllowedWorkspaceIds(allowedWorkspaceId));
   return url.toString();
