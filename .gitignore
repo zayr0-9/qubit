@@ -5,6 +5,7 @@ node_modules/
 bin/
 dist/
 build/
+release/
 *.exe
 *.dll
 *.so

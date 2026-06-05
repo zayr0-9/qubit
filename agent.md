@@ -51,6 +51,9 @@ agent_server.md
 
 agent_md_editor.md
   Mandatory when working on Qubit's `/md-editor` slash command, Markdown document list/editor UI, or runtime Markdown document protocol.
+
+agent_distribution.md
+  Mandatory when working on Qubit release archives, install scripts, GitHub Releases packaging, generated release assets, or installed-runtime layout.
 ```
 
 When adding a new major subsystem or extracting detailed guidance from this file, create a focused `agent_<category>.md` context file and list it here with when it is mandatory to read.
@@ -99,6 +102,10 @@ Project root
                                        Project-local input history store
   bin/qubit                            Built Linux/macOS executable
   bin/qubit.exe                        Built Windows executable
+  scripts/package-release.mjs          Release archive packager for Linux/Windows x64
+  scripts/install.sh                   Linux/Ubuntu installer for release archives
+  scripts/install.ps1                  Windows installer for release archives
+  release/                             Generated local release archives/checksums; ignored by git
   .qubit/sessions.sqlite               hyper-router SQLite transcript store in the terminal launch cwd
   .qubit/session-index.json            Qubit-owned session index in the terminal launch cwd; may include session metadata such as favouritedAt
   .qubit/runtime.log                   Runtime diagnostic log in the terminal launch cwd
@@ -363,6 +370,7 @@ Follow standard Go conventions:
 ### Node Runtime Standards
 
 - Use pnpm for Node dependency management.
+- Release packaging/install-script work is covered by `agent_distribution.md`; read it before changing `scripts/package-release.mjs`, `scripts/install.sh`, `scripts/install.ps1`, release archive layout, or installed-runtime discovery.
 - Use plain `tsc` for the Node sidecar; do not use Vite or bundling for runtime/tool code.
 - Keep runtime source in TypeScript (`runtime.ts` and future `runtime/**/*.ts` modules).
 - Do not edit generated `dist` files directly.

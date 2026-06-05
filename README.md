@@ -107,6 +107,47 @@ $env:QUBIT_STUB = "1"
 export QUBIT_STUB=1
 ```
 
+## Install
+
+The first distribution path is GitHub Releases with platform archives and install scripts. Linux x64 and Windows x64 are the initial targets. The archive includes the Go CLI plus the Node runtime files (`dist/`, `prompts/`, `package.json`, `pnpm-lock.yaml`, and `node_modules/`). Node.js must still be installed and available on `PATH`.
+
+Linux/Ubuntu install from a release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zayr0-9/qubit/main/scripts/install.sh | sh
+```
+
+For a local Ubuntu install test before publishing a release, build an archive and point the installer at it:
+
+```sh
+pnpm run package:release:linux
+QUBIT_ARCHIVE_URL="file://$PWD/release/qubit-v0.1.0-linux-x64.tar.gz" sh scripts/install.sh
+QUBIT_STUB=1 qubit
+```
+
+Windows install from a release:
+
+```powershell
+iwr https://raw.githubusercontent.com/zayr0-9/qubit/main/scripts/install.ps1 -UseB | iex
+```
+
+Useful installer environment variables:
+
+```txt
+QUBIT_REPO          GitHub repo, default zayr0-9/qubit
+QUBIT_VERSION       Release tag, default latest
+QUBIT_ARCHIVE_URL   Explicit archive URL, useful for local tests
+QUBIT_INSTALL_DIR   Install root
+QUBIT_BIN_DIR       Directory for the qubit launcher
+```
+
+Build release archives:
+
+```sh
+pnpm run package:release:linux
+pnpm run package:release:windows
+```
+
 ## Build and run
 
 Prerequisites:
