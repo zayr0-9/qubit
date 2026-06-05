@@ -45,8 +45,21 @@ func (m model) renderSessionPicker(height int) string {
 		b.WriteString(mutedSt.Render(fmt.Sprintf("  more above (%d)", window.Start)))
 		b.WriteString("\n")
 	}
+	previousHeading := ""
+	if window.Start > 0 {
+		previousHeading = formatSessionCreatedDateHeading(sessions[window.Start-1].CreatedAt, time.Now())
+	}
 	for i := window.Start; i < window.End; i++ {
 		session := sessions[i]
+		heading := formatSessionCreatedDateHeading(session.CreatedAt, time.Now())
+		if heading != previousHeading {
+			if i > window.Start || window.HasAbove {
+				b.WriteString("\n")
+			}
+			b.WriteString(lipgloss.NewStyle().Foreground(accent).Bold(true).Render(heading))
+			b.WriteString("\n")
+			previousHeading = heading
+		}
 		lines := renderSessionPickerRow(session, session.ID == m.session, rowWidth, statsWidth, m.sessionForkCount(session.ID))
 		for lineIndex, line := range lines {
 			if i == m.sessionCursor {
@@ -161,17 +174,45 @@ func formatSessionPickerStats(session sessionInfo, forkCount int) string {
 	return strings.Join(parts, " · ")
 }
 func formatSessionCreatedAt(createdAt string) string {
-	createdAt = strings.TrimSpace(createdAt)
-	if createdAt == "" {
-		return "-- -- --:--"
+	if t, ok := parseSessionTime(createdAt); ok {
+		return t.Format("15:04")
 	}
-	if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
-		return t.Local().Format("02-01 15:04")
+	return "--:--"
+}
+
+func formatSessionCreatedDateHeading(createdAt string, now time.Time) string {
+	if t, ok := parseSessionTime(createdAt); ok {
+		createdDate := dateOnly(t)
+		today := dateOnly(now.Local())
+		switch {
+		case createdDate.Equal(today):
+			return "Today"
+		case createdDate.Equal(today.AddDate(0, 0, -1)):
+			return "Yesterday"
+		default:
+			return fmt.Sprintf("%d %s", t.Day(), t.Format("January"))
+		}
 	}
-	if t, err := time.Parse("2006-01-02T15:04:05", createdAt); err == nil {
-		return t.Local().Format("02-01 15:04")
+	return "Unknown date"
+}
+
+func parseSessionTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
 	}
-	return oneLine(createdAt, len("02-01 15:04"))
+	if t, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return t.Local(), true
+	}
+	if t, err := time.Parse("2006-01-02T15:04:05", value); err == nil {
+		return t.Local(), true
+	}
+	return time.Time{}, false
+}
+
+func dateOnly(t time.Time) time.Time {
+	year, month, day := t.Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, t.Location())
 }
 func pluralLabel(count int, singular string, plural string) string {
 	if count == 1 {

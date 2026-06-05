@@ -2018,7 +2018,7 @@ func TestSessionPickerUsesAvailableTerminalWidth(t *testing.T) {
 }
 
 func TestSessionPickerRowAllowsTwoLinesForLongTitle(t *testing.T) {
-	rows := renderSessionPickerRow(sessionInfo{ID: "sess", Title: "A very long session title", CreatedAt: "2026-06-02T13:45:00Z", MessageCount: 123}, false, 60, 20, 2)
+	rows := renderSessionPickerRow(sessionInfo{ID: "sess", Title: "A very long session title", CreatedAt: "2026-06-02T13:45:00Z", MessageCount: 123}, false, 45, 20, 2)
 
 	if len(rows) != 2 {
 		t.Fatalf("row count = %d, want 2; rows=%q", len(rows), rows)
@@ -2027,8 +2027,8 @@ func TestSessionPickerRowAllowsTwoLinesForLongTitle(t *testing.T) {
 		t.Fatalf("second row = %q, want continuation title", rows[1])
 	}
 	for _, row := range rows {
-		if got := len([]rune(row)); got > 60 {
-			t.Fatalf("row width = %d, want <= 60; row=%q", got, row)
+		if got := len([]rune(row)); got > 45 {
+			t.Fatalf("row width = %d, want <= 45; row=%q", got, row)
 		}
 	}
 }
@@ -2053,8 +2053,8 @@ func TestSessionPickerShowsMessageAndForkStats(t *testing.T) {
 
 	rendered := plainText(m.renderSessionPicker(20))
 
-	if !regexp.MustCompile(`02-06 [0-9]{2}:45`).MatchString(rendered) || !strings.Contains(rendered, "12345 msgs · 2 forks") {
-		t.Fatalf("rendered session picker missing date/message/fork stats:\n%s", rendered)
+	if !regexp.MustCompile(`[0-9]{2}:45`).MatchString(rendered) || !strings.Contains(rendered, "12345 msgs · 2 forks") {
+		t.Fatalf("rendered session picker missing time/message/fork stats:\n%s", rendered)
 	}
 
 	for _, line := range strings.Split(rendered, "\n") {
@@ -2223,6 +2223,28 @@ func TestRunFinishedStaleRunDoesNotNotify(t *testing.T) {
 	}
 	if len(n.payloads) != 0 {
 		t.Fatalf("notifications = %#v, want none for stale run_finished", n.payloads)
+	}
+}
+
+func TestSessionPickerGroupsSessionsByCreatedDate(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	now := time.Now()
+	m.sessions = []sessionInfo{
+		{ID: "today", Title: "Today session", CreatedAt: now.Format(time.RFC3339Nano), UpdatedAt: now.Add(3 * time.Minute).Format(time.RFC3339Nano)},
+		{ID: "yesterday", Title: "Yesterday session", CreatedAt: now.AddDate(0, 0, -1).Format(time.RFC3339Nano), UpdatedAt: now.Add(2 * time.Minute).Format(time.RFC3339Nano)},
+		{ID: "older", Title: "Older session", CreatedAt: "2026-04-24T09:15:00Z", UpdatedAt: now.Add(time.Minute).Format(time.RFC3339Nano)},
+	}
+
+	rendered := plainText(m.renderSessionPicker(20))
+
+	for _, want := range []string{"Today", "Yesterday", "24 April"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered session picker missing %q heading:\n%s", want, rendered)
+		}
+	}
+	if strings.Index(rendered, "Today") > strings.Index(rendered, "Today session") || strings.Index(rendered, "Yesterday") > strings.Index(rendered, "Yesterday session") || strings.Index(rendered, "24 April") > strings.Index(rendered, "Older session") {
+		t.Fatalf("date headings should appear before their sessions:\n%s", rendered)
 	}
 }
 
