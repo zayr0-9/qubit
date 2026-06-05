@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -197,7 +198,7 @@ func (m model) updateTeaPaste(msg tea.PasteMsg) model {
 
 func (m model) updateComposerPaste(msg composerPasteMsg) model {
 	if msg.Err != nil {
-		return m
+		return m.updateUIError(fmt.Errorf("paste clipboard: %w", msg.Err))
 	}
 	if m.hasPlanClarification() {
 		return m.updatePlanClarificationPaste(msg.Text)

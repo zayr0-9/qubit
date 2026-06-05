@@ -33,9 +33,6 @@ func (m model) showFileMentionPalette() bool {
 	if m.mode != modeChat || !m.ready || m.forkSelector.Active || m.showSlashPalette() {
 		return false
 	}
-	if m.busy && !m.streaming {
-		return false
-	}
 	_, ok := m.activeFileMentionToken()
 	return ok
 }

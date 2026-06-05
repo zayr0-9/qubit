@@ -2,6 +2,7 @@ package tui
 
 type runtimeMsg runtimeEvent
 type runtimeErrMsg struct{ err error }
+type uiErrMsg struct{ err error }
 type runtimeReconnectMsg struct{ err error }
 type sendDoneMsg struct{ err error }
 type terminalSetupResultMsg terminalSetupResult

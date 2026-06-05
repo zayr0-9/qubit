@@ -58,58 +58,59 @@ When adding a new major subsystem or extracting detailed guidance from this file
 ## Important Paths
 
 ```txt
-D:\qubit
+Project root
   package.json                         Node runtime package config
   runtime.ts                           Node sidecar runtime source
-  dist\runtime.js                      Compiled Node sidecar runtime launched by Go
+  dist/runtime.js                      Compiled Node sidecar runtime launched by Go
   go.mod                               Go module config
   main.go                              CLI entrypoint only; calls internal/tui.Run
-  internal\tui\run.go                  Exported TUI package entrypoint used by main.go
-  internal\tui\app.go                  Bubble Tea app model/update dispatcher
-  internal\tui\input_update.go         Keyboard/composer submit flow
-  internal\tui\runtime_events.go       Runtime event dispatcher
-  internal\tui\run_lifecycle.go        Assistant/reasoning/streaming/notification lifecycle
-  internal\tui\session_events.go       Session list/message event handling
-  internal\tui\errors_layout.go        Runtime/send error handling and layout helpers
-  internal\tui\view.go                 Top-level TUI rendering composition
-  internal\tui\header_footer_view.go   Header, footer, and status rendering
-  internal\tui\input_view.go           Composer/input rendering
-  internal\tui\message_view.go         Chat viewport/message rendering helpers
-  internal\tui\markdown_view.go        Glamour Markdown rendering and ANSI cleanup
-  internal\tui\session_picker_view.go  Session picker rendering
-  internal\tui\modal_view.go           Modal rendering
-  internal\tui\plan_view.go            Plan view rendering
-  internal\tui\reasoning_view.go       Reasoning block rendering
-  internal\tui\layout_render.go        Transparent fixed-height render helpers
-  internal\tui\commands.go             Slash commands and command palette interactions
-  internal\tui\keys.go                 API key picker and masked key-entry UI
-  internal\tui\runtime_client.go       TUI-side Tea command adapter around runtimeclient
-  internal\tui\runtime_state.go        TUI runtime client wrapper state for tests/adapters
-  internal\tui\protocol_aliases.go     Internal aliases to protocol DTOs
-  internal\tui\model_struct.go         Main model struct
-  internal\tui\*_state.go              Focused UI state structs split by feature/domain
-  internal\tui\styles.go               Lip Gloss styling
-  internal\tui\util.go                 Shared helpers
-  internal\tui\protocol\types.go       JSON-lines protocol DTOs
-  internal\tui\runtimeclient\client.go Runtime process/server client implementation
-  internal\tui\components\composer\    Custom multiline composer component
-  internal\tui\components\listwindow\  Visible list-window helper
-  internal\tui\platform\platform.go    Browser/config-dir/notification platform helpers
-  internal\tui\storage\input_history.go
+  internal/tui/run.go                  Exported TUI package entrypoint used by main.go
+  internal/tui/app.go                  Bubble Tea app model/update dispatcher
+  internal/tui/input_update.go         Keyboard/composer submit flow
+  internal/tui/runtime_events.go       Runtime event dispatcher
+  internal/tui/run_lifecycle.go        Assistant/reasoning/streaming/notification lifecycle
+  internal/tui/session_events.go       Session list/message event handling
+  internal/tui/errors_layout.go        Runtime/send error handling and layout helpers
+  internal/tui/view.go                 Top-level TUI rendering composition
+  internal/tui/header_footer_view.go   Header, footer, and status rendering
+  internal/tui/input_view.go           Composer/input rendering
+  internal/tui/message_view.go         Chat viewport/message rendering helpers
+  internal/tui/markdown_view.go        Glamour Markdown rendering and ANSI cleanup
+  internal/tui/session_picker_view.go  Session picker rendering
+  internal/tui/modal_view.go           Modal rendering
+  internal/tui/plan_view.go            Plan view rendering
+  internal/tui/reasoning_view.go       Reasoning block rendering
+  internal/tui/layout_render.go        Transparent fixed-height render helpers
+  internal/tui/commands.go             Slash commands and command palette interactions
+  internal/tui/keys.go                 API key picker and masked key-entry UI
+  internal/tui/runtime_client.go       TUI-side Tea command adapter around runtimeclient
+  internal/tui/runtime_state.go        TUI runtime client wrapper state for tests/adapters
+  internal/tui/protocol_aliases.go     Internal aliases to protocol DTOs
+  internal/tui/model_struct.go         Main model struct
+  internal/tui/*_state.go              Focused UI state structs split by feature/domain
+  internal/tui/styles.go               Lip Gloss styling
+  internal/tui/util.go                 Shared helpers
+  internal/tui/protocol/types.go       JSON-lines protocol DTOs
+  internal/tui/runtimeclient/client.go Runtime process/server client implementation
+  internal/tui/components/composer/    Custom multiline composer component
+  internal/tui/components/listwindow/  Visible list-window helper
+  internal/tui/platform/platform.go    Browser/config-dir/notification platform helpers
+  internal/tui/storage/input_history.go
                                        Project-local input history store
-  bin\qubit.exe                        Built Windows executable
-  .qubit\sessions.sqlite               hyper-router SQLite transcript store in the terminal launch cwd
-  .qubit\session-index.json            Qubit-owned session index in the terminal launch cwd; may include session metadata such as favouritedAt
-  .qubit\runtime.log                   Runtime diagnostic log in the terminal launch cwd
-  .qubit\codex-provider-calls.log
+  bin/qubit                            Built Linux/macOS executable
+  bin/qubit.exe                        Built Windows executable
+  .qubit/sessions.sqlite               hyper-router SQLite transcript store in the terminal launch cwd
+  .qubit/session-index.json            Qubit-owned session index in the terminal launch cwd; may include session metadata such as favouritedAt
+  .qubit/runtime.log                   Runtime diagnostic log in the terminal launch cwd
+  .qubit/codex-provider-calls.log
                                        JSON-lines Codex provider call log in the terminal launch cwd
-  .qubit\input-history.json            Persisted non-secret composer history in the terminal launch cwd
+  .qubit/input-history.json            Persisted non-secret composer history in the terminal launch cwd
   %APPDATA%\Qubit or ~/.config/qubit
                                        User-global Qubit config directory, overrideable with QUBIT_CONFIG_DIR
-  <config>\theme.json                  User-global selected `/theme` palette
-  <config>\settings.json               User-global non-secret app defaults, including default provider, per-provider default models, and the global subagent provider/model
-  .qubit\todos\*.md                    Project todo lists managed by todoMd
-  .qubit\plans\*.md                    Project plans managed by planMd
+  <config>/theme.json                  User-global selected `/theme` palette
+  <config>/settings.json               User-global non-secret app defaults, including default provider, per-provider default models, and the global subagent provider/model
+  .qubit/todos/*.md                    Project todo lists managed by todoMd
+  .qubit/plans/*.md                    Project plans managed by planMd
 ```
 
 ## Architecture Rules
@@ -365,17 +366,24 @@ Follow standard Go conventions:
 - Use plain `tsc` for the Node sidecar; do not use Vite or bundling for runtime/tool code.
 - Keep runtime source in TypeScript (`runtime.ts` and future `runtime/**/*.ts` modules).
 - Do not edit generated `dist` files directly.
-- Go launches the compiled `dist\runtime.js`.
+- Go launches the compiled `dist/runtime.js`.
 - Keep provider setup, key resolution, storage setup, and tool registration in TypeScript runtime files.
 - Run `pnpm run build:runtime` after runtime/tool source changes.
 - Native runtime dependencies (`keytar`, `better-sqlite3`) must be allowed in `package.json` `pnpm.onlyBuiltDependencies`; after dependency changes run `pnpm rebuild better-sqlite3` if the native SQLite smoke test cannot locate `better_sqlite3.node`.
-- Validate native SQLite on the active Node/Windows environment with: `node -e "import Database from 'better-sqlite3'; const db = new Database(':memory:'); db.exec('select 1'); db.close(); console.log('ok')"`.
+- Linux local development needs common build/search tools such as `git`, `ripgrep`, `gcc`, `make`, `pkg-config`, and Secret Service/libsecret development packages for `keytar`.
+- Validate native SQLite on the active Node environment with: `node -e "import Database from 'better-sqlite3'; const db = new Database(':memory:'); db.exec('select 1'); db.close(); console.log('ok')"`.
 - Support environment-driven provider configuration for automation and fallback:
 
 ```powershell
 $env:ZAI_API_KEY = "your-zai-key"
 $env:GLM_MODEL = "glm-4.6"
 $env:GLM_ENDPOINT = "coding" # optional
+```
+
+```sh
+export ZAI_API_KEY=your-zai-key
+export GLM_MODEL=glm-4.6
+export GLM_ENDPOINT=coding # optional
 ```
 
 - Support secure in-app API key management through OS keychain integration (`keytar`).
@@ -391,6 +399,10 @@ $env:GLM_ENDPOINT = "coding" # optional
 
 ```powershell
 $env:QUBIT_STUB = "1"
+```
+
+```sh
+export QUBIT_STUB=1
 ```
 
 - Keep dev/debug UI details behind explicit environment flags. Do not expose raw internal IDs, fork parent IDs, durations, payload sizes, modal internals, or similar developer metadata in normal UI unless the user explicitly asks for it.
@@ -409,7 +421,18 @@ $env:QUBIT_STUB = "1"
 
 Before reporting a Go/runtime change as complete, run the narrowest useful checks.
 
-Recommended commands from `D:\qubit` on Windows:
+Recommended commands on Linux:
+
+```sh
+pnpm run build:runtime
+pnpm run check:runtime
+go test ./...
+go vet ./...
+go build -o bin/qubit .
+node -e "import('keytar').then(async mod => { const keytar = mod.default ?? mod; const account = 'qubit-smoke-' + Date.now(); await keytar.setPassword('Qubit Test', account, 'secret'); const got = await keytar.getPassword('Qubit Test', account); await keytar.deletePassword('Qubit Test', account); if (got !== 'secret') throw new Error('keytar round trip failed'); console.log('keytar round trip ok'); })"
+```
+
+Recommended commands on Windows:
 
 ```powershell
 $env:Path = "C:\Program Files\Go\bin;" + $env:Path
@@ -424,6 +447,10 @@ node -e "import('keytar').then(async mod => { const keytar = mod.default ?? mod;
 ```
 
 For manual smoke testing:
+
+```sh
+QUBIT_STUB=1 ./bin/qubit
+```
 
 ```powershell
 $env:Path = "C:\Program Files\Go\bin;" + $env:Path
@@ -475,7 +502,7 @@ When making changes:
 4. Prefer boring, maintainable code over clever abstractions.
 5. Keep the app maintainable: create focused files/components for cohesive features when that improves navigation and prevents giant files.
 6. Do not introduce unrelated formatting churn.
-7. Do not mutate generated files, `.qubit` data, or `bin/qubit.exe` unless rebuilding is part of the task.
+7. Do not mutate generated files, `.qubit` data, or built binaries under `bin/` unless rebuilding is part of the task.
 8. Do not install dependencies unless clearly required.
 9. Run validation before claiming success.
 10. If an interactive TUI issue cannot be copied, inspect:

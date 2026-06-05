@@ -401,7 +401,7 @@ func findAppRoot() (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("could not find Qubit app root. Run from D:\\qubit or keep bin\\qubit.exe under the project root")
+	return "", fmt.Errorf("could not find Qubit app root. Run from the Qubit project root or keep the built binary under the project root")
 }
 
 func isAppRoot(dir string) bool {

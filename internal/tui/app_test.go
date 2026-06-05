@@ -3241,3 +3241,47 @@ func TestRuntimeReconnectFailureSurfacesLogPath(t *testing.T) {
 		t.Fatalf("messages = %#v, want runtime log path", got.messages)
 	}
 }
+
+func TestClipboardCopyFailureIsNonFatal(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.composer.SetValue("draft stays")
+
+	updated, cmd := m.Update(uiErrMsg{err: fmt.Errorf("copy selection: No clipboard utilities available")})
+	got := updated.(model)
+	if cmd != nil {
+		t.Fatal("ui error returned command, want nil")
+	}
+	if !got.ready {
+		t.Fatal("ready = false after clipboard failure, want true")
+	}
+	if got.status != "ui error" {
+		t.Fatalf("status = %q, want ui error", got.status)
+	}
+	if got.composer.Value() != "draft stays" {
+		t.Fatalf("composer = %q, want draft preserved", got.composer.Value())
+	}
+	if len(got.messages) != len(m.messages) {
+		t.Fatalf("messages changed after ui error: got %d want %d", len(got.messages), len(m.messages))
+	}
+}
+
+func TestRuntimeErrorForClipboardFailureIsNonFatal(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+
+	updated, cmd := m.Update(runtimeErrMsg{err: fmt.Errorf("copy selection: No clipboard utilities available")})
+	got := updated.(model)
+	if cmd != nil {
+		t.Fatal("clipboard runtimeErrMsg returned command, want nil")
+	}
+	if !got.ready {
+		t.Fatal("ready = false after clipboard runtimeErrMsg, want true")
+	}
+	if got.status != "ui error" {
+		t.Fatalf("status = %q, want ui error", got.status)
+	}
+	if len(got.messages) != len(m.messages) {
+		t.Fatalf("messages changed after clipboard runtimeErrMsg: got %d want %d", len(got.messages), len(m.messages))
+	}
+}

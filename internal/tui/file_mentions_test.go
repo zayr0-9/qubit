@@ -115,12 +115,8 @@ func TestShowFileMentionPaletteFalseForSlashBusyNotReady(t *testing.T) {
 	}
 	m.ready = true
 	m.busy = true
-	if m.showFileMentionPalette() {
-		t.Fatal("file mention palette visible when busy before streaming")
-	}
-	m.streaming = true
 	if !m.showFileMentionPalette() {
-		t.Fatal("file mention palette hidden while streaming")
+		t.Fatal("file mention palette hidden while busy")
 	}
 }
 
@@ -131,5 +127,36 @@ func writeTestFile(t *testing.T, path string) {
 	}
 	if err := os.WriteFile(path, []byte("test"), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
+	}
+}
+
+func TestFileMentionTypingAtDuringStreamShowsPalette(t *testing.T) {
+	cwd := t.TempDir()
+	writeTestFile(t, filepath.Join(cwd, "agent.md"))
+
+	m := initialModel(&runtimeClient{launchCwd: cwd})
+	m.ready = true
+	m.busy = true
+	m.activeRunID = "run_1"
+	m.streaming = true
+	m.width = 80
+	m.height = 20
+	m.layout()
+
+	updated, cmd := m.updateKey(tea.KeyPressMsg{Text: "@", Code: '@'})
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil", cmd)
+	}
+	got := updated.(model)
+	if got.composer.Value() != "@" {
+		t.Fatalf("composer value = %q, want @ inserted during stream", got.composer.Value())
+	}
+	if !got.showFileMentionPalette() {
+		t.Fatal("file mention palette hidden after typing @ during stream")
+	}
+	got.ensureFileMentionIndex()
+	matches := got.filteredFileMentionEntries()
+	if len(matches) == 0 || matches[0].Path != "agent.md" {
+		t.Fatalf("matches = %#v, want agent.md", matches)
 	}
 }

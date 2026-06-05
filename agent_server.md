@@ -22,7 +22,8 @@ The first TUI for a project starts the Node runtime server. Later TUIs connect t
 ## Current Implementation
 
 - Go startup is called through `internal/tui.Run()` from the root `main.go`; the Tea command adapter is in `internal/tui/runtime_client.go`, and the concrete runtime process/server client is in `internal/tui/runtimeclient/client.go`.
-- Node runtime server mode is in `runtime.ts`.
+- Node runtime server mode is wired from `runtime.ts`, with focused helpers in `runtime/server/clientRegistry.ts` for per-client selected-session state and `runtime/server/writer.ts` for redacted targeted JSON-lines writes.
+- Shared JSON persistence uses `runtime/jsonStore.ts` for same-directory atomic writes.
 - Go computes a deterministic localhost address from the project `.qubit` directory.
 - Go first tries to connect to the existing runtime server.
 - If no server is reachable, Go acquires `.qubit/runtime-server.lock`, starts `dist/runtime.js` with `QUBIT_RUNTIME_ADDR`, then connects to the server as a client.

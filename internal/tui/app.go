@@ -73,6 +73,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateRuntime(runtimeEvent(msg))
 	case runtimeErrMsg:
 		return m.updateRuntimeError(msg.err)
+	case uiErrMsg:
+		return m.updateUIError(msg.err), nil
 	case runtimeReconnectMsg:
 		return m.updateRuntimeReconnect(msg.err)
 	case sendDoneMsg:

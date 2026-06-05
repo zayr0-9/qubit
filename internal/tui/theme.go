@@ -101,8 +101,7 @@ func (m model) updateThemeEntryTeaPaste(msg tea.PasteMsg) model {
 
 func (m model) updateThemeEntryPaste(msg composerPasteMsg) model {
 	if msg.Err != nil {
-		updated, _ := m.updateRuntimeError(msg.Err)
-		return updated
+		return m.updateUIError(fmt.Errorf("paste clipboard: %w", msg.Err))
 	}
 	return m.insertThemeEntryPaste(msg.Text)
 }

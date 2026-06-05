@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -38,10 +39,23 @@ func (m model) renderInputStatus() string {
 	}
 
 	parts := []string{m.reasoningLevelValue()}
+	if cwdStatus := m.cwdStatusText(); cwdStatus != "" {
+		parts = append(parts, cwdStatus)
+	}
 	if contextStatus := m.contextStatusText(); contextStatus != "" {
 		parts = append(parts, contextStatus)
 	}
 	return footerStyle.Width(m.width).Render(mode + mutedSt.Render(" · "+strings.Join(parts, " · ")))
+}
+func (m model) cwdStatusText() string {
+	if m.runtime != nil && m.runtime.launchCwd != "" {
+		return m.runtime.launchCwd
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return cwd
 }
 func (m model) statusModeBadges() string {
 	if m.cwdBlockEnabled {

@@ -29,6 +29,7 @@ prompts/                        Editable plan/edit/subagent prompt addenda
 tools/                          Model-callable tool implementations
 utils/                          Shared runtime/tool helpers
 .qubit/                         Project-local sessions, indexes, logs, todos, plans
+bin/qubit                       Built Linux/macOS executable
 bin/qubit.exe                   Built Windows executable
 ```
 
@@ -90,10 +91,20 @@ $env:ZAI_API_KEY = "your-key"
 $env:GLM_MODEL = "glm-5.1"
 ```
 
+```sh
+export QUBIT_PROVIDER=glm
+export ZAI_API_KEY=your-key
+export GLM_MODEL=glm-5.1
+```
+
 Useful development mode:
 
 ```powershell
 $env:QUBIT_STUB = "1"
+```
+
+```sh
+export QUBIT_STUB=1
 ```
 
 ## Build and run
@@ -103,10 +114,21 @@ Prerequisites:
 - Go matching `go.mod`
 - Node.js and `pnpm`
 - Native dependency support for `better-sqlite3` and `keytar`
+- Linux local development also needs common build/search tools such as `git`, `ripgrep`, `gcc`, `make`, `pkg-config`, and Secret Service/libsecret development packages for `keytar`
+
+Debian/Ubuntu-style package baseline:
+
+```sh
+sudo apt install git ripgrep build-essential pkg-config libsecret-1-dev dbus-x11 xdg-utils
+```
 
 Install dependencies:
 
 ```powershell
+pnpm install
+```
+
+```sh
 pnpm install
 ```
 
@@ -116,9 +138,17 @@ Build everything:
 pnpm run build
 ```
 
+```sh
+pnpm run build
+```
+
 Run from source:
 
 ```powershell
+pnpm run chat
+```
+
+```sh
 pnpm run chat
 ```
 
@@ -128,11 +158,19 @@ Run the built binary:
 .\bin\qubit.exe
 ```
 
+```sh
+./bin/qubit
+```
+
 Stub-mode smoke test:
 
 ```powershell
 $env:QUBIT_STUB = "1"
 .\bin\qubit.exe
+```
+
+```sh
+QUBIT_STUB=1 ./bin/qubit
 ```
 
 ## Validation
@@ -146,10 +184,23 @@ go vet ./...
 go build -o bin\qubit.exe .
 ```
 
+```sh
+pnpm run check:runtime
+go test ./...
+go vet ./...
+go build -o bin/qubit .
+```
+
 Runtime native SQLite smoke test:
 
 ```powershell
 node -e "import Database from 'better-sqlite3'; const db = new Database(':memory:'); db.exec('select 1'); db.close(); console.log('ok')"
+```
+
+Linux keytar smoke test, after Secret Service is available:
+
+```sh
+node -e "import('keytar').then(async mod => { const keytar = mod.default ?? mod; const account = 'qubit-smoke-' + Date.now(); await keytar.setPassword('Qubit Test', account, 'secret'); const got = await keytar.getPassword('Qubit Test', account); await keytar.deletePassword('Qubit Test', account); if (got !== 'secret') throw new Error('keytar round trip failed'); console.log('keytar round trip ok'); })"
 ```
 
 ## Design principles

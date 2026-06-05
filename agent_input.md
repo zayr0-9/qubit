@@ -55,6 +55,7 @@ internal/tui/plan_clarification.go          Plan clarification manual input/past
 ## Paste and Clipboard Routing
 
 - Bubble Tea terminal paste (`tea.PasteMsg`) and explicit clipboard paste (`composerPasteMsg` from `Ctrl+V`) are separate paths. Test both when changing paste behavior.
+- Clipboard copy should try the OS clipboard utility first, then OSC52 as a terminal fallback. Copy/paste integration failures are non-fatal UI errors: preserve readiness/input state and show the error in status/footer instead of appending a runtime error message or stopping chat.
 - Top-level paste routing should follow the focused input surface, in this order:
   1. plan clarification manual input, only when active/manual selected
   2. `/md-editor` active text target

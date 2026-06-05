@@ -14,6 +14,9 @@ func (m model) updateRuntimeError(err error) (model, tea.Cmd) {
 	if isRuntimeDisconnect(err) {
 		return m.updateRuntimeDisconnected(err)
 	}
+	if isNonFatalUIError(err) {
+		return m.updateUIError(err), nil
+	}
 	m.clearFakeStream()
 	m.busy = false
 	m.ready = false
@@ -30,6 +33,24 @@ func (m model) updateRuntimeError(err error) (model, tea.Cmd) {
 
 func isRuntimeDisconnect(err error) bool {
 	return err != nil && (errors.Is(err, runtimeclient.ErrDisconnected) || strings.Contains(strings.ToLower(err.Error()), "runtime stopped"))
+}
+
+func isNonFatalUIError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.HasPrefix(text, "copy selection:") || strings.HasPrefix(text, "paste clipboard:")
+}
+
+func (m model) updateUIError(err error) model {
+	if err == nil {
+		return m
+	}
+	m.err = err.Error()
+	m.status = "ui error"
+	m.layout()
+	return m
 }
 
 func (m model) updateRuntimeDisconnected(err error) (model, tea.Cmd) {

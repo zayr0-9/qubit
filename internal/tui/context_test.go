@@ -234,3 +234,17 @@ func TestUserMessageDisplayNumberUsesVisibleMessageIndex(t *testing.T) {
 		t.Fatalf("message display number = %d, want visible message index 5", got)
 	}
 }
+
+func TestRenderInputStatusShowsCwdBetweenReasoningAndContext(t *testing.T) {
+	m := initialModel(&runtimeClient{launchCwd: `D:\qubit`})
+	m.width = 120
+	m.maxContext = 400000
+	m.reasoningLevel = reasoningLevelHigh
+	m.messages = nil
+
+	status := plainText(m.renderInputStatus())
+	want := `high · D:\qubit · ctx 0/400k`
+	if !strings.Contains(status, want) {
+		t.Fatalf("status = %q, want cwd between reasoning and ctx as %q", status, want)
+	}
+}

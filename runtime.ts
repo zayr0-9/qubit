@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @ts-nocheck
+// @ts-nocheck TODO(node-runtime-typing): remaining integration shell still wraps untyped hyper-router/tool surfaces; extracted runtime modules are strict-typed.
 import readline from "node:readline";
 import net from "node:net";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -29,6 +29,9 @@ import { CodexCallLogWriter, CodexResponsesProvider, QubitCodexTokenStore, cance
 import { overlayActiveRunUserMessages } from "./runtime/activeRunOverlay.js";
 import { assistantReasoningContent } from "./runtime/assistantReasoning.js";
 import { createMdDocument, listMdDocuments, readMdDocument, renameMdDocument, saveMdDocument } from "./runtime/mdDocuments.js";
+import { writeJsonAtomic } from "./runtime/jsonStore.js";
+import { ClientRegistry } from "./runtime/server/clientRegistry.js";
+import { broadcastTo, writeTo } from "./runtime/server/writer.js";
 
 const entryDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = basename(entryDir) === "dist" ? dirname(entryDir) : entryDir;
@@ -405,11 +408,10 @@ let apiKeyIndex = await loadApiKeyIndex();
 const codexTokenStore = new QubitCodexTokenStore({ dataDir: configDir, legacyDataDir: dataDir, keychainService, keytar });
 let runtimeState = await createRuntimeState("plan");
 let sessionIndex = await loadSessionIndex();
-let activeSessionId = sessionIndex.activeSessionId;
+let defaultSessionIdForStartup = sessionIndex.activeSessionId;
 
+const clientRegistry = new ClientRegistry();
 const clients = new Set();
-const clientMeta = new Map();
-let nextClientId = 1;
 let idleShutdownTimer = null;
 
 function runtimeIdleTimeoutMs() {
@@ -453,12 +455,13 @@ async function cleanupRuntimeLock() {
   }
 }
 
-function readyMessage(id) {
+function readyMessage(id, selectedSessionId = defaultSelectedSessionId()) {
+  const session = visibleSessionById(selectedSessionId) || activeSession(selectedSessionId);
   return {
     type: "ready",
     id,
-    sessionId: activeSessionId,
-    sessionTitle: activeSession()?.title,
+    sessionId: session?.id || selectedSessionId,
+    sessionTitle: session?.title,
     provider: runtimeState.providerName,
     activeProvider: runtimeState.providerName,
     activeKeyAlias: runtimeState.keyAlias,
@@ -474,29 +477,20 @@ function readyMessage(id) {
 }
 
 let currentResponseTarget = null;
+let currentRequestContext = { target: null };
 function write(message, target = null) {
-  const line = `${JSON.stringify(redactMessage(message))}\n`;
-  const destination = target || currentResponseTarget;
-  if (destination) {
-    destination.write(line);
-    return;
-  }
-  if (!serverAddress) {
-    process.stdout.write(line);
-    return;
-  }
-  console.error(`[runtime-server] dropped untargeted message type=${message?.type || "unknown"}`);
+  writeTo(target || currentResponseTarget, message, {
+    redactor: redactMessage,
+    serverMode: Boolean(serverAddress),
+    logger: (line) => console.error(line),
+  });
 }
 
 function broadcast(message) {
-  const line = `${JSON.stringify(redactMessage(message))}\n`;
-  if (clients.size > 0) {
-    for (const client of clients) {
-      client.write(line);
-    }
-    return;
-  }
-  if (!serverAddress) process.stdout.write(line);
+  broadcastTo(clients, message, {
+    redactor: redactMessage,
+    serverMode: Boolean(serverAddress),
+  });
 }
 
 const serverAddress = process.env.QUBIT_RUNTIME_ADDR || "";
@@ -512,7 +506,7 @@ function startStdioClient() {
     input: process.stdin,
     crlfDelay: Infinity,
   });
-  attachLineHandler(rl, null);
+  attachLineHandler(rl, null, undefined);
   rl.on("close", () => {
     queue.finally(() => process.exit(0));
   });
@@ -520,9 +514,9 @@ function startStdioClient() {
 
 async function startRuntimeServer(address) {
   const server = net.createServer((socket) => {
-    const clientId = `client_${nextClientId++}`;
     clients.add(socket);
-    clientMeta.set(socket, { clientId, connectedAt: Date.now() });
+    const clientState = clientRegistry.add(socket, { selectedSessionId: defaultSelectedSessionId() });
+    const clientId = clientState.clientId;
     cancelIdleShutdown(`client connected ${clientId}`);
     console.error(`[runtime-server] client connected ${clientId}; clients=${clients.size}`);
     socket.setEncoding("utf8");
@@ -531,17 +525,16 @@ async function startRuntimeServer(address) {
     const removeClient = (event) => {
       if (removed) return;
       removed = true;
-      const meta = clientMeta.get(socket);
+      const meta = clientRegistry.remove(socket);
       clients.delete(socket);
-      clientMeta.delete(socket);
       rl?.close();
       console.error(`[runtime-server] client ${event} ${meta?.clientId || clientId}; clients=${clients.size}`);
       maybeScheduleIdleShutdown(`client ${event}`);
     };
     rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
     rl.on("error", () => removeClient("errored"));
-    attachLineHandler(rl, socket);
-    write(readyMessage(), socket);
+    attachLineHandler(rl, socket, clientState);
+    write(readyMessage(undefined, clientState.selectedSessionId), socket);
     socket.on("close", () => removeClient("closed"));
     socket.on("error", () => removeClient("errored"));
   });
@@ -557,23 +550,30 @@ async function startRuntimeServer(address) {
 
 let queue = Promise.resolve();
 
-function attachLineHandler(rl, target) {
+function attachLineHandler(rl, target, clientState) {
+  const requestContext = { target, clientState };
   rl.on("line", (line) => {
     const previousTarget = currentResponseTarget;
+    const previousContext = currentRequestContext;
     currentResponseTarget = target;
+    currentRequestContext = requestContext;
     try {
       if (handleImmediateLine(line)) return;
     } finally {
       currentResponseTarget = previousTarget;
+      currentRequestContext = previousContext;
     }
 
     queue = queue.then(async () => {
       const previousTarget = currentResponseTarget;
+      const previousContext = currentRequestContext;
       currentResponseTarget = target;
+      currentRequestContext = requestContext;
       try {
         await handleLine(line);
       } finally {
         currentResponseTarget = previousTarget;
+        currentRequestContext = previousContext;
       }
     }).catch((error) => {
       write({ type: "error", error: redactSecrets(error instanceof Error ? error.message : String(error)) }, target);
@@ -785,14 +785,17 @@ async function handleLine(line) {
       return;
     }
     write({ type: "session.deleted", id: request.id, sessionId: deleted.id, sessionTitle: deleted.title });
+    if (currentRequestContext.clientState?.selectedSessionId === deleted.id) {
+      currentRequestContext.clientState.selectedSessionId = defaultSelectedSessionId();
+    }
     writeSessionList(request.id);
     return;
   }
 
   if (request.type === "session.tree") {
-    const requestedSessionId = String(request.sessionId || activeSessionId || "");
-    const focalSession = sessionIndex.sessions.find((session) => session.id === requestedSessionId) || activeSession();
-    const focalSessionId = focalSession?.id || activeSessionId;
+    const requestedSessionId = String(request.sessionId || selectedSessionIdForCurrentClient() || "");
+    const focalSession = sessionIndex.sessions.find((session) => session.id === requestedSessionId) || activeSession(selectedSessionIdForCurrentClient());
+    const focalSessionId = focalSession?.id || selectedSessionIdForCurrentClient();
     const nodes = await buildSessionTreeNodes(focalSessionId);
     write({
       type: "session.tree",
@@ -806,22 +809,25 @@ async function handleLine(line) {
 
   if (request.type === "session.new") {
     const session = await createSession({ title: request.title });
-    write({ type: "session.created", id: request.id, session, sessionId: activeSessionId, sessionTitle: session.title });
+    setSelectedSessionForCurrentClient(session.id);
+    write({ type: "session.created", id: request.id, session, sessionId: session.id, sessionTitle: session.title });
     writeSessionList(request.id);
     return;
   }
 
   if (request.type === "session.fork") {
+    const sourceSessionId = String(request.sessionId || selectedSessionIdForCurrentClient());
     const session = await forkSession({
-      sourceSessionId: String(request.sessionId || activeSessionId),
+      sourceSessionId,
       messageIndex: Number(request.messageIndex),
       title: request.title,
     });
     if (!session) {
-      write({ type: "error", id: request.id, error: `Unknown session: ${request.sessionId || activeSessionId}` });
+      write({ type: "error", id: request.id, error: `Unknown session: ${sourceSessionId}` });
       return;
     }
-    write({ type: "session.forked", id: request.id, session, sessionId: activeSessionId, sessionTitle: session.title });
+    setSelectedSessionForCurrentClient(session.id);
+    write({ type: "session.forked", id: request.id, session, sessionId: session.id, sessionTitle: session.title });
     writeSessionList(request.id);
     return;
   }
@@ -832,12 +838,13 @@ async function handleLine(line) {
       write({ type: "error", id: request.id, error: `Unknown session: ${request.sessionId}` });
       return;
     }
-    write({ type: "session.activated", id: request.id, sessionId: activeSessionId, sessionTitle: session.title, session });
+    setSelectedSessionForCurrentClient(session.id);
+    write({ type: "session.activated", id: request.id, sessionId: session.id, sessionTitle: session.title, session });
     return;
   }
 
   if (request.type === "session.messages") {
-    const sessionId = String(request.sessionId || activeSessionId);
+    const sessionId = String(request.sessionId || selectedSessionIdForCurrentClient());
     const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId);
     if (!session) {
       write({ type: "error", id: request.id, error: `Unknown session: ${sessionId}` });
@@ -869,9 +876,10 @@ async function handleLine(line) {
   }
 
   if (request.type === "session.rename") {
-    const session = await renameSession(String(request.sessionId || activeSessionId), String(request.title || ""));
+    const sessionId = String(request.sessionId || selectedSessionIdForCurrentClient());
+    const session = await renameSession(sessionId, String(request.title || ""));
     if (!session) {
-      write({ type: "error", id: request.id, error: `Unknown session: ${request.sessionId || activeSessionId}` });
+      write({ type: "error", id: request.id, error: `Unknown session: ${sessionId}` });
       return;
     }
     write({ type: "session.renamed", id: request.id, sessionId: session.id, sessionTitle: session.title, session });
@@ -879,10 +887,10 @@ async function handleLine(line) {
   }
 
   if (request.type === "session.favourite") {
-    const requestedSessionId = String(request.sessionId || activeSessionId || "");
+    const requestedSessionId = String(request.sessionId || selectedSessionIdForCurrentClient() || "");
     const session = await favouriteSession(requestedSessionId);
     if (!session) {
-      write({ type: "error", id: request.id, error: `Unknown session: ${request.sessionId || activeSessionId}` });
+      write({ type: "error", id: request.id, error: `Unknown session: ${requestedSessionId}` });
       return;
     }
     write({ type: "session.favourited", id: request.id, sessionId: session.id, sessionTitle: session.title, session });
@@ -892,7 +900,8 @@ async function handleLine(line) {
 
   if (request.type === "chat" && typeof request.input === "string") {
     const responseTarget = currentResponseTarget;
-    void handleChatRequest(request, responseTarget).catch((error) => {
+    const requestContext = currentRequestContext;
+    void handleChatRequest(request, responseTarget, requestContext).catch((error) => {
       write({
         type: "error",
         id: request.id,
@@ -907,13 +916,14 @@ async function handleLine(line) {
   write({ type: "error", id: request.id, error: "Expected chat/session/key command" });
 }
 
-async function handleChatRequest(request, responseTarget = null) {
+async function handleChatRequest(request, responseTarget = null, requestContext = { target: responseTarget }) {
   const runId = String(request.runId || request.id || createRunId());
   const controller = new AbortController();
-  let runSessionId = request.sessionId || activeSessionId;
+  const selectedSessionId = requestContext?.clientState?.selectedSessionId || defaultSelectedSessionId();
+  let runSessionId = request.sessionId || selectedSessionId;
   const replaceFromMessageIndex = Number(request.replaceFromMessageIndex);
   if (Number.isFinite(replaceFromMessageIndex)) {
-    const sourceSessionId = String(request.sessionId || activeSessionId);
+    const sourceSessionId = String(request.sessionId || selectedSessionId);
     const source = sessionIndex.sessions.find((candidate) => candidate.id === sourceSessionId);
     if (!source) {
       write({ type: "error", id: request.id, error: `Unknown session: ${sourceSessionId}` }, responseTarget);
@@ -930,12 +940,15 @@ async function handleChatRequest(request, responseTarget = null) {
       return;
     }
     runSessionId = session.id;
-  } else if (request.newSession === true || !request.sessionId) {
+    if (requestContext?.clientState) requestContext.clientState.selectedSessionId = runSessionId;
+  } else if (request.newSession === true) {
     const session = await createSession({ title: request.title || titleFromInput(request.input) });
     runSessionId = session.id;
+    if (requestContext?.clientState) requestContext.clientState.selectedSessionId = runSessionId;
   } else {
     await ensureSession(runSessionId);
-    activeSessionId = runSessionId;
+    if (requestContext?.clientState) requestContext.clientState.selectedSessionId = runSessionId;
+    else setDefaultSelectedSessionId(runSessionId);
   }
 
   const requestedReasoningLevel = normalizeReasoningLevel(request.reasoningLevel || reasoningLevel);
@@ -954,7 +967,21 @@ async function handleChatRequest(request, responseTarget = null) {
   const cwdBlockEnabled = request.cwdBlockEnabled !== false;
   setRunCwdBlockEnabled(runId, cwdBlockEnabled);
   const runRuntimeState = runtimeState;
-  activeRuns.set(runId, { runId, requestId: request.id, sessionId: runSessionId, input: request.input, controller, runtime: runRuntimeState.runtime, target: responseTarget, cwdBlockEnabled });
+  const runInfo = {
+    runId,
+    requestId: request.id,
+    sessionId: runSessionId,
+    input: request.input,
+    controller,
+    runtime: runRuntimeState.runtime,
+    target: responseTarget,
+    cwdBlockEnabled,
+    providerName: runRuntimeState.providerName,
+    model: runRuntimeState.model,
+    promptMode: runRuntimeState.promptMode,
+    reasoningLevel,
+  };
+  activeRuns.set(runId, runInfo);
   cancelIdleShutdown(`visible run started ${runId}`);
   write({ type: "run_started", id: request.id, runId, sessionId: runSessionId }, responseTarget);
 
@@ -977,6 +1004,8 @@ async function handleChatRequest(request, responseTarget = null) {
     await touchSession(runSessionId, {
       title: titleFromInput(request.input),
       messageCount: result.messages.filter((message) => message.role !== "system").length + generatedImageMessages.length,
+      provider: runInfo.providerName,
+      model: runInfo.model,
     });
 
     if (result.status !== "cancelled" || assistant?.content || generatedImageMessages.length > 0) {
@@ -1015,7 +1044,7 @@ async function handleChatRequest(request, responseTarget = null) {
 async function runSubagentTool(args, context) {
   const parentRunId = context?.runId || "";
   const parentRun = activeRuns.get(parentRunId) || hiddenRuns.get(parentRunId);
-  const parentSessionId = context?.sessionId || parentRun?.sessionId || activeSessionId;
+  const parentSessionId = context?.sessionId || parentRun?.sessionId || defaultSelectedSessionId();
   const parentHidden = hiddenRuns.get(parentRunId);
   const depth = (parentHidden?.depth || 0) + 1;
   const maxDepth = 2;
@@ -1531,8 +1560,7 @@ function normalizeSubagentSettings(rawSubagent, defaultProvider, defaultModels =
 }
 
 async function saveSettings(nextSettings = settings) {
-  await mkdir(configDir, { recursive: true });
-  await writeFile(settingsPath, `${JSON.stringify(nextSettings, null, 2)}\n`, { mode: 0o600 });
+  await writeJsonAtomic(settingsPath, nextSettings, { mode: 0o600 });
 }
 
 async function loadApiKeyIndex() {
@@ -1576,8 +1604,7 @@ async function loadApiKeyIndex() {
   return index;
 }
 async function saveApiKeyIndex(index = apiKeyIndex) {
-  await mkdir(configDir, { recursive: true });
-  await writeFile(keyIndexPath, `${JSON.stringify(index, null, 2)}\n`, { mode: 0o600 });
+  await writeJsonAtomic(keyIndexPath, index, { mode: 0o600 });
 }
 
 async function listApiKeys() {
@@ -2251,8 +2278,7 @@ async function loadSessionIndex() {
 }
 
 async function saveSessionIndex(index = sessionIndex) {
-  await mkdir(dataDir, { recursive: true });
-  await writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`);
+  await writeJsonAtomic(indexPath, index);
 }
 
 function newSession(id = createSessionId(), title = "New chat", now = new Date().toISOString()) {
@@ -2271,9 +2297,8 @@ async function createSession(options = {}) {
   const title = String(options.title || "New chat").trim() || "New chat";
   const session = newSession(createSessionId(), title);
   sessionIndex.sessions.unshift(session);
-  if (options.hidden !== true) {
-    sessionIndex.activeSessionId = session.id;
-    activeSessionId = session.id;
+  if (options.setDefaultSelected === true || (!serverAddress && options.hidden !== true)) {
+    setDefaultSelectedSessionId(session.id);
   }
   await saveSessionIndex();
   return session;
@@ -2337,8 +2362,7 @@ async function forkSession({ sourceSessionId, messageIndex, title, includeUiMess
   }
 
   sessionIndex.sessions.unshift(session);
-  sessionIndex.activeSessionId = session.id;
-  activeSessionId = session.id;
+  if (serverAddress === "") setDefaultSelectedSessionId(session.id);
   await saveSessionIndex();
   return session;
 }
@@ -2352,9 +2376,10 @@ async function ensureSession(sessionId) {
 async function activateSession(sessionId) {
   const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId && candidate.hidden !== true);
   if (!session) return null;
-  sessionIndex.activeSessionId = session.id;
-  activeSessionId = session.id;
-  await saveSessionIndex();
+  if (!serverAddress) {
+    setDefaultSelectedSessionId(session.id);
+    await saveSessionIndex();
+  }
   return session;
 }
 
@@ -2365,11 +2390,10 @@ async function deleteSession(sessionId) {
   if (visibleSessions.length <= 1) throw new Error("Cannot delete the only session.");
   const [deleted] = sessionIndex.sessions.splice(index, 1);
   if (storage.deleteSession) await storage.deleteSession(sessionId);
-  if (activeSessionId === sessionId || sessionIndex.activeSessionId === sessionId) {
+  if (defaultSessionIdForStartup === sessionId || sessionIndex.activeSessionId === sessionId) {
     const nextVisible = sessionIndex.sessions.filter((session) => session.hidden !== true);
     const next = nextVisible[Math.min(index, nextVisible.length - 1)] || nextVisible[0];
-    activeSessionId = next.id;
-    sessionIndex.activeSessionId = next.id;
+    setDefaultSelectedSessionId(next.id);
   }
   await saveSessionIndex();
   return deleted;
@@ -2385,7 +2409,7 @@ async function renameSession(sessionId, title) {
   return session;
 }
 
-async function favouriteSession(sessionId = activeSessionId) {
+async function favouriteSession(sessionId = defaultSelectedSessionId()) {
   const session = sessionIndex.sessions.find((candidate) => candidate.id === sessionId && candidate.hidden !== true);
   if (!session) return null;
   if (!session.favouritedAt) {
@@ -2404,25 +2428,47 @@ async function touchSession(sessionId, patch = {}) {
   if (Number.isFinite(patch.messageCount)) {
     session.messageCount = patch.messageCount;
   }
-  session.provider = runtimeState.providerName;
-  session.model = model;
+  session.provider = patch.provider || runtimeState.providerName;
+  session.model = patch.model || model;
   session.updatedAt = new Date().toISOString();
-  sessionIndex.activeSessionId = session.id;
-  activeSessionId = session.id;
+  if (!serverAddress) setDefaultSelectedSessionId(session.id);
   await saveSessionIndex();
 }
 
-function activeSession() {
-  return sessionIndex.sessions.find((session) => session.id === activeSessionId && session.hidden !== true) || sessionIndex.sessions.find((session) => session.hidden !== true) || sessionIndex.sessions[0];
+function visibleSessionById(sessionId) {
+  return sessionIndex.sessions.find((session) => session.id === sessionId && session.hidden !== true);
+}
+
+function defaultSelectedSessionId() {
+  return visibleSessionById(defaultSessionIdForStartup)?.id || sessionIndex.sessions.find((session) => session.hidden !== true)?.id || sessionIndex.sessions[0]?.id || defaultSessionId;
+}
+
+function selectedSessionIdForCurrentClient() {
+  return currentRequestContext?.clientState?.selectedSessionId || defaultSelectedSessionId();
+}
+
+function setDefaultSelectedSessionId(sessionId) {
+  defaultSessionIdForStartup = sessionId;
+  sessionIndex.activeSessionId = sessionId;
+}
+
+function setSelectedSessionForCurrentClient(sessionId) {
+  if (currentRequestContext?.clientState) currentRequestContext.clientState.selectedSessionId = sessionId;
+  else setDefaultSelectedSessionId(sessionId);
+}
+
+function activeSession(sessionId = defaultSelectedSessionId()) {
+  return visibleSessionById(sessionId) || sessionIndex.sessions.find((session) => session.hidden !== true) || sessionIndex.sessions[0];
 }
 
 function writeSessionList(id) {
   const visibleSessions = sessionIndex.sessions.filter((session) => session.hidden !== true);
+  const selected = activeSession(selectedSessionIdForCurrentClient());
   write({
     type: "session.list",
     id,
-    sessionId: activeSession()?.id || activeSessionId,
-    sessionTitle: activeSession()?.title,
+    sessionId: selected?.id || selectedSessionIdForCurrentClient(),
+    sessionTitle: selected?.title,
     sessions: sessionsByRecentActivity(visibleSessions),
   });
 }
@@ -2478,7 +2524,7 @@ async function planViewMessagesForToolGroup(group) {
   return views;
 }
 
-async function buildSessionTreeNodes(focalSessionId = activeSessionId) {
+async function buildSessionTreeNodes(focalSessionId = defaultSelectedSessionId()) {
   const previewCache = new Map();
   const sessions = relatedForkSessions(sessionIndex.sessions.filter((session) => session.hidden !== true), focalSessionId);
   if (sessions.length === 0) return [];
@@ -2671,7 +2717,7 @@ function compareSessionsForTree(a, b) {
   return left.localeCompare(right);
 }
 
-function relatedForkSessions(sessions, focalSessionId = activeSessionId) {
+function relatedForkSessions(sessions, focalSessionId = defaultSelectedSessionId()) {
   sessions = Array.isArray(sessions) ? sessions.filter((session) => session?.hidden !== true) : [];
   if (sessions.length === 0) return [];
 
@@ -2685,7 +2731,8 @@ function relatedForkSessions(sessions, focalSessionId = activeSessionId) {
 
   let startId = typeof focalSessionId === "string" ? focalSessionId : "";
   if (!idToSession.has(startId)) {
-    startId = idToSession.has(activeSessionId) ? activeSessionId : sessions.find((session) => idToSession.has(session?.id))?.id;
+    const fallbackId = defaultSelectedSessionId();
+    startId = idToSession.has(fallbackId) ? fallbackId : sessions.find((session) => idToSession.has(session?.id))?.id;
   }
   if (!startId || !idToSession.has(startId)) return [];
 
