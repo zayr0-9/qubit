@@ -42,7 +42,10 @@ Package scripts:
 ```sh
 pnpm run package:release:linux
 pnpm run package:release:windows
+pnpm run install:dogfood:linux
 ```
+
+`install:dogfood:linux` rebuilds the Linux release archive and installs it from the local `release/` artifact using `scripts/install.sh`. Use it for fast Ubuntu/Linux dogfooding updates.
 
 ## Packaging Rules
 

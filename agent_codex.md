@@ -98,7 +98,16 @@ Default endpoint:
 https://chatgpt.com/backend-api/codex/responses
 ```
 
-Requests use `Authorization: Bearer <ChatGPT access token>` and `Accept: text/event-stream`.
+Qubit supports Codex Responses over WebSocket with HTTP/SSE fallback. The default `QUBIT_CODEX_TRANSPORT=auto` tries WebSocket first, then falls back to HTTP/SSE for retryable WebSocket failures. `QUBIT_CODEX_TRANSPORT=websocket` forces WebSocket and `QUBIT_CODEX_TRANSPORT=http` forces the legacy HTTP/SSE path.
+
+WebSocket uses:
+
+```txt
+wss://chatgpt.com/backend-api/codex/responses
+OpenAI-Beta: responses_websockets=2026-02-06
+```
+
+The WebSocket request is a JSON text frame with top-level `type: "response.create"`. HTTP requests use `Authorization: Bearer <ChatGPT access token>` and `Accept: text/event-stream`; WebSocket handshake headers carry the same bearer/account/session routing metadata plus the beta header.
 
 Codex requests include Qubit's local function tools plus OpenAI-hosted Responses tools:
 

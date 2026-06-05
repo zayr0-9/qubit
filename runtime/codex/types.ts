@@ -88,15 +88,40 @@ export interface CodexAuthOptions {
   fetch?: typeof fetch;
 }
 
+export type CodexResponsesTransport = "auto" | "http" | "websocket";
+
 export interface CodexResponsesProviderOptions extends CodexAuthOptions {
   baseURL?: string;
   originator?: string;
   userAgent?: string;
+  transport?: CodexResponsesTransport;
+  webSocketFactory?: CodexWebSocketFactory;
+  websocketConnectTimeoutMs?: number;
+  websocketIdleTimeoutMs?: number;
   reasoningEffort?: "minimal" | "low" | "medium" | "high";
   reasoningSummary?: "auto" | "concise" | "detailed" | null;
   onReasoningDelta?: (event: { sessionId?: string; runId?: string; delta: string }) => void;
   onCallLog?: (event: CodexProviderCallLogEvent) => void | Promise<void>;
 }
+
+export interface CodexWebSocketFactoryOptions {
+  url: string;
+  headers: Record<string, string>;
+}
+
+export interface CodexWebSocketLike {
+  readyState?: number;
+  send(data: string, callback?: (error?: Error) => void): void;
+  close(code?: number, reason?: string): void;
+  terminate?: () => void;
+  on(event: "open", listener: () => void): this;
+  on(event: "message", listener: (data: unknown, isBinary?: boolean) => void): this;
+  on(event: "error", listener: (error: Error) => void): this;
+  on(event: "close", listener: (code: number, reason: Buffer) => void): this;
+  on(event: "upgrade", listener: (response: { headers?: Record<string, string | string[] | undefined> }) => void): this;
+}
+
+export type CodexWebSocketFactory = (options: CodexWebSocketFactoryOptions) => CodexWebSocketLike;
 
 export interface CodexRequestParts {
   instructions?: string;
@@ -104,7 +129,7 @@ export interface CodexRequestParts {
   tools: unknown[];
 }
 
-export interface CodexSseParseResult {
+export interface CodexResponseParseResult {
   content: string;
   reasoningContent?: string;
   toolCalls: ToolCall[];
@@ -114,6 +139,12 @@ export interface CodexSseParseResult {
   usage?: unknown;
   outputItems?: unknown[];
 }
+
+export type CodexSseParseResult = CodexResponseParseResult;
+
+export type CodexResponseParseOptions = {
+  onReasoningDelta?: (delta: string) => void;
+};
 
 export type CodexGenerateInput = {
   sessionId?: string;
@@ -147,5 +178,6 @@ export interface CodexProviderCallLogEvent {
     stopReason?: string;
     providerStopReason?: string;
   };
+  transport?: "http" | "websocket";
   error?: string;
 }

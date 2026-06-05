@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { ModelProvider, ModelResponse } from "@hyper-labs/hyper-router";
-import { CODEX_BASE_URL, CODEX_ORIGINATOR, type CodexGenerateInput, type CodexProviderCallLogEvent, type CodexResponsesProviderOptions } from "./types.js";
+import { CODEX_BASE_URL, CODEX_ORIGINATOR, type CodexGenerateInput, type CodexProviderCallLogEvent, type CodexResponsesProviderOptions, type CodexResponsesTransport } from "./types.js";
 import { getCodexAuthContext } from "./auth.js";
 import { toCodexRequestParts } from "./responsesItems.js";
 import { parseCodexSseResponse } from "./responsesSse.js";
-import { codexErrorMessage, withCodexRetry } from "./responsesRetry.js";
+import { parseCodexWebSocketResponse } from "./responsesWebsocket.js";
+import { codexErrorMessage, isCodexRetryableError, withCodexRetry } from "./responsesRetry.js";
 
 export class CodexResponsesProvider implements ModelProvider {
   private readonly options: CodexResponsesProviderOptions;
@@ -60,17 +61,11 @@ export class CodexResponsesProvider implements ModelProvider {
       console.error(`[codex-reasoning] request model=${input.model || "unknown"} reasoningEffort=${body.reasoning.effort} reasoningSummary=${"summary" in body.reasoning ? body.reasoning.summary : "disabled"} include=${JSON.stringify(body.include)}`);
     }
     try {
+      let completedTransport: "http" | "websocket" = "http";
       const parsed = await withCodexRetry(async () => {
-        input.signal?.throwIfAborted();
-        const response = await this.fetchImpl(this.responsesUrl(), {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-          ...(input.signal ? { signal: input.signal } : {}),
-        });
-        return await parseCodexSseResponse(response, {
-          onReasoningDelta: (delta) => this.options.onReasoningDelta?.({ sessionId: input.sessionId, runId: input.runId, delta }),
-        });
+        const result = await this.generateWithTransport(input, headers, body);
+        completedTransport = result.transport;
+        return result.parsed;
       }, {
         onRetry: (event) => {
           this.logRetry(input, event.nextAttempt, event.maxAttempts, event.delayMs, event.reason);
@@ -104,6 +99,7 @@ export class CodexResponsesProvider implements ModelProvider {
         requestId,
         promptCacheKey,
         status: "completed",
+        transport: completedTransport,
         startedAt,
         ...this.finishedTiming(startedAtMs),
         ...(parsed.responseId ? { responseId: parsed.responseId } : {}),
@@ -137,8 +133,59 @@ export class CodexResponsesProvider implements ModelProvider {
     }
   }
 
+  private async generateWithTransport(input: CodexGenerateInput, headers: Headers, body: Record<string, unknown>): Promise<{ parsed: Awaited<ReturnType<typeof parseCodexSseResponse>>; transport: "http" | "websocket" }> {
+    input.signal?.throwIfAborted();
+    const transport = this.resolveTransport();
+    if (transport === "http") return { parsed: await this.generateHttp(input, headers, body), transport: "http" };
+    if (transport === "websocket") return { parsed: await this.generateWebSocket(input, headers, body), transport: "websocket" };
+
+    try {
+      return { parsed: await this.generateWebSocket(input, headers, body), transport: "websocket" };
+    } catch (error) {
+      input.signal?.throwIfAborted();
+      if (!isCodexRetryableError(error)) throw error;
+      console.error(`[codex-retry] websocket failed; falling back to HTTP model=${input.model || "unknown"} runId=${input.runId || ""} sessionId=${input.sessionId || ""} reason=${codexErrorMessage(error).replace(/\s+/g, " ").slice(0, 300)}`);
+      return { parsed: await this.generateHttp(input, headers, body), transport: "http" };
+    }
+  }
+
+  private async generateHttp(input: CodexGenerateInput, headers: Headers, body: Record<string, unknown>): Promise<Awaited<ReturnType<typeof parseCodexSseResponse>>> {
+    input.signal?.throwIfAborted();
+    const response = await this.fetchImpl(this.responsesUrl(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    return await parseCodexSseResponse(response, {
+      onReasoningDelta: (delta) => this.options.onReasoningDelta?.({ sessionId: input.sessionId, runId: input.runId, delta }),
+    });
+  }
+
+  private async generateWebSocket(input: CodexGenerateInput, headers: Headers, body: Record<string, unknown>): Promise<Awaited<ReturnType<typeof parseCodexSseResponse>>> {
+    return await parseCodexWebSocketResponse({
+      baseURL: this.baseURL(),
+      headers,
+      body,
+      ...(input.signal ? { signal: input.signal } : {}),
+      ...(this.options.webSocketFactory ? { webSocketFactory: this.options.webSocketFactory } : {}),
+      ...(this.options.websocketConnectTimeoutMs ? { connectTimeoutMs: this.options.websocketConnectTimeoutMs } : {}),
+      ...(this.options.websocketIdleTimeoutMs ? { idleTimeoutMs: this.options.websocketIdleTimeoutMs } : {}),
+      onReasoningDelta: (delta) => this.options.onReasoningDelta?.({ sessionId: input.sessionId, runId: input.runId, delta }),
+    });
+  }
+
+  private resolveTransport(): CodexResponsesTransport {
+    const value = (this.options.transport || process.env.QUBIT_CODEX_TRANSPORT || "auto").toLowerCase();
+    return value === "http" || value === "websocket" || value === "auto" ? value : "auto";
+  }
+
+  private baseURL(): string {
+    return (this.options.baseURL || CODEX_BASE_URL).replace(/\/$/, "");
+  }
+
   private responsesUrl(): string {
-    return `${(this.options.baseURL || CODEX_BASE_URL).replace(/\/$/, "")}/responses`;
+    return `${this.baseURL()}/responses`;
   }
 
   private logRetry(input: CodexGenerateInput, attempt: number, maxAttempts: number, delayMs: number, reason: string): void {

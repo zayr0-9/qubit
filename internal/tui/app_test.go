@@ -1490,7 +1490,7 @@ func TestStaleStartupSessionListDoesNotOverrideNewRunSession(t *testing.T) {
 func newTestRuntime(t *testing.T) (*runtimeClient, *recordingWriteCloser) {
 	t.Helper()
 	stdin := &recordingWriteCloser{}
-	return &runtimeClient{stdin: stdin, events: make(chan runtimeEvent, 8), errs: make(chan error, 1)}, stdin
+	return &runtimeClient{stdin: stdin, events: make(chan runtimeEvent, 8), errs: make(chan error, 1), qubitDir: t.TempDir()}, stdin
 }
 
 type recordingWriteCloser struct {

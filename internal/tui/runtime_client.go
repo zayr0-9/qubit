@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -87,4 +88,14 @@ func reconnectRuntime(r *runtimeClient) tea.Cmd {
 		}
 		return runtimeReconnectMsg{err: fmt.Errorf("runtime reconnect unavailable")}
 	}
+}
+
+func runtimeQubitDir(r *runtimeClient) string {
+	if r == nil {
+		return ""
+	}
+	if _, ok := os.LookupEnv("QUBIT_CONFIG_DIR"); !ok && r.client == nil && r.qubitDir != "" {
+		return ""
+	}
+	return r.qubitDir
 }

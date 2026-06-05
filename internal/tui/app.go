@@ -9,12 +9,12 @@ import (
 func initialModel(rt *runtimeClient) model {
 	composer := newComposer()
 	theme := defaultTheme()
+	if loadedTheme, err := loadThemeConfig(runtimeQubitDir(rt)); err == nil && loadedTheme.Background != "" && loadedTheme.Text != "" {
+		theme = loadedTheme
+	}
 	inputHistory := []string(nil)
 	if rt != nil {
 		var err error
-		if loadedTheme, err := loadThemeConfig(rt.qubitDir); err == nil && loadedTheme.Background != "" && loadedTheme.Text != "" {
-			theme = loadedTheme
-		}
 		inputHistory, err = loadInputHistory(rt.qubitDir)
 		if err != nil {
 			inputHistory = nil

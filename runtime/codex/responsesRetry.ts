@@ -64,6 +64,14 @@ export function createRetryableCodexHttpError(status: number, text?: string): Co
   return error;
 }
 
+export function createRetryableCodexWebSocketError(message: string, options: { status?: number; retryable?: boolean; cause?: unknown } = {}): CodexRetriableError {
+  const error = new Error(`Codex Responses websocket failed: ${safeErrorText(message)}`) as CodexRetriableError;
+  if (typeof options.status === "number") error.status = options.status;
+  error.retryable = options.retryable ?? (typeof options.status === "number" ? isRetryableCodexHttpStatus(options.status) : true);
+  if (options.cause !== undefined) error.cause = options.cause;
+  return error;
+}
+
 export function isCodexRetryableError(error: unknown): boolean {
   if (isAbortLikeError(error)) return false;
   const candidate = error as CodexRetriableError | undefined;
@@ -74,6 +82,7 @@ export function isCodexRetryableError(error: unknown): boolean {
   return [
     "fetch failed",
     "network error",
+    "websocket",
     "socket hang up",
     "connection reset",
     "connection refused",

@@ -148,6 +148,12 @@ pnpm run package:release:linux
 pnpm run package:release:windows
 ```
 
+For local Ubuntu/Linux dogfooding, rebuild and reinstall the local release in one command:
+
+```sh
+pnpm run install:dogfood:linux
+```
+
 ## Build and run
 
 Prerequisites:

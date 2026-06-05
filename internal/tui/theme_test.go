@@ -42,6 +42,7 @@ func TestNormalizeHexColor(t *testing.T) {
 }
 
 func TestThemeSlashCommandOpensThemeEditor(t *testing.T) {
+	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
 	m := initialModel(nil)
 	m.ready = true
 
@@ -62,6 +63,7 @@ func TestThemeSlashCommandOpensThemeEditor(t *testing.T) {
 }
 
 func TestThemePresetSelectionAppliesNeon(t *testing.T) {
+	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
 	m := initialModel(nil)
 	beforeSpinner := m.spinner.View()
 	updated, _ := m.openThemeEntry()
@@ -97,6 +99,7 @@ func TestThemePresetSelectionAppliesNeon(t *testing.T) {
 }
 
 func TestThemeCustomAppliesValidHexAndClearsCache(t *testing.T) {
+	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
 	m := initialModel(nil)
 	m.renderCache[renderCacheKey{Role: "assistant", Content: "cached", Width: 80}] = "old"
 	updated, _ := m.openThemeEntry()
@@ -119,6 +122,7 @@ func TestThemeCustomAppliesValidHexAndClearsCache(t *testing.T) {
 }
 
 func TestThemeCustomRejectsInvalidHex(t *testing.T) {
+	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
 	m := initialModel(nil)
 	original := m.theme
 	updated, _ := m.openThemeEntry()
@@ -144,6 +148,7 @@ func TestThemeCustomRejectsInvalidHex(t *testing.T) {
 }
 
 func TestThemeDefaultShortcutRestoresDefault(t *testing.T) {
+	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
 	m := initialModel(nil).applyThemeConfig(builtinThemes[2])
 	updated, _ := m.openThemeEntry()
 	m = updated.(model)
@@ -159,6 +164,7 @@ func TestThemeDefaultShortcutRestoresDefault(t *testing.T) {
 }
 
 func TestRenderThemeEntryShowsPresetsAndHexHint(t *testing.T) {
+	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
 	m := initialModel(nil)
 	m.width = 90
 	m.height = 30
@@ -174,6 +180,7 @@ func TestRenderThemeEntryShowsPresetsAndHexHint(t *testing.T) {
 }
 
 func TestThemeConfigPersistsAndLoadsSelectedPreset(t *testing.T) {
+	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
 	qubitDir := t.TempDir()
 	rt, _ := newTestRuntime(t)
 	rt.qubitDir = qubitDir
@@ -244,5 +251,20 @@ func TestLightThemeMarkdownUsesReadableThemeText(t *testing.T) {
 	}
 	if style.CodeBlock.Color == nil || *style.CodeBlock.Color != wantText {
 		t.Fatalf("code block markdown color = %v, want %q", style.CodeBlock.Color, wantText)
+	}
+}
+
+func TestThemeConfigPersistsWithoutRuntime(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("QUBIT_CONFIG_DIR", configDir)
+
+	m := initialModel(nil).applyThemeConfig(builtinThemes[1])
+	if m.err != "" {
+		t.Fatalf("applyThemeConfig err = %q", m.err)
+	}
+
+	loaded := initialModel(nil)
+	if loaded.theme.ID != "light" || loaded.theme.Background != "#f7f3ea" || loaded.theme.Text != "#24201a" {
+		t.Fatalf("loaded theme = %#v, want persisted light preset", loaded.theme)
 	}
 }

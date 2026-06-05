@@ -5,5 +5,7 @@ export * from "./oauth.js";
 export * from "./auth.js";
 export * from "./responsesItems.js";
 export * from "./responsesSse.js";
+export * from "./responsesEvents.js";
+export * from "./responsesWebsocket.js";
 export * from "./responsesProvider.js";
 export * from "./callLog.js";

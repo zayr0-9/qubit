@@ -15,6 +15,7 @@
     "package:release": "node scripts/package-release.mjs",
     "package:release:linux": "node scripts/package-release.mjs linux",
     "package:release:windows": "node scripts/package-release.mjs windows",
+    "install:dogfood:linux": "pnpm run package:release:linux && QUBIT_ARCHIVE_URL=\"file://$PWD/release/qubit-v0.1.0-linux-x64.tar.gz\" sh scripts/install.sh",
     "test": "node --import tsx --test tools/**/*.test.ts utils/**/*.test.ts runtime/**/*.test.ts *.test.ts",
     "test:runtime": "pnpm run test",
     "check": "pnpm run check:runtime && go test ./...",
@@ -30,6 +31,7 @@
     "glob": "^13.0.0",
     "keytar": "^7.9.0",
     "sql.js": "^1.14.1",
+    "ws": "^8.21.0",
     "zod": "^4.4.3"
   },
   "packageManager": "pnpm@10.33.0",
@@ -42,6 +44,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.1",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }

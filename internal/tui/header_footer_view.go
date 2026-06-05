@@ -79,7 +79,7 @@ func (m model) cwdBlockBadge() string {
 func (m model) renderFooter() string {
 	footer := "enter send | drag select transcript | ctrl+click open link if forwarded | ctrl+c copy/quit | esc clear"
 	if m.keyboardEnhanced {
-		footer = "enter send | shift+enter newline | shift+arrows select | ctrl+shift+left/right words | ctrl+a all | ctrl+c copy/quit"
+		footer = "enter send | shift+enter newline | ctrl+c copy/quit"
 	}
 	if m.composer.HasSelection() {
 		footer = "selection | ctrl+c copy | ctrl+x cut | type replace | backspace/delete remove | esc clear"

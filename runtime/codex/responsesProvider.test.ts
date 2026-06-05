@@ -1,7 +1,8 @@
 import * as assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 import { CodexResponsesProvider } from "./responsesProvider.js";
-import type { CodexAuthJson, CodexTokenStore } from "./types.js";
+import type { CodexAuthJson, CodexTokenStore, CodexWebSocketLike } from "./types.js";
 
 const VALID_ACCESS_TOKEN = `header.${Buffer.from(JSON.stringify({ exp: 4_102_444_800 })).toString("base64url")}.signature`;
 
@@ -25,6 +26,17 @@ class MemoryTokenStore implements CodexTokenStore {
   }
 }
 
+class FakeSocket extends EventEmitter implements CodexWebSocketLike {
+  sent: string[] = [];
+
+  send(data: string, callback?: (error?: Error) => void): void {
+    this.sent.push(data);
+    callback?.();
+  }
+
+  close(): void {}
+}
+
 describe("CodexResponsesProvider", () => {
   it("sends ChatGPT account routing headers and Codex request metadata", async () => {
     let capturedUrl = "";
@@ -40,6 +52,7 @@ describe("CodexResponsesProvider", () => {
     const provider = new CodexResponsesProvider({
       tokenStore,
       baseURL: "https://chatgpt.com/backend-api/codex",
+      transport: "http",
       fetch: (async (url, init) => {
         capturedUrl = String(url);
         capturedHeaders = new Headers(init?.headers);
@@ -84,6 +97,7 @@ describe("CodexResponsesProvider", () => {
     const provider = new CodexResponsesProvider({
       tokenStore,
       baseURL: "https://chatgpt.com/backend-api/codex",
+      transport: "http",
       onCallLog: (event) => logs.push(event),
       fetch: (async () => new Response([
         "event: response.completed",
@@ -152,6 +166,7 @@ describe("CodexResponsesProvider reasoning", () => {
     const provider = new CodexResponsesProvider({
       tokenStore,
       baseURL: "https://chatgpt.com/backend-api/codex",
+      transport: "http",
       fetch: (async () => new Response([
         "event: response.completed",
         `data: ${JSON.stringify({
@@ -195,6 +210,7 @@ describe("CodexResponsesProvider reasoning request options", () => {
     const provider = new CodexResponsesProvider({
       tokenStore,
       baseURL: "https://chatgpt.com/backend-api/codex",
+      transport: "http",
       reasoningSummary: null,
       fetch: (async (_url, init) => {
         capturedBody = JSON.parse(String(init?.body));
@@ -217,3 +233,100 @@ describe("CodexResponsesProvider reasoning request options", () => {
     assert.deepEqual(capturedBody.reasoning, { effort: "medium" });
   });
 });
+
+describe("CodexResponsesProvider websocket transport", () => {
+  it("uses websocket transport when requested", async () => {
+    const logs: any[] = [];
+    let capturedHeaders: Record<string, string> | undefined;
+    let socket: FakeSocket | undefined;
+    const tokenStore = new MemoryTokenStore({
+      tokens: {
+        access_token: VALID_ACCESS_TOKEN,
+        refresh_token: "refresh-token",
+        account_id: "workspace-123",
+      },
+    });
+    const provider = new CodexResponsesProvider({
+      tokenStore,
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      transport: "websocket",
+      onCallLog: (event) => logs.push(event),
+      webSocketFactory: ({ headers }) => {
+        capturedHeaders = headers;
+        socket = new FakeSocket();
+        queueMicrotask(() => socket?.emit("open"));
+        return socket;
+      },
+      fetch: (async () => {
+        throw new Error("fetch should not be called");
+      }) as typeof fetch,
+    });
+
+    const responsePromise = provider.generate({
+      model: "gpt-5.2-codex",
+      sessionId: "session-1",
+      runId: "run-1",
+      messages: [{ role: "user", content: "hello" } as any],
+      tools: [],
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(capturedHeaders?.authorization, `Bearer ${VALID_ACCESS_TOKEN}`);
+    assert.equal(capturedHeaders?.["chatgpt-account-id"], "workspace-123");
+    assert.equal(capturedHeaders?.["session-id"], "session-1");
+    assert.equal(capturedHeaders?.["thread-id"], "session-1");
+    assert.equal(capturedHeaders?.["x-client-request-id"], "run-1");
+    assert.equal(capturedHeaders?.["OpenAI-Beta"], "responses_websockets=2026-02-06");
+    assert.equal(JSON.parse(socket!.sent[0]).type, "response.create");
+
+    await new Promise((resolve) => setImmediate(resolve));
+    socket?.emit("message", JSON.stringify({ type: "response.output_text.delta", delta: "WS" }), false);
+    await new Promise((resolve) => setImmediate(resolve));
+    socket?.emit("message", JSON.stringify({ type: "response.completed", response: { id: "resp-ws", output: [] } }), false);
+
+    const response = await responsePromise;
+    assert.equal(response.message?.content, "WS");
+    assert.equal(logs[0].transport, "websocket");
+  });
+
+  it("falls back to HTTP in auto mode when websocket fails", async () => {
+    let fetchCalled = false;
+    const tokenStore = new MemoryTokenStore({
+      tokens: {
+        access_token: VALID_ACCESS_TOKEN,
+        refresh_token: "refresh-token",
+      },
+    });
+    const provider = new CodexResponsesProvider({
+      tokenStore,
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      transport: "auto",
+      webSocketFactory: () => {
+        const socket = new FakeSocket();
+        queueMicrotask(() => socket.emit("error", new Error("connect failed")));
+        return socket;
+      },
+      fetch: (async () => {
+        fetchCalled = true;
+        return new Response([
+          "event: response.completed",
+          `data: ${JSON.stringify({ type: "response.completed", response: { id: "resp-http", output: [{ type: "message", content: [{ type: "output_text", text: "HTTP" }] }] } })}`,
+          "",
+          "",
+        ].join("\n"), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    const response = await provider.generate({
+      model: "gpt-5.2-codex",
+      sessionId: "session-1",
+      runId: "run-1",
+      messages: [{ role: "user", content: "hello" } as any],
+      tools: [],
+    });
+
+    assert.equal(fetchCalled, true);
+    assert.equal(response.message?.content, "HTTP");
+  });
+});
+

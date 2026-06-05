@@ -95,10 +95,7 @@ func resolveThemeConfig(theme themeConfig) themeConfig {
 }
 
 func (m *model) saveThemeConfig() {
-	if m.runtime == nil {
-		return
-	}
-	if err := saveThemeConfig(m.runtime.qubitDir, m.theme); err != nil {
+	if err := saveThemeConfig(runtimeQubitDir(m.runtime), m.theme); err != nil {
 		m.err = err.Error()
 		m.status = "theme save failed"
 	}
