@@ -25,28 +25,29 @@ function isWindowsPath(inputPath: string): boolean {
   return detectPathType(inputPath) === 'windows' && !isWslUncPath(inputPath)
 }
 
-function resolvePosixLike(inputPath: string, cwd?: string): string {
+function resolvePosixLike(inputPath: string, cwd?: string, workspaceCwd?: string): string {
   const normalizedInput = toWslPath(inputPath)
   if (normalizedInput.startsWith('/')) return path.posix.normalize(normalizedInput)
 
-  const normalizedBase = toWslPath(cwdOrDefault(cwd))
+  const normalizedBase = toWslPath(cwdOrDefault(cwd, workspaceCwd))
   const basePath = normalizedBase.startsWith('/') ? normalizedBase : path.posix.resolve('/', normalizedBase)
   return path.posix.resolve(basePath, normalizedInput)
 }
 
-function resolveWindowsLike(inputPath: string, cwd?: string): string {
-  const basePath = cwdOrDefault(cwd)
+function resolveWindowsLike(inputPath: string, cwd?: string, workspaceCwd?: string): string {
+  const basePath = cwdOrDefault(cwd, workspaceCwd)
   return path.win32.isAbsolute(inputPath) ? path.win32.normalize(inputPath) : path.win32.resolve(basePath, inputPath)
 }
 
-function pathKindFromInput(inputPath: string, cwd?: string): ToolPathType {
+function pathKindFromInput(inputPath: string, cwd?: string, workspaceCwd?: string): ToolPathType {
   const inputType = detectPathType(inputPath)
   if (inputType === 'linux' || isWslUncPath(inputPath)) return 'wsl'
   if (inputType === 'windows') return 'windows'
 
-  if (cwd) {
-    const cwdType = detectPathType(cwd)
-    if (cwdType === 'linux' || isWslUncPath(cwd)) return 'wsl'
+  const effectiveCwd = cwd ? cwdOrDefault(cwd, workspaceCwd) : undefined
+  if (effectiveCwd) {
+    const cwdType = detectPathType(effectiveCwd)
+    if (cwdType === 'linux' || isWslUncPath(effectiveCwd)) return 'wsl'
     if (cwdType === 'windows') return 'windows'
   }
 
@@ -63,13 +64,13 @@ export async function resolveToolPath(
   }
 
   const inputType: PathType = detectPathType(inputPath)
-  const pathType = inputType === 'relative' ? 'relative' : pathKindFromInput(inputPath, options.cwd)
-  const effectiveKind = pathKindFromInput(inputPath, options.cwd)
+  const pathType = inputType === 'relative' ? 'relative' : pathKindFromInput(inputPath, options.cwd, options.workspaceCwd)
+  const effectiveKind = pathKindFromInput(inputPath, options.cwd, options.workspaceCwd)
   const comparisonKind: ComparisonKind = effectiveKind === 'windows' ? 'win32' : 'posix'
 
   const comparisonPath = comparisonKind === 'win32'
-    ? resolveWindowsLike(inputPath, options.cwd)
-    : resolvePosixLike(inputPath, options.cwd)
+    ? resolveWindowsLike(inputPath, options.cwd, options.workspaceCwd)
+    : resolvePosixLike(inputPath, options.cwd, options.workspaceCwd)
 
   let fsPath = comparisonPath
   if (isWindows() && comparisonKind === 'posix') {

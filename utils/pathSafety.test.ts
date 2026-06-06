@@ -94,6 +94,40 @@ describe('resolveRestrictedToolPath', () => {
       /outside the workspace|Access denied/
     )
   })
+
+  it('resolves dot cwd to the default workspace instead of filesystem root', async () => {
+    const result = await resolveRestrictedToolPath('.', {
+      cwd: '.',
+      workspaceCwd: tmpDir,
+      mode: 'directory',
+    })
+    assert.equal(result.comparisonPath, tmpDir)
+  })
+
+  it('resolves files relative to dot cwd inside the default workspace', async () => {
+    const result = await resolveRestrictedToolPath('file.txt', {
+      cwd: '.',
+      workspaceCwd: tmpDir,
+      mode: 'file',
+    })
+    assert.equal(result.comparisonPath, path.join(tmpDir, 'file.txt'))
+  })
+
+  it('keeps relative subdirectory cwd inside the default workspace', async () => {
+    const result = await resolveRestrictedToolPath('./subdir', {
+      cwd: '.',
+      workspaceCwd: tmpDir,
+      mode: 'directory',
+    })
+    assert.equal(result.comparisonPath, path.join(tmpDir, 'subdir'))
+  })
+
+  it('still blocks escapes from dot cwd', async () => {
+    await assert.rejects(
+      () => resolveRestrictedToolPath('../outside', { cwd: '.', workspaceCwd: tmpDir, mode: 'file' }),
+      /outside the workspace|Access denied/
+    )
+  })
 })
 
 describe('assertPathWithinWorkspace', () => {

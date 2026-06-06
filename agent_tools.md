@@ -178,7 +178,13 @@ UNC WSL paths:
 
 Relative paths:
   src/foo.ts
+
+Relative cwd values:
+  cwd = .
+  cwd = ./src
 ```
+
+Relative tool cwd values are resolved against the launch/default workspace cwd, not filesystem root or the Node runtime process cwd. For example, if Qubit was launched in `/home/user/project`, `cwd: "."` means `/home/user/project` and `cwd: "./src"` means `/home/user/project/src` while still remaining subject to cwd containment.
 
 Path resolver expectations:
 
