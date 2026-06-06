@@ -45,7 +45,9 @@ export interface ReadTodoResult {
 export interface CreateTodoResult {
   id: string
   created: boolean
-  content: string
+  success: boolean
+  message: string
+  content: string | null
 }
 
 export interface TodoEditResultItem {
@@ -153,12 +155,20 @@ export async function readTodoList(name: string, cwd?: string): Promise<ReadTodo
   }
 }
 
-export async function createTodoList(content: string, cwd?: string): Promise<CreateTodoResult> {
+export async function createTodoList(content: string, cwd?: string, name?: string): Promise<CreateTodoResult> {
   const dir = await ensureStorageDirectory(cwd)
-  const id = await generateTodoId(dir)
+  const id = name ? normalizeId(name) : await generateTodoId(dir)
   const filePath = path.join(dir, `${id}${TODO_FILE_EXTENSION}`)
-  await fs.promises.writeFile(filePath, content, 'utf8')
-  return { id, created: true, content }
+
+  try {
+    await fs.promises.writeFile(filePath, content, { encoding: 'utf8', flag: 'wx' })
+    return { id, created: true, success: true, message: `Created todo list "${id}"`, content }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return { id, created: false, success: false, message: `Todo list "${id}" already exists`, content: null }
+    }
+    throw error
+  }
 }
 
 export async function editTodoList(
@@ -235,7 +245,7 @@ export async function editTodoList(
 export async function runTodoTool(args: TodoToolArgs) {
   switch (args.action) {
     case 'create':
-      return await createTodoList(args.content ?? '', args.cwd)
+      return await createTodoList(args.content ?? '', args.cwd, args.name)
     case 'list':
       return await listTodoLists(args.cwd)
     case 'read':
@@ -265,7 +275,7 @@ export const todoMdTool = defineTool({
     type: 'object',
     properties: {
       action: { type: 'string', enum: ['create', 'list', 'read', 'edit'] },
-      name: { type: 'string', description: 'Todo list name. Required for read/edit.' },
+      name: { type: 'string', description: 'Todo list name. Optional for create; required for read/edit. If omitted on create, a random id is generated and must be used for later read/edit calls.' },
       content: { type: 'string', description: 'Markdown content for create action.' },
       search: { type: 'string', description: 'Line substring to find for single edit action. Prefer edits for multiple changes.' },
       replacement: { type: 'string', description: 'Full replacement line for single edit action. Prefer edits for multiple changes.' },

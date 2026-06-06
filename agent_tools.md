@@ -75,7 +75,7 @@ deleteFile
 
 todoMd
   Manages Markdown todo lists stored in the project .qubit/todos directory under the default/supplied workspace.
-  Supports create/list/read/edit actions, auto-generated lowercase dash names, single or batched line replacement edits, and permission mode is ask.
+  Supports create/list/read/edit actions, optional named create IDs, auto-generated lowercase dash names when create omits a name, single or batched line replacement edits, and permission mode is ask.
 
 planMd
   Manages Markdown plans stored in the project .qubit/plans directory.
@@ -324,7 +324,7 @@ createFile/editFile/multiEdit/deleteFile
 todoMd
   Store under .qubit/todos in cwdOrDefault(cwd).
   Use resolveRestrictedToolPath for the storage directory so native Windows and WSL workspaces stay scoped correctly.
-  Keep generated names lowercase dash-separated and avoid adding old Electron/Ygg storage assumptions.
+  Keep todo IDs lowercase dash-separated and avoid adding old Electron/Ygg storage assumptions. Create accepts an optional name; if omitted, it generates a random ID that must be used for later read/edit calls. Named create must not overwrite an existing todo file.
   Edit action accepts legacy search/replacement for one line replacement, or an edits array for multiple replacements in one tool call. Batched edits are all-or-nothing: if any search misses, no changes are written.
 ```
 

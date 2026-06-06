@@ -66,6 +66,7 @@ func todoOverlayKey(call toolCallUI, snapshot todoOverlaySnapshot) string {
 }
 
 func latestTodoToolCall(messages []chatMessage) (toolCallUI, bool) {
+	fallback, hasFallback := toolCallUI{}, false
 	for i := len(messages) - 1; i >= 0; i-- {
 		group := messages[i].ToolGroup
 		if messages[i].Role != "tool" || group == nil || group.Name != "todoMd" {
@@ -76,12 +77,27 @@ func latestTodoToolCall(messages []chatMessage) (toolCallUI, bool) {
 			if call.Name == "" {
 				call.Name = group.Name
 			}
-			if call.Result != nil || call.Status != "running" {
+			if call.Result == nil && call.Status == "running" {
+				continue
+			}
+			snapshot, ok := todoOverlaySnapshotFromCall(call)
+			if !ok {
+				continue
+			}
+			if todoOverlaySnapshotHasUsableContent(snapshot) {
 				return call, true
+			}
+			if !hasFallback {
+				fallback = call
+				hasFallback = true
 			}
 		}
 	}
-	return toolCallUI{}, false
+	return fallback, hasFallback
+}
+
+func todoOverlaySnapshotHasUsableContent(snapshot todoOverlaySnapshot) bool {
+	return len(snapshot.Items) > 0 || len(snapshot.Lists) > 0 || (snapshot.Message != "" && snapshot.Err == "")
 }
 
 func todoOverlaySnapshotFromCall(call toolCallUI) (todoOverlaySnapshot, bool) {

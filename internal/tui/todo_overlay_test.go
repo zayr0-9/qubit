@@ -251,3 +251,25 @@ func TestTodoOverlayHeaderUsesMarkdownTitleWithoutHash(t *testing.T) {
 		t.Fatalf("todo overlay header should prefer title without hash over list id: %q", rendered)
 	}
 }
+
+func TestTodoOverlayKeepsLatestUsableContentAfterNotFound(t *testing.T) {
+	m := todoOverlayTestModel()
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{
+		{Role: "tool", ToolGroup: &toolGroup{Name: "todoMd", Calls: []toolCallUI{{ID: "create", Name: "todoMd", Status: "completed", Args: map[string]any{"action": "create"}, Result: map[string]any{"id": "generated-list", "success": true, "content": "# Fix relative cwd\n- [x] inspect\n- [ ] implement\n"}}}}},
+		{Role: "tool", ToolGroup: &toolGroup{Name: "todoMd", Calls: []toolCallUI{{ID: "edit-fail", Name: "todoMd", Status: "failed", Args: map[string]any{"action": "edit", "name": "fix-relative-cwd"}, Result: map[string]any{"ok": true, "success": false, "message": "Todo list \"fix-relative-cwd\" does not exist", "error": "Todo list \"fix-relative-cwd\" does not exist"}}}}},
+	}
+
+	m.todoOverlayExpanded = true
+	rendered := stripANSI(m.renderTodoOverlay(10))
+	for _, want := range []string{"todo · Fix relative cwd · 1/2 done", "inspect", "implement"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("todo overlay missing previous usable content %q:\n%s", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "does not exist") {
+		t.Fatalf("todo overlay should not replace usable content with later not-found error:\n%s", rendered)
+	}
+}

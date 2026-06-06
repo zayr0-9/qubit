@@ -2170,10 +2170,13 @@ function contextCharCount(value) {
 }
 
 function runtimeToolCallStatus(toolName, status, result) {
+  const payload = resultPayload(result);
+  const data = plainObject(payload);
   if (toolName === "subagent") {
-    const payload = resultPayload(result);
-    const data = plainObject(payload);
     if (data.success === false || Number(data.failed || 0) > 0) return "failed";
+  }
+  if (toolName === "todoMd") {
+    if (data.success === false || data.exists === false) return "failed";
   }
   return status;
 }
@@ -2291,7 +2294,7 @@ function summarizeToolResult(toolName, result) {
     case "subagent":
       return { ...summary, ...compactObject(data, ["success", "message", "executionMode", "provider", "model", "completed", "failed", "stoppedEarly", "durationMs"]), results: Array.isArray(data.results) ? data.results.slice(0, 8).map((item) => ({ ...compactObject(item, ["index", "name", "status", "provider", "model", "durationMs", "truncated"]), contentPreview: previewText(item?.content, 1600), error: previewText(item?.error, 1200), ...(process.env.QUBIT_DEV_TOOL_DETAILS === "1" || process.env.QUBIT_DEV === "1" ? compactObject(item, ["hiddenSessionId", "runId"]) : {}) })) : undefined };
     case "todoMd":
-      return { ...summary, ...compactObject(data, ["id", "created", "exists", "success", "message", "modifiedAt"]), content: previewText(data.content, 1600), contentPreview: previewText(data.content, 1600) };
+      return { ...summary, ...compactObject(data, ["id", "created", "exists", "success", "message", "modifiedAt"]), content: previewText(data.content, 1600), contentPreview: previewText(data.content, 1600), error: data.success === false || data.exists === false ? previewText(data.message || base.error, 1200) : summary.error };
     case "planMd":
       return { ...summary, ...compactObject(data, ["name", "created", "exists", "success", "message", "modifiedAt", "displayed", "path", "clarified", "cancelled", "questions"]), answerCount: Array.isArray(data.answers) ? data.answers.length : undefined, planCount: Array.isArray(payload) ? payload.length : undefined, contentPreview: data.displayed || data.clarified ? undefined : previewText(data.content, 1600) };
     default:

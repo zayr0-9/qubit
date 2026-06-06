@@ -60,4 +60,55 @@ describe('todoMd', () => {
     const read = await readTodoList(created.id, tmpDir)
     assert.equal(read.content, '- [ ] first\n- [ ] second\n')
   })
+
+  it('creates a named todo list for later read and edit calls', async () => {
+    const created = await runTodoTool({
+      action: 'create',
+      name: 'Fix relative cwd',
+      content: '- [ ] inspect\n',
+      cwd: tmpDir,
+    }) as any
+
+    assert.equal(created.id, 'fix-relative-cwd')
+    assert.equal(created.created, true)
+    assert.equal(created.success, true)
+
+    const edited = await runTodoTool({
+      action: 'edit',
+      name: 'fix-relative-cwd',
+      search: '[ ] inspect',
+      replacement: '- [x] inspect',
+      cwd: tmpDir,
+    }) as any
+
+    assert.equal(edited.success, true)
+    assert.match(edited.content ?? '', /\[x\] inspect/)
+
+    const read = await readTodoList('fix-relative-cwd', tmpDir)
+    assert.equal(read.content, edited.content)
+  })
+
+  it('does not overwrite an existing named todo list', async () => {
+    const created = await runTodoTool({
+      action: 'create',
+      name: 'duplicate-list',
+      content: '- [ ] original\n',
+      cwd: tmpDir,
+    }) as any
+    assert.equal(created.success, true)
+
+    const duplicate = await runTodoTool({
+      action: 'create',
+      name: 'duplicate-list',
+      content: '- [ ] replacement\n',
+      cwd: tmpDir,
+    }) as any
+
+    assert.equal(duplicate.created, false)
+    assert.equal(duplicate.success, false)
+    assert.match(duplicate.message, /already exists/)
+
+    const read = await readTodoList('duplicate-list', tmpDir)
+    assert.equal(read.content, '- [ ] original\n')
+  })
 })
