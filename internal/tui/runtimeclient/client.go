@@ -1,7 +1,6 @@
 package runtimeclient
 
 import (
-	"bufio"
 	"crypto/sha1"
 	"encoding/json"
 	"errors"
@@ -27,6 +26,7 @@ type Client struct {
 	stdin   io.WriteCloser
 	events  chan protocol.RuntimeEvent
 	errs    chan error
+	logMu   sync.Mutex
 	closed  bool
 	connSeq int
 
@@ -66,7 +66,7 @@ func Start() (*Client, error) {
 func newClient(ctx clientContext) *Client {
 	return &Client{
 		clientID:  newLogicalClientID(),
-		events:    make(chan protocol.RuntimeEvent, 32),
+		events:    make(chan protocol.RuntimeEvent, 256),
 		errs:      make(chan error, 4),
 		appRoot:   ctx.appRoot,
 		launchCwd: ctx.launchCwd,
@@ -253,30 +253,39 @@ func (r *Client) attachConn(conn io.ReadWriteCloser, attached bool) {
 }
 
 func (r *Client) readStdout(stdout io.Reader, seq int) {
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
+	reader := newRuntimeLineReader(stdout)
+	for {
+		line, err := reader.readLine()
+		if len(line) > 0 {
+			if !r.shouldReportReader(seq) {
+				return
+			}
+			r.handleRuntimeLine(line)
+		}
+		if err == nil {
+			continue
+		}
 		if !r.shouldReportReader(seq) {
 			return
 		}
-		line := append([]byte(nil), scanner.Bytes()...)
-		var ev protocol.RuntimeEvent
-		if err := json.Unmarshal(line, &ev); err != nil {
-			r.appendLog("stdout", string(line))
-			r.emitError(fmt.Errorf("bad runtime event: %s", string(line)))
-			continue
+		if errors.Is(err, io.EOF) {
+			r.emitError(ErrDisconnected)
+			return
 		}
-		r.appendLog("stdout", summarizeRuntimeEvent(line, ev))
-		r.events <- ev
-	}
-	if !r.shouldReportReader(seq) {
-		return
-	}
-	if err := scanner.Err(); err != nil {
 		r.emitError(fmt.Errorf("%w: %v", ErrDisconnected, err))
 		return
 	}
-	r.emitError(ErrDisconnected)
+}
+
+func (r *Client) handleRuntimeLine(line []byte) {
+	var ev protocol.RuntimeEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		r.appendLog("stdout", previewRuntimeLine(line))
+		r.emitError(fmt.Errorf("bad runtime event: %s", previewRuntimeLine(line)))
+		return
+	}
+	r.appendLog("stdout", summarizeRuntimeEvent(line, ev))
+	r.events <- ev
 }
 
 func (r *Client) shouldReportReader(seq int) bool {
@@ -297,6 +306,8 @@ func (r *Client) appendLog(stream string, line string) {
 		return
 	}
 	entry := fmt.Sprintf("[%s] %s\n", stream, line)
+	r.logMu.Lock()
+	defer r.logMu.Unlock()
 	f, err := os.OpenFile(r.logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return

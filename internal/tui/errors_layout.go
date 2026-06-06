@@ -55,18 +55,18 @@ func (m model) updateUIError(err error) model {
 }
 
 func (m model) updateRuntimeDisconnected(err error) (model, tea.Cmd) {
+	m.finishFakeStreamContent()
 	m.clearFakeStream()
-	m.busy = false
 	m.ready = false
 	m.runtimeConnected = false
-	m.activeRunID = ""
-	m.lastRunStartedSession = ""
 	m.err = err.Error()
 	m.status = "runtime disconnected; reconnecting..."
+	m.refreshViewport()
 	return m, reconnectRuntime(m.runtime)
 }
 
 func (m model) updateRuntimeReconnect(err error) (model, tea.Cmd) {
+	wasRunning := m.activeRunID != "" || m.busy
 	if err != nil {
 		m.clearFakeStream()
 		m.busy = false
@@ -84,6 +84,15 @@ func (m model) updateRuntimeReconnect(err error) (model, tea.Cmd) {
 	}
 	m.err = ""
 	m.runtimeConnected = true
+	if wasRunning && m.session != "" {
+		loadRunID := newRunID()
+		m.transcriptLoadRunID = loadRunID
+		m.transcriptLoadSession = m.session
+		m.autoScroll = true
+		m.busy = true
+		m.status = "runtime reconnected; refreshing transcript"
+		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.messages", "id": loadRunID, "sessionId": m.session}))
+	}
 	m.status = "runtime reconnected"
 	return m, waitRuntimeEvent(m.runtime)
 }

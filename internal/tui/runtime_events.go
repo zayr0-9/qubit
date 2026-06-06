@@ -78,9 +78,11 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		}
 		var notifyCmd tea.Cmd
 		if m.streaming {
+			m.finishFakeStreamContent()
 			m.streamingFinished = true
 			m.streamingFinishStatus = finishStatus
 			m.status = "responding"
+			m.refreshViewportForStreaming()
 		} else {
 			m.status = finishStatus
 			m.appendRunDurationStatus(finishStatus, time.Now())

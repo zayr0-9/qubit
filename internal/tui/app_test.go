@@ -3668,3 +3668,66 @@ func TestToolHitboxesAlignAfterMultipleCachedSegments(t *testing.T) {
 		t.Fatalf("hitbox startY = %d, rendered row = %d", got, visibleToolLine)
 	}
 }
+
+func TestRunFinishedCommitsFullStreamingContentImmediately(t *testing.T) {
+	m := model{
+		busy:                  true,
+		activeRunID:           "run_1",
+		streaming:             true,
+		streamingMessageIndex: 0,
+		streamingFullContent:  "complete answer",
+		streamingVisibleRunes: 4,
+		messages:              []chatMessage{{Role: "assistant", Content: "comp"}},
+	}
+
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_1", Status: "completed"})
+	got := updated.(model)
+
+	if !got.streaming || !got.streamingFinished {
+		t.Fatalf("streaming=%v streamingFinished=%v, want stream marked finishing", got.streaming, got.streamingFinished)
+	}
+	if got.messages[0].Content != "complete answer" {
+		t.Fatalf("content = %q, want complete answer committed on run_finished", got.messages[0].Content)
+	}
+}
+
+func TestRuntimeDisconnectPreservesVisibleStreamAndReconnectRefreshesTranscript(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	rt.reconnect = func() error { return nil }
+	m := initialModel(rt)
+	m.ready = true
+	m.session = "sess_1"
+	m.busy = true
+	m.activeRunID = "run_1"
+	m.streaming = true
+	m.streamingMessageIndex = 0
+	m.streamingFullContent = "complete before disconnect"
+	m.messages = []chatMessage{{Role: "assistant", Content: "complete"}}
+
+	updated, reconnectCmd := m.Update(runtimeErrMsg{err: runtimeclient.ErrDisconnected})
+	got := updated.(model)
+	if reconnectCmd == nil {
+		t.Fatal("disconnect returned nil command, want reconnect command")
+	}
+	if got.messages[0].Content != "complete before disconnect" {
+		t.Fatalf("content after disconnect = %q, want full visible stream preserved", got.messages[0].Content)
+	}
+	if got.activeRunID != "run_1" || !got.busy {
+		t.Fatalf("activeRunID=%q busy=%v, want active run retained for reconnect refresh", got.activeRunID, got.busy)
+	}
+
+	msg := reconnectCmd()
+	updated, refreshCmd := got.Update(msg)
+	got = updated.(model)
+	if refreshCmd == nil {
+		t.Fatal("successful reconnect during active run returned nil command, want transcript refresh batch")
+	}
+	if got.status != "runtime reconnected; refreshing transcript" {
+		t.Fatalf("status = %q, want reconnect refresh status", got.status)
+	}
+
+	payload := runBatchSendCommand(t, refreshCmd, stdin, "session.messages")
+	if payload["type"] != "session.messages" || payload["sessionId"] != "sess_1" {
+		t.Fatalf("payload = %#v, want session.messages refresh for active session", payload)
+	}
+}

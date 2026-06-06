@@ -114,3 +114,18 @@ func TestSummarizeRuntimeEventCompactsSessionList(t *testing.T) {
 		t.Fatalf("summary = %q, want session payload omitted", got)
 	}
 }
+
+func TestReadStdoutHandlesLargeRuntimeEventLine(t *testing.T) {
+	large := strings.Repeat("x", 2*1024*1024)
+	rt := &Client{events: make(chan protocol.RuntimeEvent, 1), errs: make(chan error, 1), logPath: filepath.Join(t.TempDir(), "runtime.log")}
+	rt.readStdout(strings.NewReader(`{"type":"assistant","content":"`+large+`"}`+"\n"), 0)
+
+	select {
+	case ev := <-rt.Events():
+		if ev.Type != "assistant" || len(ev.Content) != len(large) {
+			t.Fatalf("event type=%q content len=%d, want assistant len=%d", ev.Type, len(ev.Content), len(large))
+		}
+	default:
+		t.Fatal("large runtime event was not delivered")
+	}
+}

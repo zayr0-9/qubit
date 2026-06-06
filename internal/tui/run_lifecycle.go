@@ -230,6 +230,17 @@ func (m *model) abortActiveRun() {
 	m.refreshViewport()
 }
 
+func (m *model) finishFakeStreamContent() {
+	if !m.streaming || m.streamingMessageIndex < 0 || m.streamingMessageIndex >= len(m.messages) {
+		return
+	}
+	if m.streamingFullContent == "" {
+		return
+	}
+	m.messages[m.streamingMessageIndex].Content = m.streamingFullContent
+	m.streamingVisibleRunes = len([]rune(m.streamingFullContent))
+}
+
 func (m *model) clearFakeStream() {
 	m.streaming = false
 	m.streamingMessageIndex = 0
