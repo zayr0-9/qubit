@@ -521,7 +521,7 @@ func TestSubagentToolGroupLabelAndDetails(t *testing.T) {
 			"completed": float64(1),
 			"failed":    float64(1),
 			"results": []any{
-				map[string]any{"index": float64(0), "name": "inspect", "status": "completed", "content": "found the issue"},
+				map[string]any{"index": float64(0), "name": "inspect", "status": "completed", "content": "found the issue\nroot cause is in cancellation\npatch runtime\nextra line"},
 				map[string]any{"index": float64(1), "name": "edit", "status": "failed", "error": "missing key", "hiddenSessionId": "subagent_secret"},
 			},
 		},
@@ -529,8 +529,11 @@ func TestSubagentToolGroupLabelAndDetails(t *testing.T) {
 	m.messages[1].ToolGroup.Expanded = true
 	m.refreshViewport()
 	viewport := plainText(m.viewport.View())
-	if !strings.Contains(viewport, "Ran 2 subagents") || !strings.Contains(viewport, "found the issue") || !strings.Contains(viewport, "missing key") {
-		t.Fatalf("viewport = %q, want subagent label and result/error previews", viewport)
+	if !strings.Contains(viewport, "Ran 2 subagents") || !strings.Contains(viewport, "found the issue") || !strings.Contains(viewport, "root cause is in cancellation") || !strings.Contains(viewport, "patch runtime") || !strings.Contains(viewport, "missing key") {
+		t.Fatalf("viewport = %q, want subagent label and expanded multiline result/error previews", viewport)
+	}
+	if strings.Contains(viewport, "extra line") {
+		t.Fatalf("viewport = %q, expanded subagent preview should be capped at a few lines", viewport)
 	}
 	if strings.Contains(viewport, "subagent_secret") {
 		t.Fatalf("viewport = %q, hidden session id should be hidden by default", viewport)

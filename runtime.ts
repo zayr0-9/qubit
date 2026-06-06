@@ -1180,12 +1180,17 @@ async function runSubagentTask({ task, index, context, parentRun, parentSessionI
     });
 
     const cwdBlockEnabled = parentRun?.cwdBlockEnabled !== false;
-    hiddenRuns.set(runId, { runId, parentRunId, parentSessionId, sessionId: childSession.id, depth, autoAllowPermissions: true, cwdBlockEnabled, runtime: runtimeStateForChild.runtime });
+    const childController = new AbortController();
+    const parentSignal = context?.signal;
+    if (parentSignal?.aborted) childController.abort();
+    const abortChild = () => childController.abort();
+    parentSignal?.addEventListener?.("abort", abortChild, { once: true });
+    hiddenRuns.set(runId, { runId, parentRunId, parentSessionId, sessionId: childSession.id, depth, autoAllowPermissions: true, cwdBlockEnabled, runtime: runtimeStateForChild.runtime, controller: childController, parentSignal, abortChild });
     cancelIdleShutdown(`hidden run started ${runId}`);
     setRunCwdBlockEnabled(runId, cwdBlockEnabled);
     const result = await runtimeStateForChild.runtime.run({
       runId,
-      signal: context?.signal,
+      signal: childController.signal,
       sessionId: childSession.id,
       input: task.prompt,
       maxSteps: 400,
@@ -1215,9 +1220,13 @@ async function runSubagentTask({ task, index, context, parentRun, parentSessionI
     };
   } catch (error) {
     const durationMs = Math.max(0, Date.now() - startedAtMs);
-    const errorMessage = redactSecrets(error instanceof Error ? error.message : String(error));
-    return subagentTaskFailure(index, task, childSession?.id || "", runId, providerName, selectedModel, durationMs, errorMessage);
+    const hiddenRun = hiddenRuns.get(runId);
+    const aborted = Boolean(hiddenRun?.controller?.signal?.aborted || context?.signal?.aborted || isAbortError(error));
+    const errorMessage = aborted ? "Subagent cancelled." : redactSecrets(error instanceof Error ? error.message : String(error));
+    return subagentTaskFailure(index, task, childSession?.id || "", runId, providerName, selectedModel, durationMs, errorMessage, aborted ? "cancelled" : "failed");
   } finally {
+    const hiddenRun = hiddenRuns.get(runId);
+    hiddenRun?.parentSignal?.removeEventListener?.("abort", hiddenRun.abortChild);
     hiddenRuns.delete(runId);
     maybeScheduleIdleShutdown(`hidden run finished ${runId}`);
     clearRunCwdBlockEnabled(runId);
@@ -1225,11 +1234,11 @@ async function runSubagentTask({ task, index, context, parentRun, parentSessionI
   }
 }
 
-function subagentTaskFailure(index, task, hiddenSessionId, runId, providerName, selectedModel, durationMs, error) {
+function subagentTaskFailure(index, task, hiddenSessionId, runId, providerName, selectedModel, durationMs, error, status = "failed") {
   return {
     index,
     name: task?.name || "",
-    status: "failed",
+    status,
     provider: providerName,
     model: selectedModel,
     ...(hiddenSessionId ? { hiddenSessionId } : {}),
@@ -1332,6 +1341,19 @@ function generatedImageMarkdown(image) {
   return lines.join("\n\n");
 }
 
+function cancelChildRuns(parentRunId) {
+  for (const [childRunId, child] of hiddenRuns.entries()) {
+    if (child?.parentRunId !== parentRunId) continue;
+    try {
+      child.runtime?.cancel?.(childRunId);
+    } catch {
+      // Best-effort: the AbortController below is the local cancellation path.
+    }
+    child.controller?.abort();
+    cancelChildRuns(childRunId);
+  }
+}
+
 function handleCancelRequest(request) {
   const requesterTarget = currentResponseTarget;
   const runId = String(request.runId || "");
@@ -1347,6 +1369,7 @@ function handleCancelRequest(request) {
     // Best-effort: the AbortController below is the local cancellation path.
   }
   active.controller?.abort();
+  cancelChildRuns(runId);
 
   const message = { type: "run_cancelled", id: request.id, runId, sessionId: active.sessionId, status: "cancelled" };
   write(message, requesterTarget);

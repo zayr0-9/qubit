@@ -480,6 +480,12 @@ func (m *model) renderToolGroupDetails(group *toolGroup, width int) string {
 			b.WriteString("\n")
 			b.WriteString(mutedSt.Render("     " + oneLine(line, detailWidth)))
 		}
+		if group != nil && group.Name == "subagent" {
+			for _, line := range subagentResponsePreviewLines(call, detailWidth) {
+				b.WriteString("\n")
+				b.WriteString(mutedSt.Render("     " + line))
+			}
+		}
 	}
 	return b.String()
 }
@@ -545,7 +551,9 @@ func toolCallDetailLines(call toolCallUI, width int) []string {
 		}
 	}
 	appendPreview("preview", "contentPreview")
-	appendPreview("response", "content")
+	if call.Name == "subagent" {
+		appendPreview("response", "content")
+	}
 	appendPreview("stdout", "stdoutPreview")
 	appendPreview("stderr", "stderrPreview")
 	appendPreview("error", "error")
@@ -553,6 +561,32 @@ func toolCallDetailLines(call toolCallUI, width int) []string {
 		lines = append(lines, "no details")
 	}
 	return lines
+}
+
+func subagentResponsePreviewLines(call toolCallUI, width int) []string {
+	content := strings.TrimSpace(firstNonEmpty(stringValue(call.Result, "content"), stringValue(call.Result, "contentPreview")))
+	if content == "" {
+		return nil
+	}
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, min(3, len(lines))+1)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		out = append(out, oneLine(line, width))
+		if len(out) >= 3 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	if stringValue(call.Result, "truncated") != "" {
+		out = append(out, "…")
+	}
+	return out
 }
 
 func subagentTaskToolCalls(group *toolGroup) []toolCallUI {
@@ -574,6 +608,9 @@ func subagentTaskToolCalls(group *toolGroup) []toolCallUI {
 			}
 			status := stringValue(result, "status")
 			if status == "" {
+				status = "failed"
+			}
+			if status == "cancelled" {
 				status = "failed"
 			}
 			name := stringValue(result, "name")
