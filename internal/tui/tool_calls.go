@@ -1022,3 +1022,31 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+func (m *model) toolGroupHitboxes(groups []*toolGroup, width int) []toolHitbox {
+	if len(groups) == 0 {
+		return nil
+	}
+	var hitboxes []toolHitbox
+	lineY := 0
+	separatorWidth := lipgloss.Width(mutedSt.Render("  ·  "))
+	for start := 0; start < len(groups); start += toolGroupsPerLine {
+		end := min(len(groups), start+toolGroupsPerLine)
+		rowGroups := groups[start:end]
+		x := 0
+		for i, group := range rowGroups {
+			if group == nil {
+				continue
+			}
+			segment := m.renderToolGroupInline(group)
+			segmentWidth := lipgloss.Width(segment)
+			hitboxes = append(hitboxes, toolHitbox{Kind: "tool", GroupID: group.ID, StartY: lineY, EndY: lineY, StartX: x, EndX: x + max(0, segmentWidth-1)})
+			x += segmentWidth
+			if i < len(rowGroups)-1 {
+				x += separatorWidth
+			}
+		}
+		lineY += renderedLineCount(m.renderToolGroupRow(rowGroups, width))
+	}
+	return hitboxes
+}

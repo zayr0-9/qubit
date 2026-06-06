@@ -29,6 +29,7 @@ func initialModel(rt *runtimeClient) model {
 		composer:             composer,
 		spinner:              spin,
 		renderCache:          make(map[renderCacheKey]string),
+		markdownRenderers:    make(markdownRendererCache),
 		messages:             []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
 		status:               "starting runtime",
 		permissionMode:       permissionModeAsk,
@@ -93,6 +94,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateToolCallRevealTick()
 	case notificationResultMsg:
 		return m.updateNotificationResult(msg), nil
+	case terminalBellResultMsg:
+		return m.updateTerminalBellResult(msg), nil
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)

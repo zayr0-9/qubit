@@ -432,19 +432,24 @@ func TestRenderModalKeepsSelectedOptionVisible(t *testing.T) {
 	}
 }
 
-func TestPlanModeAutoApprovesPlanToolOnly(t *testing.T) {
-	rt, stdin := newTestRuntime(t)
-	m := initialModel(rt)
-	m.permissionMode = permissionModeAsk
+func TestPlanModeAutoApprovesPlanModeExceptionTools(t *testing.T) {
+	for _, toolName := range []string{"planMd", "subagent"} {
+		t.Run(toolName, func(t *testing.T) {
+			rt, stdin := newTestRuntime(t)
+			m := initialModel(rt)
+			m.permissionMode = permissionModeAsk
+			permissionID := "perm_" + toolName
 
-	updated, cmd := m.updateRuntime(runtimeEvent{Type: "tool.permission.request", ID: "perm_plan", ToolName: "planMd"})
-	got := updated.(model)
-	if got.modal != nil || got.mode == modeModal {
-		t.Fatalf("planMd opened modal in plan mode: mode=%v modal=%#v", got.mode, got.modal)
-	}
-	payload := runBatchSendCommand(t, cmd, stdin, "tool.permission.response")
-	if payload["id"] != "perm_plan" || payload["allow"] != true {
-		t.Fatalf("payload = %#v, want allow response for perm_plan", payload)
+			updated, cmd := m.updateRuntime(runtimeEvent{Type: "tool.permission.request", ID: permissionID, ToolName: toolName})
+			got := updated.(model)
+			if got.modal != nil || got.mode == modeModal {
+				t.Fatalf("%s opened modal in plan mode: mode=%v modal=%#v", toolName, got.mode, got.modal)
+			}
+			payload := runBatchSendCommand(t, cmd, stdin, "tool.permission.response")
+			if payload["id"] != permissionID || payload["allow"] != true {
+				t.Fatalf("payload = %#v, want allow response for %s", payload, permissionID)
+			}
+		})
 	}
 }
 
@@ -586,8 +591,27 @@ func TestPermissionModalShowsFullArgsWithScrollableContent(t *testing.T) {
 	if m.modal.ScrollOffset == 0 {
 		t.Fatal("ScrollOffset = 0, want scrolled content")
 	}
-	rendered = plainText(m.renderModal(8))
+	rendered = plainText(m.renderModal(m.modalPanelAvailableHeight()))
 	if !strings.Contains(rendered, "more above") {
 		t.Fatalf("rendered modal missing above scroll hint after scrolling:\n%s", rendered)
+	}
+}
+
+func TestPermissionModalFitsActionsAtBottomWhenArgsAreLarge(t *testing.T) {
+	m := model{width: 80, height: 12, mode: modeChat}
+	m = m.openToolPermissionModal(runtimeEvent{
+		ID:       "perm_large_args",
+		ToolName: "subagent",
+		Args: map[string]any{
+			"tasks": []map[string]any{{"prompt": strings.Repeat("find things\n", 40)}},
+		},
+	})
+
+	rendered := plainText(m.renderModal(8))
+	if !strings.Contains(rendered, "Allow") || !strings.Contains(rendered, "Deny") {
+		t.Fatalf("rendered modal clipped permission actions:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "more below") {
+		t.Fatalf("rendered modal missing scroll hint:\n%s", rendered)
 	}
 }

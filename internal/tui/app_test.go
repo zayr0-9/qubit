@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"testing"
@@ -284,7 +285,7 @@ func TestFakeStreamTickAdvancesContent(t *testing.T) {
 	}
 }
 
-func TestFakeStreamTickCompletesAfterRunFinished(t *testing.T) {
+func TestFakeStreamTickCompletesAfterRunFinishedReturnsCompletionCommand(t *testing.T) {
 	m := model{
 		busy:                  true,
 		activeRunID:           "run_1",
@@ -299,8 +300,8 @@ func TestFakeStreamTickCompletesAfterRunFinished(t *testing.T) {
 	updated, cmd := m.updateFakeStreamTick()
 	got := updated.(model)
 
-	if cmd != nil {
-		t.Fatal("fake stream completion returned command, want nil")
+	if cmd == nil {
+		t.Fatal("fake stream completion returned nil command, want completion command")
 	}
 	if got.streaming {
 		t.Fatal("streaming = true, want false")
@@ -536,7 +537,7 @@ func TestApplySessionMessagesRelayoutsViewport(t *testing.T) {
 	}
 }
 
-func TestApplySessionMessagesClearsFakeStream(t *testing.T) {
+func TestApplySessionMessagesClearsFakeStreamForExplicitLoad(t *testing.T) {
 	m := model{
 		session:               "sess_1",
 		busy:                  true,
@@ -544,11 +545,13 @@ func TestApplySessionMessagesClearsFakeStream(t *testing.T) {
 		streaming:             true,
 		streamingMessageIndex: 0,
 		streamingFullContent:  "old",
+		transcriptLoadRunID:   "load_1",
+		transcriptLoadSession: "sess_1",
 		messages:              []chatMessage{{Role: "assistant", Content: "o"}},
 	}
 	messages := []chatMessage{{Role: "user", Content: "new"}}
 
-	m.applySessionMessages(runtimeEvent{Type: "session.messages", SessionID: "sess_1", Messages: messages})
+	m.applySessionMessages(runtimeEvent{Type: "session.messages", ID: "load_1", SessionID: "sess_1", Messages: messages})
 
 	if m.streaming {
 		t.Fatal("streaming = true, want false")
@@ -2146,43 +2149,54 @@ func (n *recordingNotifier) Notify(payload notificationPayload) error {
 	return nil
 }
 
-func runNotificationCommand(t *testing.T, cmd tea.Cmd) notificationResultMsg {
+func runTerminalBellCommand(t *testing.T, cmd tea.Cmd) terminalBellResultMsg {
 	t.Helper()
 	if cmd == nil {
-		t.Fatal("notification command is nil")
+		t.Fatal("terminal bell command is nil")
 	}
+	oldBellWriter := terminalBellWriter
+	terminalBellWriter = io.Discard
+	defer func() { terminalBellWriter = oldBellWriter }()
+
 	msg := cmd()
 	if batch, ok := msg.(tea.BatchMsg); ok {
-		results := make(chan tea.Msg, len(batch))
-		for _, child := range batch {
+		results := make(chan tea.Msg, len(batch)*4+8)
+		runChild := func(child tea.Cmd) {
 			if child == nil {
-				continue
+				return
 			}
-			go func(child tea.Cmd) {
-				results <- child()
-			}(child)
+			go func() { results <- child() }()
+		}
+		for _, child := range batch {
+			runChild(child)
 		}
 		deadline := time.After(250 * time.Millisecond)
-		for range batch {
+		for {
 			select {
 			case childMsg := <-results:
-				if result, ok := childMsg.(notificationResultMsg); ok {
+				switch result := childMsg.(type) {
+				case terminalBellResultMsg:
 					return result
+				case notificationResultMsg:
+					t.Fatalf("batch included system notification result: %#v", result)
+				case tea.BatchMsg:
+					for _, nested := range result {
+						runChild(nested)
+					}
 				}
 			case <-deadline:
-				t.Fatal("timed out waiting for notification command")
+				t.Fatal("timed out waiting for terminal bell command")
 			}
 		}
-		t.Fatal("batch did not include notification command")
 	}
-	result, ok := msg.(notificationResultMsg)
+	result, ok := msg.(terminalBellResultMsg)
 	if !ok {
-		t.Fatalf("message = %#v, want notificationResultMsg", msg)
+		t.Fatalf("message = %#v, want terminalBellResultMsg", msg)
 	}
 	return result
 }
 
-func TestFakeStreamCompletionNotifiesAfterRunFinished(t *testing.T) {
+func TestFakeStreamCompletionRingsBellAfterRunFinishedWithoutSystemNotification(t *testing.T) {
 	n := &recordingNotifier{}
 	m := model{
 		notifier:              n,
@@ -2199,19 +2213,16 @@ func TestFakeStreamCompletionNotifiesAfterRunFinished(t *testing.T) {
 
 	updated, cmd := m.updateFakeStreamTick()
 	got := updated.(model)
-	runNotificationCommand(t, cmd)
+	bellResult := runTerminalBellCommand(t, cmd)
+	if bellResult.err != nil {
+		t.Fatalf("terminal bell err = %v, want nil", bellResult.err)
+	}
 
 	if got.streaming || got.busy || got.activeRunID != "" {
 		t.Fatalf("run state = streaming:%v busy:%v activeRunID:%q, want complete", got.streaming, got.busy, got.activeRunID)
 	}
-	if len(n.payloads) != 1 {
-		t.Fatalf("notifications = %#v, want one", n.payloads)
-	}
-	if n.payloads[0].Kind != notificationKindRunComplete || n.payloads[0].Title != "Qubit" {
-		t.Fatalf("notification = %#v, want run-complete Qubit notification", n.payloads[0])
-	}
-	if !strings.Contains(n.payloads[0].Body, "Demo chat") {
-		t.Fatalf("notification body = %q, want session title", n.payloads[0].Body)
+	if len(n.payloads) != 0 {
+		t.Fatalf("notifications = %#v, want none when terminal bell handles attention", n.payloads)
 	}
 }
 
@@ -2238,7 +2249,7 @@ func TestRunFinishedDuringStreamDoesNotNotifyBeforeStreamDrains(t *testing.T) {
 	}
 }
 
-func TestRunFinishedWithoutStreamingNotifiesImmediately(t *testing.T) {
+func TestRunFinishedWithoutStreamingRingsBellImmediately(t *testing.T) {
 	rt, _ := newTestRuntime(t)
 	n := &recordingNotifier{}
 	m := model{
@@ -2253,13 +2264,16 @@ func TestRunFinishedWithoutStreamingNotifiesImmediately(t *testing.T) {
 
 	updated, cmd := m.updateRuntime(runtimeEvent{Type: "run_finished", RunID: "run_1", Status: "completed"})
 	got := updated.(model)
-	runNotificationCommand(t, cmd)
+	bellResult := runTerminalBellCommand(t, cmd)
+	if bellResult.err != nil {
+		t.Fatalf("terminal bell err = %v, want nil", bellResult.err)
+	}
 
 	if got.busy || got.activeRunID != "" {
 		t.Fatalf("run state = busy:%v activeRunID:%q, want complete", got.busy, got.activeRunID)
 	}
-	if len(n.payloads) != 1 || n.payloads[0].Kind != notificationKindRunComplete {
-		t.Fatalf("notifications = %#v, want one run-complete notification", n.payloads)
+	if len(n.payloads) != 0 {
+		t.Fatalf("notifications = %#v, want none when terminal bell handles attention", n.payloads)
 	}
 	if len(got.messages) != 2 || got.messages[1].Role != "status" || !got.messages[1].LocalOnly || got.messages[1].Content != "worked for 5 minutes" {
 		t.Fatalf("messages = %#v, want local worked duration after user message", got.messages)
@@ -3434,5 +3448,223 @@ func TestSlashSessionsStartsCursorAtTop(t *testing.T) {
 	got.applySessionList(runtimeEvent{Type: "session.list", Sessions: got.sessions})
 	if got.sessionCursor != 0 {
 		t.Fatalf("sessionCursor after session.list = %d, want 0", got.sessionCursor)
+	}
+}
+
+func TestSessionMessagesDuringActiveStreamDoesNotClearRun(t *testing.T) {
+	m := model{
+		session:               "sess_1",
+		busy:                  true,
+		activeRunID:           "run_1",
+		streaming:             true,
+		streamingMessageIndex: 1,
+		streamingFullContent:  "final answer",
+		streamingVisibleRunes: 5,
+		messages: []chatMessage{
+			{Role: "user", Content: "question"},
+			{Role: "assistant", Content: "final"},
+		},
+	}
+
+	m.applySessionMessages(runtimeEvent{Type: "session.messages", ID: "background_load", SessionID: "sess_1", Messages: []chatMessage{{Role: "assistant", Content: "stored transcript"}}})
+
+	if !m.busy || !m.streaming || m.activeRunID != "run_1" {
+		t.Fatalf("run state busy=%v streaming=%v activeRunID=%q, want active stream preserved", m.busy, m.streaming, m.activeRunID)
+	}
+	if len(m.messages) != 2 || m.messages[1].Content != "final" {
+		t.Fatalf("messages = %#v, want stream placeholder preserved", m.messages)
+	}
+}
+
+func TestExplicitTranscriptLoadCanReplaceActiveStream(t *testing.T) {
+	m := model{
+		session:               "sess_1",
+		busy:                  true,
+		activeRunID:           "run_1",
+		streaming:             true,
+		streamingMessageIndex: 1,
+		streamingFullContent:  "final answer",
+		transcriptLoadRunID:   "load_1",
+		transcriptLoadSession: "sess_1",
+		messages: []chatMessage{
+			{Role: "user", Content: "question"},
+			{Role: "assistant", Content: "partial"},
+		},
+	}
+	loaded := []chatMessage{{Role: "user", Content: "loaded"}, {Role: "assistant", Content: "transcript"}}
+
+	m.applySessionMessages(runtimeEvent{Type: "session.messages", ID: "load_1", SessionID: "sess_1", Messages: loaded})
+
+	if m.busy || m.streaming || m.activeRunID != "" {
+		t.Fatalf("run state busy=%v streaming=%v activeRunID=%q, want transcript load to replace stream", m.busy, m.streaming, m.activeRunID)
+	}
+	if len(m.messages) != len(loaded) || m.messages[1].Content != "transcript" {
+		t.Fatalf("messages = %#v, want loaded transcript", m.messages)
+	}
+	if m.transcriptLoadRunID != "" || m.transcriptLoadSession != "" {
+		t.Fatalf("transcript load tracking not cleared: id=%q session=%q", m.transcriptLoadRunID, m.transcriptLoadSession)
+	}
+}
+
+func TestRefreshViewportReusesRenderedMessageSegments(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 24
+	m.messages = []chatMessage{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "**stable** https://example.com"},
+	}
+	m.layout()
+	m.refreshViewport()
+	if len(m.messageRenderSegments) != len(m.messages) {
+		t.Fatalf("segments = %d, want %d", len(m.messageRenderSegments), len(m.messages))
+	}
+	first := m.messageRenderSegments[1]
+	if first.Text == "" || len(first.Lines) == 0 || len(first.Links) == 0 {
+		t.Fatalf("segment missing metadata: %#v", first)
+	}
+
+	m.refreshViewport()
+	second := m.messageRenderSegments[1]
+	if second.Text != first.Text {
+		t.Fatalf("cached segment text changed")
+	}
+	if len(second.Lines) != len(first.Lines) || len(second.Links) != len(first.Links) {
+		t.Fatalf("cached segment metadata changed: lines %d/%d links %d/%d", len(second.Lines), len(first.Lines), len(second.Links), len(first.Links))
+	}
+}
+
+func TestStreamingMessageUsesCheapRenderUntilMarkdownBoundary(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 24
+	m.layout()
+	m.streaming = true
+	m.streamingMessageIndex = 0
+	message := chatMessage{Role: "assistant", Content: "plain streaming text"}
+
+	rendered := m.renderMessageContent(message, false)
+	if !strings.Contains(rendered, "plain streaming text") {
+		t.Fatalf("rendered streaming content = %q", rendered)
+	}
+	if len(m.markdownRenderers) != 1 { // initial ready message rendered during layout
+		t.Fatalf("markdown renderers = %d, want no new renderer for plain streaming text beyond initial layout", len(m.markdownRenderers))
+	}
+}
+
+func TestFakeStreamChunkSizeBoundsLongResponseTicks(t *testing.T) {
+	if got := fakeStreamChunkSize(30000, 0); got < 1000 {
+		t.Fatalf("long response chunk size = %d, want coarse chunks", got)
+	}
+	if got := fakeStreamTickInterval(30000); got < 50*time.Millisecond {
+		t.Fatalf("long response tick interval = %s, want throttled interval", got)
+	}
+}
+
+func TestStreamingRefreshCachesStableTranscriptPrefix(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 24
+	m.messages = []chatMessage{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "stable response"},
+		{Role: "assistant", Content: "stream"},
+	}
+	m.streaming = true
+	m.streamingMessageIndex = 2
+	m.layout()
+	m.refreshViewportForStreaming()
+	if m.streamingTranscriptCache.Prefix == "" {
+		t.Fatal("streaming prefix cache is empty")
+	}
+	firstPrefix := m.streamingTranscriptCache.Prefix
+	m.messages[2].Content = "stream more"
+	m.refreshViewportForStreaming()
+	if m.streamingTranscriptCache.Prefix != firstPrefix {
+		t.Fatal("streaming prefix changed after only streaming tail changed")
+	}
+	if !strings.Contains(m.transcriptContent, "stream more") {
+		t.Fatalf("transcript content missing updated streaming tail: %q", m.transcriptContent)
+	}
+}
+
+func TestRefreshViewportSegmentCacheInvalidatesFormerLastUserTrailingNewline(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 24
+	m.messages = []chatMessage{{Role: "user", Content: "first"}}
+	m.layout()
+	m.refreshViewport()
+	firstLines := len(m.transcriptLines)
+	if firstLines < 2 {
+		t.Fatalf("single final user lines = %d, want trailing blank line", firstLines)
+	}
+
+	m.messages = append(m.messages, chatMessage{Role: "assistant", Content: "reply"})
+	m.refreshViewport()
+	if strings.Contains(m.transcriptContent, "first\n\n\n") {
+		t.Fatalf("transcript kept stale final-user trailing newline: %q", m.transcriptContent)
+	}
+}
+
+func TestTranscriptMetadataMatchesRenderedContentAcrossCachedSegments(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 80
+	m.height = 24
+	m.messages = []chatMessage{
+		{Role: "user", Content: "one"},
+		{Role: "assistant", Content: "two"},
+		{Role: "user", Content: "three"},
+		{Role: "assistant", Content: "four"},
+	}
+	m.layout()
+	m.refreshViewport()
+	want := transcriptRenderLines(m.transcriptContent)
+	if len(m.transcriptLines) != len(want) {
+		t.Fatalf("transcript lines = %d, want %d from rendered content\ncontent=%q", len(m.transcriptLines), len(want), m.transcriptContent)
+	}
+	for i := range want {
+		if m.transcriptLines[i].Text != want[i].Text {
+			t.Fatalf("line %d = %q, want %q", i, m.transcriptLines[i].Text, want[i].Text)
+		}
+	}
+}
+
+func TestToolHitboxesAlignAfterMultipleCachedSegments(t *testing.T) {
+	m := initialModel(nil)
+	m.session = "sess_1"
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.messages = []chatMessage{
+		{Role: "user", Content: "one"},
+		{Role: "assistant", Content: "two"},
+		{Role: "user", Content: "read"},
+	}
+	m.applyToolCallFinish(runtimeEvent{
+		Type:       "tool.call.finish",
+		SessionID:  "sess_1",
+		Step:       1,
+		ToolCallID: "read_1",
+		ToolName:   "readFile",
+		Status:     "completed",
+		Args:       map[string]any{"path": "agent.md"},
+		Result:     map[string]any{"totalLines": float64(42), "contentPreview": "# Qubit Agent Guide"},
+	})
+	if len(m.toolHitboxes) == 0 {
+		t.Fatal("tool hitbox missing")
+	}
+	visibleToolLine := -1
+	for i, line := range strings.Split(plainText(m.viewport.View()), "\n") {
+		if strings.Contains(line, "Read 1 file") {
+			visibleToolLine = i + m.viewport.YOffset()
+			break
+		}
+	}
+	if visibleToolLine < 0 {
+		t.Fatalf("viewport = %q, want rendered tool row", plainText(m.viewport.View()))
+	}
+	if got := m.toolHitboxes[0].StartY; got != visibleToolLine {
+		t.Fatalf("hitbox startY = %d, rendered row = %d", got, visibleToolLine)
 	}
 }

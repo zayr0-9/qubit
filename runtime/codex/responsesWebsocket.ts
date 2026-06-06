@@ -96,11 +96,15 @@ async function connectCodexWebSocket(options: CodexWebSocketRequestOptions): Pro
     let settled = false;
     const timeout = setTimeout(() => finish(createRetryableCodexWebSocketError("websocket connect timeout", { retryable: true })), connectTimeoutMs(options.connectTimeoutMs));
     const onAbort = () => finish(abortError());
+    const onOpen = () => finish();
+    const onError = (error: Error) => finish(createRetryableCodexWebSocketError(error.message, { retryable: true, cause: error }));
     const finish = (error?: unknown) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       options.signal?.removeEventListener("abort", onAbort);
+      socket.off("open", onOpen);
+      socket.off("error", onError);
       if (error) {
         closeSocket(socket);
         reject(error);
@@ -109,8 +113,8 @@ async function connectCodexWebSocket(options: CodexWebSocketRequestOptions): Pro
       }
     };
     options.signal?.addEventListener("abort", onAbort, { once: true });
-    socket.on("open", () => finish());
-    socket.on("error", (error) => finish(createRetryableCodexWebSocketError(error.message, { retryable: true, cause: error })));
+    socket.on("open", onOpen);
+    socket.on("error", onError);
   });
   return socket;
 }
@@ -129,18 +133,24 @@ function nextMessage(socket: CodexWebSocketLike, timeoutMs: number, signal?: Abo
     let settled = false;
     const timeout = setTimeout(() => finish(undefined, createRetryableCodexWebSocketError("idle timeout waiting for websocket", { retryable: true })), timeoutMs);
     const onAbort = () => finish(undefined, abortError());
+    const onMessage = (data: unknown, isBinary?: boolean) => finish({ kind: "message", text: socketDataToText(data), isBinary: Boolean(isBinary) });
+    const onError = (error: Error) => finish({ kind: "error", error });
+    const onClose = (code: number, reason: Buffer) => finish({ kind: "close", code, reason: reason?.toString("utf8") || "" });
     const finish = (message?: SocketMessage, error?: unknown) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       signal?.removeEventListener("abort", onAbort);
+      socket.off("message", onMessage);
+      socket.off("error", onError);
+      socket.off("close", onClose);
       if (error) reject(error);
       else resolve(message!);
     };
     signal?.addEventListener("abort", onAbort, { once: true });
-    socket.on("message", (data, isBinary) => finish({ kind: "message", text: socketDataToText(data), isBinary: Boolean(isBinary) }));
-    socket.on("error", (error) => finish({ kind: "error", error }));
-    socket.on("close", (code, reason) => finish({ kind: "close", code, reason: reason?.toString("utf8") || "" }));
+    socket.on("message", onMessage);
+    socket.on("error", onError);
+    socket.on("close", onClose);
   });
 }
 

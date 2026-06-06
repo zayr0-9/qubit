@@ -201,10 +201,10 @@ func (m model) applyThemeConfig(theme themeConfig) model {
 	m.previousMode = modeChat
 	m.status = fmt.Sprintf("theme applied: %s", theme.Name)
 	m.err = ""
-	m.renderCache = make(map[renderCacheKey]string)
+	m.clearRenderCaches()
 	m.layout()
 	m.refreshViewport()
-	m.renderCache = make(map[renderCacheKey]string)
+	m.clearRenderCaches()
 	return m
 }
 

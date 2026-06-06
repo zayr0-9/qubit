@@ -119,6 +119,11 @@ export interface CodexWebSocketLike {
   on(event: "error", listener: (error: Error) => void): this;
   on(event: "close", listener: (code: number, reason: Buffer) => void): this;
   on(event: "upgrade", listener: (response: { headers?: Record<string, string | string[] | undefined> }) => void): this;
+  off(event: "open", listener: () => void): this;
+  off(event: "message", listener: (data: unknown, isBinary?: boolean) => void): this;
+  off(event: "error", listener: (error: Error) => void): this;
+  off(event: "close", listener: (code: number, reason: Buffer) => void): this;
+  off(event: "upgrade", listener: (response: { headers?: Record<string, string | string[] | undefined> }) => void): this;
 }
 
 export type CodexWebSocketFactory = (options: CodexWebSocketFactoryOptions) => CodexWebSocketLike;

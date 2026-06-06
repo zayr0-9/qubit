@@ -246,7 +246,7 @@ Qubit currently supports three user-facing permission modes for gated tools:
 
 ```txt
 ask
-  The Go client opens the permission modal when the runtime emits tool.permission.request, except planMd is always-allowed for planning workflows and editFile is auto-allowed only for plan-mode requests that the runtime has verified are restricted to project `.qubit/plans` files.
+  The Go client opens the permission modal when the runtime emits tool.permission.request, except planMd and subagent are always-allowed for planning workflows and editFile is auto-allowed only for plan-mode requests that the runtime has verified are restricted to project `.qubit/plans` files.
 
 always_allow
   The Go client immediately sends tool.permission.response with allow=true for runtime permission requests and uses the edit prompt.
@@ -257,7 +257,7 @@ allow_all
 
 The permission mode is Go UI/session state. Keep the runtime/tool definitions responsible for declaring static tool safety (`permission: { mode: 'ask' }` for gated tools and `permission: { mode: 'always' }` for intrinsically safe read/search/planning tools), but keep user-facing auto-approval gating in the Go client. Do not conflate tool-level `always` with user-level `always_allow` or `allow_all`.
 
-For now, permission mode is changed with `/permission <plan|edit|allow-all>` or cycled in the chat UI with Shift+Tab. The current mode is rendered as a minimal bright `plan` / `edit` / `allow all` label in a dedicated status section below the input area and is not persisted across process restarts. The same status section also shows cwd containment state as `cwd block` or `cwd open`; `/cwd-remove-block` and `/cwd-enable-block` toggle that per-TUI-session setting. Plan mode maps to ask-before-gated-tools behavior with planMd allowed and editFile auto-allowed only after runtime path validation confirms the target is inside project `.qubit/plans`; edit mode maps to always-allow gated tools plus the edit prompt; allow-all mode maps to always-allow gated tools while retaining the plan prompt. If persistence is added later, document the settings file and migration behavior here.
+For now, permission mode is changed with `/permission <plan|edit|allow-all>` or cycled in the chat UI with Shift+Tab. The current mode is rendered as a minimal bright `plan` / `edit` / `allow all` label in a dedicated status section below the input area and is not persisted across process restarts. The same status section also shows cwd containment state as `cwd block` or `cwd open`; `/cwd-remove-block` and `/cwd-enable-block` toggle that per-TUI-session setting. Plan mode maps to ask-before-gated-tools behavior with planMd and subagent allowed and editFile auto-allowed only after runtime path validation confirms the target is inside project `.qubit/plans`; edit mode maps to always-allow gated tools plus the edit prompt; allow-all mode maps to always-allow gated tools while retaining the plan prompt. If persistence is added later, document the settings file and migration behavior here.
 
 ## Tool Definition Standards
 
@@ -278,7 +278,7 @@ Guidelines:
 
 - Keep read-only tools permission mode `always` unless a reason emerges to ask.
 - Write/shell/network tools should be permission-gated when migrated.
-- Keep user-facing permission-mode behavior in Go: ask mode shows the modal except always-allowed tools such as planMd; always-allow and allow-all modes auto-approve runtime permission requests.
+- Keep user-facing permission-mode behavior in Go: ask mode shows the modal except always-allowed tools such as planMd and subagent; always-allow and allow-all modes auto-approve runtime permission requests.
 - Keep input schemas explicit and JSON-serializable.
 - Validate required arguments before doing filesystem work.
 - Catch implementation errors inside `execute` and return `{ ok: false, error }`.

@@ -161,12 +161,12 @@ Prerequisites:
 - Go matching `go.mod`
 - Node.js and `pnpm`
 - Native dependency support for `better-sqlite3` and `keytar`
-- Linux local development also needs common build/search tools such as `git`, `ripgrep`, `gcc`, `make`, `pkg-config`, and Secret Service/libsecret development packages for `keytar`
+- Linux local development also needs common build/search tools such as `git`, `ripgrep`, `gcc`, `make`, `pkg-config`, Secret Service/libsecret development packages for `keytar`, and optionally `notify-send`/`libnotify-bin` for desktop notifications
 
 Debian/Ubuntu-style package baseline:
 
 ```sh
-sudo apt install git ripgrep build-essential pkg-config libsecret-1-dev dbus-x11 xdg-utils
+sudo apt install git ripgrep build-essential pkg-config libsecret-1-dev dbus-x11 xdg-utils libnotify-bin
 ```
 
 Install dependencies:

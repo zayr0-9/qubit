@@ -179,8 +179,15 @@ func (m *model) applySessionMessages(ev runtimeEvent) {
 	if ev.SessionID != "" && ev.SessionID != m.session {
 		return
 	}
+	if m.activeRunID != "" || m.streaming {
+		if ev.ID == "" || ev.ID != m.transcriptLoadRunID || (m.transcriptLoadSession != "" && ev.SessionID != "" && ev.SessionID != m.transcriptLoadSession) {
+			return
+		}
+	}
 	m.clearFakeStream()
 	m.activeRunID = ""
+	m.transcriptLoadRunID = ""
+	m.transcriptLoadSession = ""
 	if ev.SessionID != "" {
 		m.session = ev.SessionID
 	}

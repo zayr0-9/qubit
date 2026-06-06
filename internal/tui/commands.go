@@ -605,7 +605,7 @@ func (m model) shouldAutoAllowPermission(ev runtimeEvent) bool {
 	if m.permissionMode != permissionModeAsk {
 		return false
 	}
-	if ev.ToolName == "planMd" {
+	if ev.ToolName == "planMd" || ev.ToolName == "subagent" {
 		return true
 	}
 	return ev.ToolName == "editFile" && boolMetadata(ev.Metadata, "planModeAutoAllowProjectPlansOnly")

@@ -21,5 +21,6 @@ type runtimeClient struct {
 	logPath   string
 	lockPath  string
 	attached  bool
+	clientID  string
 	reconnect func() error
 }

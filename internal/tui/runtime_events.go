@@ -57,7 +57,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 			return m, waitRuntimeEvent(m.runtime)
 		}
 		m.applyAssistantEvent(ev)
-		return m, tea.Batch(waitRuntimeEvent(m.runtime), fakeStreamTick())
+		return m, tea.Batch(waitRuntimeEvent(m.runtime), fakeStreamTickForContent(len([]rune(m.streamingFullContent))))
 	case "codex.usage":
 		if !m.acceptRunScopedEvent(ev) {
 			return m, waitRuntimeEvent(m.runtime)
@@ -164,6 +164,8 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.clearFakeStream()
 		m.activeRunID = ""
 		m.clearActiveRunStartedAt()
+		m.transcriptLoadRunID = ""
+		m.transcriptLoadSession = ""
 		m.autoScroll = true
 		m.busy = false
 		m.session = ev.SessionID
@@ -176,9 +178,12 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.clearFakeStream()
 		m.activeRunID = ""
 		m.clearActiveRunStartedAt()
+		loadRunID := newRunID()
+		m.transcriptLoadRunID = loadRunID
 		m.autoScroll = true
 		m.busy = true
 		m.session = ev.SessionID
+		m.transcriptLoadSession = ev.SessionID
 		m.title = ev.SessionTitle
 		m.autoNewSessionOnChat = false
 		verb := "Loading session"
@@ -188,7 +193,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m.messages = []chatMessage{{Role: "assistant", Content: fmt.Sprintf("%s: %s (%s)", verb, m.title, short(m.session, 18))}}
 		m.status = "loading transcript"
 		m.refreshViewport()
-		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.messages", "sessionId": m.session}))
+		return m, tea.Batch(waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.messages", "id": loadRunID, "sessionId": m.session}))
 	case "session.messages":
 		m.applySessionMessages(ev)
 	case "session.deleted":

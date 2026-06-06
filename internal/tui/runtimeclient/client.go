@@ -36,6 +36,7 @@ type Client struct {
 	logPath   string
 	lockPath  string
 	attached  bool
+	clientID  string
 }
 
 type clientContext struct {
@@ -64,6 +65,7 @@ func Start() (*Client, error) {
 
 func newClient(ctx clientContext) *Client {
 	return &Client{
+		clientID:  newLogicalClientID(),
 		events:    make(chan protocol.RuntimeEvent, 32),
 		errs:      make(chan error, 4),
 		appRoot:   ctx.appRoot,
@@ -204,6 +206,11 @@ func (r *Client) waitRuntimeProcess(cmd *exec.Cmd) {
 	_ = cmd.Wait()
 }
 
+func newLogicalClientID() string {
+	host, _ := os.Hostname()
+	return fmt.Sprintf("go_%x", sha1.Sum([]byte(fmt.Sprintf("%s:%d:%d", host, os.Getpid(), time.Now().UnixNano()))))[:43]
+}
+
 func runtimeServerAddress(qubitDir string) string {
 	sum := sha1.Sum([]byte(strings.ToLower(filepath.Clean(qubitDir))))
 	portOffset := int(sum[0])<<8 | int(sum[1])
@@ -235,8 +242,14 @@ func (r *Client) attachConn(conn io.ReadWriteCloser, attached bool) {
 	r.closed = false
 	r.connSeq++
 	seq := r.connSeq
+	clientID := r.clientID
 	r.mu.Unlock()
 	go r.readStdout(conn, seq)
+	if clientID != "" {
+		go func() {
+			_ = r.send(map[string]any{"type": "client.hello", "clientId": clientID})
+		}()
+	}
 }
 
 func (r *Client) readStdout(stdout io.Reader, seq int) {
@@ -372,6 +385,7 @@ func (r *Client) LaunchCwd() string                    { return r.launchCwd }
 func (r *Client) SetLaunchCwd(cwd string)              { r.launchCwd = cwd }
 func (r *Client) QubitDir() string                     { return r.qubitDir }
 func (r *Client) LogPath() string                      { return r.logPath }
+func (r *Client) ClientID() string                     { return r.clientID }
 
 func (r *Client) Shutdown()        { r.shutdown() }
 func (r *Client) Send(v any) error { return r.send(v) }

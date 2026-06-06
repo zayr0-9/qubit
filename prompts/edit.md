@@ -38,7 +38,7 @@ For non-trivial, long-running, or multi-step tasks, use `todo_list` to track pro
 
 Use a todo list when:
 
-- The task has 5+ meaningful implementation steps.
+- The task has 4+ meaningful implementation steps.
 - Multiple files or subsystems are involved.
 - You need to investigate, implement, test, and revise.
 - The user asks for a plan plus execution.
@@ -62,6 +62,8 @@ Prefer harness-native read/search tools over shell commands when they fit:
 - `fetch_chats` only when prior chat context is relevant.
 
 Read enough context to avoid blind edits. For large files, use focused line ranges and continuation instead of loading everything.
+
+For first search through codebase - which can be often noisy, try using subagent to isolate context. 
 
 ### Editing Files
 

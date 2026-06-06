@@ -183,10 +183,10 @@ func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {
 	fullContent := []rune(m.streamingFullContent)
 	m.streamingVisibleRunes = min(len(fullContent), m.streamingVisibleRunes+fakeStreamChunkSize(len(fullContent), m.streamingVisibleRunes))
 	m.messages[m.streamingMessageIndex].Content = string(fullContent[:m.streamingVisibleRunes])
-	m.refreshViewport()
+	m.refreshViewportForStreaming()
 
 	if m.streamingVisibleRunes < len(fullContent) {
-		return m, fakeStreamTick()
+		return m, fakeStreamTickForContent(len(fullContent))
 	}
 
 	finishStatus := m.streamingFinishStatus
@@ -208,7 +208,7 @@ func (m model) runCompleteNotificationCmd(status string) tea.Cmd {
 	if !shouldNotifyRunComplete(status) {
 		return nil
 	}
-	return notifyRunCompleteCmd(m.notifier, fallback(m.title, m.currentSessionTitle()))
+	return terminalBellCmd()
 }
 
 func (m model) updateNotificationResult(msg notificationResultMsg) model {
@@ -237,6 +237,8 @@ func (m *model) clearFakeStream() {
 	m.streamingVisibleRunes = 0
 	m.streamingFinished = false
 	m.streamingFinishStatus = ""
+	m.streamingMarkdownCache = streamingMarkdownCache{}
+	m.streamingTranscriptCache = streamingTranscriptCache{}
 }
 
 func newRunID() string {
@@ -244,7 +246,10 @@ func newRunID() string {
 }
 
 func fakeStreamTick() tea.Cmd {
-	return tea.Tick(18*time.Millisecond, func(time.Time) tea.Msg {
+	return fakeStreamTickForContent(0)
+}
+func fakeStreamTickForContent(totalRunes int) tea.Cmd {
+	return tea.Tick(fakeStreamTickInterval(totalRunes), func(time.Time) tea.Msg {
 		return fakeStreamTickMsg{}
 	})
 }
@@ -255,19 +260,35 @@ func inputCursorPulseTick() tea.Cmd {
 	})
 }
 
+func fakeStreamTickInterval(totalRunes int) time.Duration {
+	if totalRunes > 20000 {
+		return 80 * time.Millisecond
+	}
+	if totalRunes > 8000 {
+		return 50 * time.Millisecond
+	}
+	if totalRunes > 2000 {
+		return 33 * time.Millisecond
+	}
+	return 18 * time.Millisecond
+}
 func fakeStreamChunkSize(totalRunes int, visibleRunes int) int {
 	remaining := totalRunes - visibleRunes
 	if remaining <= 0 {
 		return 0
 	}
-	size := 3
-	if totalRunes > 2000 {
-		size = 24
-	} else if totalRunes > 800 {
-		size = 12
-	} else if totalRunes > 240 {
-		size = 6
+	// Bound cosmetic fake streaming to roughly a couple of seconds. Long
+	// responses are already complete in the runtime event, so drawing tiny chunks
+	// only makes the TUI spend more time replacing viewport content.
+	targetTicks := 90
+	if totalRunes > 20000 {
+		targetTicks = 25
+	} else if totalRunes > 8000 {
+		targetTicks = 45
+	} else if totalRunes > 2000 {
+		targetTicks = 65
 	}
+	size := max(3, (totalRunes+targetTicks-1)/targetTicks)
 	return min(size, remaining)
 }
 

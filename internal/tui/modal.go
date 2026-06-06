@@ -293,7 +293,7 @@ func (m *model) scrollModalContent(delta int) {
 	if m.modal == nil || len(m.modal.Options) > 0 {
 		return
 	}
-	maxOffset := max(0, len(m.modalContentLines())-m.modalScrollableRows(*m.modal))
+	maxOffset := max(0, len(m.modalContentLines())-m.modalContentPageSize())
 	m.modal.ScrollOffset = min(max(m.modal.ScrollOffset+delta, 0), maxOffset)
 }
 

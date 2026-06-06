@@ -10,33 +10,63 @@ import (
 	"github.com/charmbracelet/glamour/styles"
 )
 
-func renderMessageContentAtWidth(message chatMessage, width int) (string, error) {
+func (m *model) renderMessageContentAtWidth(message chatMessage, width int) (string, error) {
 	width = max(20, width)
 	if message.LocalOnly || message.Role == "status" || message.Role == "error" || message.Role == "reasoning" {
 		return wrap(message.Content, width), nil
 	}
-	markdown, err := renderMarkdown(message.Content, width)
+	markdown, err := m.renderMarkdown(message.Content, width)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimRight(stripBackgroundANSI(markdown), "\n"), nil
 }
+func renderMessageContentAtWidth(message chatMessage, width int) (string, error) {
+	return (*model)(nil).renderMessageContentAtWidth(message, width)
+}
+func (m *model) renderMarkdown(markdown string, width int) (string, error) {
+	renderer, err := m.markdownRenderer(width)
+	if err != nil {
+		return "", err
+	}
+	rendered, err := renderer.Render(markdown)
+	if err != nil {
+		return "", fmt.Errorf("render markdown: %w", err)
+	}
+	return rendered, nil
+}
 func renderMarkdown(markdown string, width int) (string, error) {
+	return (*model)(nil).renderMarkdown(markdown, width)
+}
+func (m *model) markdownRenderer(width int) (*glamour.TermRenderer, error) {
 	renderWidth := max(20, width)
+	if m != nil {
+		if m.markdownRenderers == nil {
+			m.markdownRenderers = make(markdownRendererCache)
+		}
+		key := markdownRendererCacheKey{Width: renderWidth, Theme: m.theme.Name + "|" + m.theme.Background + "|" + m.theme.Text + "|" + colorToHex(text) + "|" + colorToHex(accent) + "|" + colorToHex(cyan) + "|" + colorToHex(muted)}
+		if renderer := m.markdownRenderers[key]; renderer != nil {
+			return renderer, nil
+		}
+		renderer, err := newMarkdownRenderer(renderWidth)
+		if err != nil {
+			return nil, err
+		}
+		m.markdownRenderers[key] = renderer
+		return renderer, nil
+	}
+	return newMarkdownRenderer(renderWidth)
+}
+func newMarkdownRenderer(renderWidth int) (*glamour.TermRenderer, error) {
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithStyles(noBackgroundMarkdownStyle()),
 		glamour.WithWordWrap(renderWidth),
 		glamour.WithPreservedNewLines(),
 	)
 	if err != nil {
-		return "", fmt.Errorf("create markdown renderer: %w", err)
+		return nil, fmt.Errorf("create markdown renderer: %w", err)
 	}
-
-	rendered, err := renderer.Render(markdown)
-	if err != nil {
-		return "", fmt.Errorf("render markdown: %w", err)
-	}
-	return rendered, nil
+	return renderer, nil
 }
 func stringPtr(value string) *string {
 	return &value

@@ -243,8 +243,28 @@ func TestRenderInputStatusShowsCwdBetweenReasoningAndContext(t *testing.T) {
 	m.messages = nil
 
 	status := plainText(m.renderInputStatus())
-	want := `high · D:\qubit · ctx 0/400k`
+	want := `high · D:\qubit · 0 forks · ctx 0/400k`
 	if !strings.Contains(status, want) {
-		t.Fatalf("status = %q, want cwd between reasoning and ctx as %q", status, want)
+		t.Fatalf("status = %q, want cwd and fork count before ctx as %q", status, want)
+	}
+}
+
+func TestRenderInputStatusShowsCurrentSessionForksBetweenCwdAndContext(t *testing.T) {
+	m := initialModel(&runtimeClient{launchCwd: `/home/me/project`})
+	m.width = 120
+	m.maxContext = 400000
+	m.messages = nil
+	m.session = "sess_root"
+	m.sessions = []sessionInfo{
+		{ID: "sess_root", Title: "Root"},
+		{ID: "sess_fork_one", Title: "Fork one", ForkedFromSessionID: "sess_root"},
+		{ID: "sess_fork_two", Title: "Fork two", ForkedFromSessionID: "sess_root"},
+		{ID: "sess_grandfork", Title: "Grandfork", ForkedFromSessionID: "sess_fork_one"},
+	}
+
+	status := plainText(m.renderInputStatus())
+	want := `medium · /home/me/project · 3 forks · ctx 0/400k`
+	if !strings.Contains(status, want) {
+		t.Fatalf("status = %q, want cwd, current fork count, then ctx as %q", status, want)
 	}
 }

@@ -16,7 +16,11 @@ type model struct {
 	spinner          spinner.Model
 	inputCursorPulse int
 
-	renderCache map[renderCacheKey]string
+	renderCache              map[renderCacheKey]string
+	markdownRenderers        markdownRendererCache
+	messageRenderSegments    []messageRenderSegment
+	streamingMarkdownCache   streamingMarkdownCache
+	streamingTranscriptCache streamingTranscriptCache
 
 	messages              []chatMessage
 	queuedMessages        []queuedMessage
@@ -57,6 +61,8 @@ type model struct {
 	forkSelector          forkSelectorState
 	messageEdit           messageEditState
 	lastCodexUsage        *codexUsage
+	transcriptLoadRunID   string
+	transcriptLoadSession string
 
 	mode                       uiMode
 	previousMode               uiMode

@@ -94,3 +94,49 @@ describe("Codex responses websocket helpers", () => {
     });
   });
 });
+
+
+describe("Codex websocket listener cleanup", () => {
+  it("does not accumulate message/error/close listeners across long streams", async () => {
+    let socket: FakeSocket | undefined;
+    const parsedPromise = parseCodexWebSocketResponse({
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: new Headers({ authorization: "Bearer token" }),
+      body: { model: "gpt", input: [], stream: true },
+      webSocketFactory: () => {
+        socket = new FakeSocket();
+        queueMicrotask(() => socket?.emit("open"));
+        return socket;
+      },
+      idleTimeoutMs: 1_000,
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(socket?.listenerCount("open"), 0);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(socket?.listenerCount("message"), 1);
+    assert.equal(socket?.listenerCount("error"), 1);
+    assert.equal(socket?.listenerCount("close"), 1);
+
+    for (let i = 0; i < 12; i += 1) {
+      assert.equal(socket?.listenerCount("message"), 1);
+      assert.equal(socket?.listenerCount("error"), 1);
+      assert.equal(socket?.listenerCount("close"), 1);
+      socket?.emit("message", JSON.stringify({ type: "response.output_text.delta", delta: String(i % 10) }), false);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    assert.equal(socket?.listenerCount("message"), 1);
+    assert.equal(socket?.listenerCount("error"), 1);
+    assert.equal(socket?.listenerCount("close"), 1);
+    socket?.emit("message", JSON.stringify({ type: "response.completed", response: { id: "resp-listeners", output: [] } }), false);
+
+    const parsed = await parsedPromise;
+    assert.equal(parsed.content, "012345678901");
+    assert.equal(socket?.listenerCount("message"), 0);
+    assert.equal(socket?.listenerCount("error"), 0);
+    assert.equal(socket?.listenerCount("close"), 0);
+    assert.equal(socket?.closed, true);
+  });
+});

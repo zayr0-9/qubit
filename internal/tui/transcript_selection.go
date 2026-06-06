@@ -398,7 +398,12 @@ func (m *model) repaintTranscriptSelection() {
 	if content == "" {
 		content = m.viewport.View()
 	}
-	m.viewport.SetContent(applyTranscriptSelection(content, m.transcriptSelectedRanges()))
+	ranges := m.transcriptSelectedRanges()
+	if len(ranges) == 0 {
+		m.viewport.SetContent(content)
+		return
+	}
+	m.viewport.SetContent(applyTranscriptSelection(content, ranges))
 }
 
 func applyTranscriptSelection(content string, ranges []transcriptSelectedLineRange) string {

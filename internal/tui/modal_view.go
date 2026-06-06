@@ -28,7 +28,7 @@ func (m model) renderModalPanel(modal modalState, height int) string {
 	contentWidth := max(20, panelWidth-6)
 
 	header := m.renderModalHeader(modal, contentWidth)
-	body := m.renderModalBody(modal, contentWidth)
+	body := m.renderModalBody(modal, contentWidth, height)
 
 	var b strings.Builder
 	b.WriteString(header)
@@ -111,12 +111,12 @@ func (m model) renderModalHeader(modal modalState, contentWidth int) string {
 	return b.String()
 }
 
-func (m model) renderModalBody(modal modalState, contentWidth int) string {
+func (m model) renderModalBody(modal modalState, contentWidth int, height int) string {
 	lines := m.modalContentLinesFor(modal, contentWidth)
 	if len(lines) == 0 {
 		return ""
 	}
-	visibleRows := m.modalScrollableRows(modal)
+	visibleRows := m.modalScrollableRowsForHeight(modal, height)
 	if visibleRows >= len(lines) {
 		return strings.Join(lines, "\n")
 	}
@@ -126,21 +126,41 @@ func (m model) renderModalBody(modal modalState, contentWidth int) string {
 		visible[0] = mutedSt.Render(fmt.Sprintf("↑ more above (%d)", offset))
 	}
 	if below := len(lines) - offset - visibleRows; below > 0 {
-		visible[len(visible)-1] = mutedSt.Render(fmt.Sprintf("↓ more below (%d)", below))
+		if offset > 0 && len(visible) == 1 {
+			visible[0] = mutedSt.Render(fmt.Sprintf("↑ more above (%d) · ↓ more below (%d)", offset, below))
+		} else {
+			visible[len(visible)-1] = mutedSt.Render(fmt.Sprintf("↓ more below (%d)", below))
+		}
 	}
 	return strings.Join(visible, "\n")
 }
 
 func (m model) modalScrollableRows(modal modalState) int {
-	panelHeight := max(1, m.height)
+	return m.modalScrollableRowsForHeight(modal, m.modalPanelAvailableHeight())
+}
+
+func (m model) modalScrollableRowsForHeight(modal modalState, height int) int {
+	panelHeight := max(1, height)
 	headerRows := renderedLineCount(m.renderModalHeader(modal, max(20, min(max(48, m.width-12), 92)-6)))
 	actionRows := 0
 	if len(modal.Actions) > 0 {
-		actionRows = 2
+		actionRows = 3
 	}
-	bodySeparatorRows := 2
+	bodySeparatorRows := 0
+	if len(modal.Fields) > 0 {
+		bodySeparatorRows = 2
+	}
 	paddingRows := 2
-	return max(1, panelHeight-headerRows-actionRows-bodySeparatorRows-paddingRows)
+	return max(1, panelHeight-headerRows-actionRows-bodySeparatorRows-paddingRows-1)
+}
+
+func (m model) modalPanelAvailableHeight() int {
+	if m.height <= 0 {
+		return 1
+	}
+	footerRows := 1
+	reserved := lipgloss.Height(m.renderQueuedStatus()) + lipgloss.Height(m.renderInput()) + lipgloss.Height(m.renderInputStatus()) + footerRows
+	return max(1, m.height-reserved)
 }
 
 func (m model) modalContentLines() []string {

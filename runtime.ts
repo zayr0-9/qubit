@@ -247,14 +247,48 @@ function isHiddenRunId(runId) {
   return Boolean(runId && hiddenRuns.has(runId));
 }
 
+function targetId(target) {
+  return clientRegistry.stateFor(target)?.clientId || target?.id || "stdio";
+}
+
+function activeRunTarget(runInfo) {
+  if (!runInfo) return null;
+  if (runInfo.clientId) {
+    const reboundTarget = clientRegistry.targetForClientId(runInfo.clientId);
+    if (reboundTarget) {
+      if (reboundTarget !== runInfo.target) {
+        console.error(`[runtime-server] rebound active run ${runInfo.runId || ""} to ${runInfo.clientId}`);
+        runInfo.target = reboundTarget;
+      }
+      return reboundTarget;
+    }
+  }
+  if (runInfo.target && (!serverAddress || clientRegistry.has(runInfo.target))) return runInfo.target;
+  return null;
+}
+
 function targetForRunEvent(event) {
   if (isHiddenRunId(event?.runId)) return null;
-  if (event?.runId && activeRuns.has(event.runId)) return activeRuns.get(event.runId).target || null;
+  if (event?.runId && activeRuns.has(event.runId)) return activeRunTarget(activeRuns.get(event.runId));
   if (event?.sessionId) {
-    const active = [...activeRuns.values()].find((run) => run.sessionId === event.sessionId);
-    if (active?.target) return active.target;
+    const matches = [...activeRuns.values()].filter((run) => run.sessionId === event.sessionId);
+    if (matches.length === 1) {
+      console.error(`[runtime-server] using legacy session fallback for run event session=${event.sessionId}`);
+      return activeRunTarget(matches[0]);
+    }
+    if (matches.length > 1) {
+      console.error(`[runtime-server] refusing ambiguous session fallback for run event session=${event.sessionId} matches=${matches.length}`);
+    }
   }
   return null;
+}
+
+function writeRunEvent(message, runInfo) {
+  const target = activeRunTarget(runInfo);
+  if (!target) {
+    console.error(`[runtime-server] missing target for run event type=${message?.type || "unknown"} runId=${message?.runId || runInfo?.runId || ""} sessionId=${message?.sessionId || runInfo?.sessionId || ""} clientId=${runInfo?.clientId || ""}`);
+  }
+  write(message, target);
 }
 
 async function requestToolPermission(request) {
@@ -455,11 +489,12 @@ async function cleanupRuntimeLock() {
   }
 }
 
-function readyMessage(id, selectedSessionId = defaultSelectedSessionId()) {
+function readyMessage(id, selectedSessionId = defaultSelectedSessionId(), clientId = "") {
   const session = visibleSessionById(selectedSessionId) || activeSession(selectedSessionId);
   return {
     type: "ready",
     id,
+    clientId,
     sessionId: session?.id || selectedSessionId,
     sessionTitle: session?.title,
     provider: runtimeState.providerName,
@@ -515,7 +550,9 @@ function startStdioClient() {
 async function startRuntimeServer(address) {
   const server = net.createServer((socket) => {
     clients.add(socket);
-    const clientState = clientRegistry.add(socket, { selectedSessionId: defaultSelectedSessionId() });
+    const handshakeId = String(socket.remotePort || "");
+    const provisionalClientId = handshakeId ? `pending_${handshakeId}` : "";
+    const clientState = clientRegistry.add(socket, { selectedSessionId: defaultSelectedSessionId(), requestedClientId: provisionalClientId });
     const clientId = clientState.clientId;
     cancelIdleShutdown(`client connected ${clientId}`);
     console.error(`[runtime-server] client connected ${clientId}; clients=${clients.size}`);
@@ -534,7 +571,7 @@ async function startRuntimeServer(address) {
     rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
     rl.on("error", () => removeClient("errored"));
     attachLineHandler(rl, socket, clientState);
-    write(readyMessage(undefined, clientState.selectedSessionId), socket);
+    write(readyMessage(undefined, clientState.selectedSessionId, clientState.clientId), socket);
     socket.on("close", () => removeClient("closed"));
     socket.on("error", () => removeClient("errored"));
   });
@@ -606,7 +643,29 @@ function handleImmediateLine(line) {
     return true;
   }
 
+  if (request.type === "client.hello") {
+    handleClientHello(request);
+    return true;
+  }
+
   return false;
+}
+
+function handleClientHello(request) {
+  const requestedClientId = String(request.clientId || "").trim();
+  if (!serverAddress || !currentResponseTarget || !requestedClientId) return;
+  const previousClientId = currentRequestContext?.clientState?.clientId || "";
+  const state = clientRegistry.reidentify(currentResponseTarget, requestedClientId);
+  if (!state) return;
+  if (currentRequestContext?.clientState) currentRequestContext.clientState = state;
+  for (const run of activeRuns.values()) {
+    if (run.clientId === previousClientId || run.clientId === requestedClientId) {
+      run.clientId = requestedClientId;
+      run.target = currentResponseTarget;
+    }
+  }
+  console.error(`[runtime-server] client hello ${requestedClientId}${previousClientId && previousClientId !== requestedClientId ? ` previous=${previousClientId}` : ""}`);
+  write({ type: "client.hello", id: request.id, clientId: requestedClientId }, currentResponseTarget);
 }
 
 async function handleLine(line) {
@@ -640,6 +699,11 @@ async function handleLine(line) {
 
   if (request.type === "chat.cancel") {
     handleCancelRequest(request);
+    return;
+  }
+
+  if (request.type === "client.hello") {
+    handleClientHello(request);
     return;
   }
 
@@ -975,6 +1039,7 @@ async function handleChatRequest(request, responseTarget = null, requestContext 
     controller,
     runtime: runRuntimeState.runtime,
     target: responseTarget,
+    clientId: requestContext?.clientState?.clientId || "",
     cwdBlockEnabled,
     providerName: runRuntimeState.providerName,
     model: runRuntimeState.model,
@@ -983,7 +1048,8 @@ async function handleChatRequest(request, responseTarget = null, requestContext 
   };
   activeRuns.set(runId, runInfo);
   cancelIdleShutdown(`visible run started ${runId}`);
-  write({ type: "run_started", id: request.id, runId, sessionId: runSessionId }, responseTarget);
+  console.error(`[runtime-server] run started runId=${runId} sessionId=${runSessionId} clientId=${runInfo.clientId || ""} target=${targetId(responseTarget)}`);
+  writeRunEvent({ type: "run_started", id: request.id, runId, sessionId: runSessionId }, runInfo);
 
   try {
     const result = await runRuntimeState.runtime.run({
@@ -1009,7 +1075,7 @@ async function handleChatRequest(request, responseTarget = null, requestContext 
     });
 
     if (result.status !== "cancelled" || assistant?.content || generatedImageMessages.length > 0) {
-      write({
+      writeRunEvent({
         type: "assistant",
         id: request.id,
         runId,
@@ -1018,12 +1084,12 @@ async function handleChatRequest(request, responseTarget = null, requestContext 
         content: assistant?.content || fallbackAssistant?.content || (generatedImageMessages.length > 0 ? "Generated image saved." : ""),
         reasoningContent,
         codexUsage,
-      }, responseTarget);
+      }, runInfo);
     }
-    write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: result.status, codexUsage }, responseTarget);
+    writeRunEvent({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: result.status, codexUsage }, runInfo);
   } catch (error) {
     if (controller.signal.aborted || isAbortError(error)) {
-      write({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: "cancelled", codexUsage: await codexUsageForRun(runId) }, responseTarget);
+      writeRunEvent({ type: "run_finished", id: request.id, runId, sessionId: runSessionId, status: "cancelled", codexUsage: await codexUsageForRun(runId) }, runInfo);
     } else {
       write({
         type: "error",

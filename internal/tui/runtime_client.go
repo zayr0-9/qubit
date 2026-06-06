@@ -22,6 +22,7 @@ func startRuntime() (*runtimeClient, error) {
 		launchCwd: client.LaunchCwd(),
 		qubitDir:  client.QubitDir(),
 		logPath:   client.LogPath(),
+		clientID:  client.ClientID(),
 	}, nil
 }
 

@@ -42,6 +42,7 @@ func (m model) renderInputStatus() string {
 	if cwdStatus := m.cwdStatusText(); cwdStatus != "" {
 		parts = append(parts, cwdStatus)
 	}
+	parts = append(parts, m.forkStatusText())
 	if contextStatus := m.contextStatusText(); contextStatus != "" {
 		parts = append(parts, contextStatus)
 	}
@@ -56,6 +57,10 @@ func (m model) cwdStatusText() string {
 		return ""
 	}
 	return cwd
+}
+func (m model) forkStatusText() string {
+	forks := m.sessionForkCount(m.session)
+	return fmt.Sprintf("%d %s", forks, pluralLabel(forks, "fork", "forks"))
 }
 func (m model) statusModeBadges() string {
 	if m.cwdBlockEnabled {
@@ -96,6 +101,8 @@ func (m model) renderFooter() string {
 	} else if m.mode == modeModal {
 		if m.modal != nil && len(m.modal.Options) > 0 {
 			footer = "up/down choose option | left/right choose action | enter confirm | esc cancel"
+		} else if m.modalHasScrollableContent() {
+			footer = "up/down scroll details | pgup/pgdn page | left/right choose action | enter confirm | esc deny/cancel"
 		} else {
 			footer = "left/right choose action | enter confirm | esc deny/cancel"
 		}

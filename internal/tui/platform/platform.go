@@ -58,8 +58,6 @@ type NoopNotifier struct{}
 
 func (NoopNotifier) Notify(NotificationPayload) error { return nil }
 
-func NewNotifier() Notifier { return NoopNotifier{} }
-
 func RunCompleteNotificationBody(sessionTitle string) string {
 	sessionTitle = strings.TrimSpace(sessionTitle)
 	if sessionTitle == "" {

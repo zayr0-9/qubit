@@ -149,6 +149,7 @@ type ForkTreeNode struct {
 type RuntimeEvent struct {
 	Type             string                      `json:"type"`
 	ID               string                      `json:"id,omitempty"`
+	ClientID         string                      `json:"clientId,omitempty"`
 	SessionID        string                      `json:"sessionId,omitempty"`
 	RunID            string                      `json:"runId,omitempty"`
 	SessionTitle     string                      `json:"sessionTitle,omitempty"`
