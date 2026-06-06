@@ -268,3 +268,24 @@ func TestRenderInputStatusShowsCurrentSessionForksBetweenCwdAndContext(t *testin
 		t.Fatalf("status = %q, want cwd, current fork count, then ctx as %q", status, want)
 	}
 }
+
+func TestRenderHeaderShowsRuntimeConnectionStatus(t *testing.T) {
+	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
+	m := initialModel(&runtimeClient{})
+	m.width = 120
+	m.provider = "stub"
+	m.model = "test-model"
+	m.title = "Default chat"
+
+	m.runtimeConnected = true
+	connected := plainText(m.renderHeader())
+	if !strings.Contains(connected, "qubit  connected  Default chat") {
+		t.Fatalf("connected header = %q, want connected status after app title", connected)
+	}
+
+	m.runtimeConnected = false
+	disconnected := plainText(m.renderHeader())
+	if !strings.Contains(disconnected, "qubit  disconnected  Default chat") {
+		t.Fatalf("disconnected header = %q, want disconnected status after app title", disconnected)
+	}
+}

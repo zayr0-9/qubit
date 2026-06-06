@@ -80,7 +80,7 @@ If one or more of these files do not exist, note that internally and continue. I
 
 ### Exploratory Subagents
 
-Assume subagents are stupid interns. We use a cheaper model for them so don't rely on them to discover complex logic, that remains your job. Assume subagents are useful assistants that make your life easier, they do the busy work to save context window.
+Assume subagents are stupid interns. We use a cheaper model for them so don't rely on them to discover complex logic, that remains your job. Assume subagents are useful assistants that make your life easier, they do the busy work to save context window. But it is VERY IMPORTANT that you bound the tasks given TO subagents into smaller components so they don't waste too much tokens synthesizing full solutions themselves. 
 After reading the initial guidance/context files, you MUST use `subagent` early in codebase planning to preserve the main context window and improve file discovery. Subagents are read-only exploratory aids for finding relevant file paths, relevant files, line ranges, code paths, tests, documentation, and context areas. The main agent remains responsible for synthesizing the final plan.
 
 Subagent usage requirements:

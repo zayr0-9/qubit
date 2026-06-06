@@ -20,6 +20,7 @@ func (m model) updateRuntimeError(err error) (model, tea.Cmd) {
 	m.clearFakeStream()
 	m.busy = false
 	m.ready = false
+	m.runtimeConnected = false
 	m.err = err.Error()
 	m.status = "runtime error"
 	detail := err.Error()
@@ -57,6 +58,7 @@ func (m model) updateRuntimeDisconnected(err error) (model, tea.Cmd) {
 	m.clearFakeStream()
 	m.busy = false
 	m.ready = false
+	m.runtimeConnected = false
 	m.activeRunID = ""
 	m.lastRunStartedSession = ""
 	m.err = err.Error()
@@ -69,6 +71,7 @@ func (m model) updateRuntimeReconnect(err error) (model, tea.Cmd) {
 		m.clearFakeStream()
 		m.busy = false
 		m.ready = false
+		m.runtimeConnected = false
 		m.err = err.Error()
 		m.status = "runtime reconnect failed"
 		detail := "Runtime reconnect failed: " + err.Error()
@@ -80,6 +83,7 @@ func (m model) updateRuntimeReconnect(err error) (model, tea.Cmd) {
 		return m, nil
 	}
 	m.err = ""
+	m.runtimeConnected = true
 	m.status = "runtime reconnected"
 	return m, waitRuntimeEvent(m.runtime)
 }

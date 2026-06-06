@@ -17,8 +17,15 @@ func (m model) renderHeader() string {
 	sessionTitle := fallback(m.title, m.currentSessionTitle())
 
 	appName := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("qubit")
+	statusStyle := mutedSt
+	statusText := "disconnected"
+	if m.runtimeConnected {
+		statusStyle = lipgloss.NewStyle().Foreground(green)
+		statusText = "connected"
+	}
+	connectionStatus := statusStyle.Render(statusText)
 	meta := mutedSt.Render(fmt.Sprintf("%s · %s", provider, modelName))
-	headerLeft := appName
+	headerLeft := fmt.Sprintf("%s  %s", appName, connectionStatus)
 	headerRight := oneLine(sessionTitle, max(12, m.width-lipgloss.Width(headerLeft)-lipgloss.Width(meta)-8))
 	headerText := fmt.Sprintf("%s  %s  %s", headerLeft, mutedSt.Render(headerRight), meta)
 	return headerStyle.Width(m.width).Render(headerText)

@@ -32,6 +32,7 @@ type model struct {
 	subagentProviders     []modelInfo
 	busy                  bool
 	ready                 bool
+	runtimeConnected      bool
 	keyboardEnhanced      bool
 	provider              string
 	activeProvider        string

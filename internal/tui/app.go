@@ -32,6 +32,7 @@ func initialModel(rt *runtimeClient) model {
 		markdownRenderers:    make(markdownRendererCache),
 		messages:             []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
 		status:               "starting runtime",
+		runtimeConnected:     rt != nil,
 		permissionMode:       permissionModeAsk,
 		cwdBlockEnabled:      true,
 		theme:                theme,

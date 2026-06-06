@@ -11,6 +11,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	switch ev.Type {
 	case "ready":
 		m.ready = true
+		m.runtimeConnected = true
 		m.provider = ev.Provider
 		m.activeProvider = ev.ActiveProvider
 		if m.activeProvider == "" {
