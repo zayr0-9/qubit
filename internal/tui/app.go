@@ -9,8 +9,12 @@ import (
 func initialModel(rt *runtimeClient) model {
 	composer := newComposer()
 	theme := defaultTheme()
-	if loadedTheme, err := loadThemeConfig(runtimeQubitDir(rt)); err == nil && loadedTheme.Background != "" && loadedTheme.Text != "" {
-		theme = loadedTheme
+	status := "starting runtime"
+	loadResult, themeLoadErr := loadThemeConfigWithResult(runtimeQubitDir(rt))
+	if themeLoadErr == nil && loadResult.Theme.Background != "" && loadResult.Theme.Text != "" {
+		theme = loadResult.Theme
+	} else if themeLoadErr != nil {
+		status = "theme load failed; using default"
 	}
 	inputHistory := []string(nil)
 	if rt != nil {
@@ -31,7 +35,8 @@ func initialModel(rt *runtimeClient) model {
 		renderCache:          make(map[renderCacheKey]string),
 		markdownRenderers:    make(markdownRendererCache),
 		messages:             []chatMessage{{Role: "assistant", Content: "Ready. Try / for commands."}},
-		status:               "starting runtime",
+		status:               status,
+		err:                  themeLoadErrorString(themeLoadErr),
 		runtimeConnected:     rt != nil,
 		permissionMode:       permissionModeAsk,
 		cwdBlockEnabled:      true,

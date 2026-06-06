@@ -170,7 +170,7 @@ func (m model) applyThemePreset(index int) (tea.Model, tea.Cmd) {
 	if index < 0 || index >= len(builtinThemes) {
 		return m, nil
 	}
-	return m.applyThemeConfig(builtinThemes[index]), nil
+	return m.applyThemeConfig(builtinThemes[index]), tea.ClearScreen
 }
 
 func (m model) applyCustomTheme() (tea.Model, tea.Cmd) {
@@ -184,7 +184,7 @@ func (m model) applyCustomTheme() (tea.Model, tea.Cmd) {
 		m.status = "invalid theme color"
 		return m, nil
 	}
-	return m.applyThemeConfig(next), nil
+	return m.applyThemeConfig(next), tea.ClearScreen
 }
 
 func (m model) applyThemeConfig(theme themeConfig) model {

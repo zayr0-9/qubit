@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -64,6 +66,7 @@ func TestThemeSlashCommandOpensThemeEditor(t *testing.T) {
 
 func TestThemePresetSelectionAppliesNeon(t *testing.T) {
 	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
+	defer resetThemeForTest()
 	m := initialModel(nil)
 	beforeSpinner := m.spinner.View()
 	updated, _ := m.openThemeEntry()
@@ -80,8 +83,8 @@ func TestThemePresetSelectionAppliesNeon(t *testing.T) {
 	}
 	m = updated.(model)
 	updated, cmd = m.updateThemeEntry(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd != nil {
-		t.Fatal("enter preset returned command, want nil")
+	if cmd == nil {
+		t.Fatal("enter preset returned nil command, want clear screen command")
 	}
 	got := updated.(model)
 	if got.mode != modeChat || got.themeEntry != nil {
@@ -100,6 +103,7 @@ func TestThemePresetSelectionAppliesNeon(t *testing.T) {
 
 func TestThemeCustomAppliesValidHexAndClearsCache(t *testing.T) {
 	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
+	defer resetThemeForTest()
 	m := initialModel(nil)
 	m.renderCache[renderCacheKey{Role: "assistant", Content: "cached", Width: 80}] = "old"
 	updated, _ := m.openThemeEntry()
@@ -109,8 +113,8 @@ func TestThemeCustomAppliesValidHexAndClearsCache(t *testing.T) {
 	m.themeEntry.Text.SetValue("#ABCDEF")
 
 	updated, cmd := m.updateThemeEntry(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd != nil {
-		t.Fatal("custom apply returned command, want nil")
+	if cmd == nil {
+		t.Fatal("custom apply returned nil command, want clear screen command")
 	}
 	got := updated.(model)
 	if got.theme.ID != "custom" || got.theme.Background != "#0a0b0c" || got.theme.Text != "#abcdef" {
@@ -149,13 +153,14 @@ func TestThemeCustomRejectsInvalidHex(t *testing.T) {
 
 func TestThemeDefaultShortcutRestoresDefault(t *testing.T) {
 	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
+	defer resetThemeForTest()
 	m := initialModel(nil).applyThemeConfig(builtinThemes[2])
 	updated, _ := m.openThemeEntry()
 	m = updated.(model)
 
 	updated, cmd := m.updateThemeEntry(tea.KeyPressMsg{Text: "d", Code: 'd'})
-	if cmd != nil {
-		t.Fatal("default shortcut returned command, want nil")
+	if cmd == nil {
+		t.Fatal("default shortcut returned nil command, want clear screen command")
 	}
 	got := updated.(model)
 	if got.theme.ID != defaultTheme().ID || got.theme.Background != defaultTheme().Background || got.theme.Text != defaultTheme().Text {
@@ -185,6 +190,7 @@ func TestThemeConfigPersistsAndLoadsSelectedPreset(t *testing.T) {
 	rt, _ := newTestRuntime(t)
 	rt.qubitDir = qubitDir
 
+	defer resetThemeForTest()
 	m := initialModel(rt).applyThemeConfig(builtinThemes[2])
 	if m.err != "" {
 		t.Fatalf("applyThemeConfig err = %q", m.err)
@@ -258,6 +264,7 @@ func TestThemeConfigPersistsWithoutRuntime(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("QUBIT_CONFIG_DIR", configDir)
 
+	defer resetThemeForTest()
 	m := initialModel(nil).applyThemeConfig(builtinThemes[1])
 	if m.err != "" {
 		t.Fatalf("applyThemeConfig err = %q", m.err)
@@ -267,4 +274,123 @@ func TestThemeConfigPersistsWithoutRuntime(t *testing.T) {
 	if loaded.theme.ID != "light" || loaded.theme.Background != "#f7f3ea" || loaded.theme.Text != "#24201a" {
 		t.Fatalf("loaded theme = %#v, want persisted light preset", loaded.theme)
 	}
+}
+
+func TestThemeInvalidGlobalConfigSurfacesLoadError(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("QUBIT_CONFIG_DIR", configDir)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "theme.json"), []byte("{bad json\n"), 0600); err != nil {
+		t.Fatalf("write invalid theme config: %v", err)
+	}
+
+	m := initialModel(nil)
+	if m.theme.ID != defaultTheme().ID {
+		t.Fatalf("theme = %#v, want default after invalid config", m.theme)
+	}
+	if !strings.Contains(m.status, "theme load failed") {
+		t.Fatalf("status = %q, want theme load failure", m.status)
+	}
+	if !strings.Contains(m.err, "parse theme config") || !strings.Contains(m.err, filepath.Join(configDir, "theme.json")) {
+		t.Fatalf("err = %q, want parse error with global path", m.err)
+	}
+}
+
+func TestThemeLegacyConfigMigratesToGlobalWhenMissing(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("QUBIT_CONFIG_DIR", configDir)
+	qubitDir := t.TempDir()
+	legacyData := []byte(`{"ID":"dracula"}` + "\n")
+	if err := os.WriteFile(filepath.Join(qubitDir, "theme.json"), legacyData, 0600); err != nil {
+		t.Fatalf("write legacy theme config: %v", err)
+	}
+
+	loaded, err := loadThemeConfigWithResult(qubitDir)
+	if err != nil {
+		t.Fatalf("loadThemeConfigWithResult error = %v", err)
+	}
+	if !loaded.FromLegacy || loaded.Theme.ID != "dracula" {
+		t.Fatalf("loaded = %#v, want migrated dracula from legacy", loaded)
+	}
+	globalPath := filepath.Join(configDir, "theme.json")
+	globalData, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatalf("read migrated global theme config: %v", err)
+	}
+	if !strings.Contains(string(globalData), `"ID": "dracula"`) {
+		t.Fatalf("global theme config = %s, want dracula preset", globalData)
+	}
+}
+
+func TestThemeGlobalConfigWinsOverDifferentLegacyConfig(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("QUBIT_CONFIG_DIR", configDir)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "theme.json"), []byte(`{"ID":"light"}`+"\n"), 0600); err != nil {
+		t.Fatalf("write global theme config: %v", err)
+	}
+	qubitDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(qubitDir, "theme.json"), []byte(`{"ID":"neon"}`+"\n"), 0600); err != nil {
+		t.Fatalf("write legacy theme config: %v", err)
+	}
+
+	loaded, err := loadThemeConfigWithResult(qubitDir)
+	if err != nil {
+		t.Fatalf("loadThemeConfigWithResult error = %v", err)
+	}
+	if loaded.FromLegacy {
+		t.Fatalf("loaded.FromLegacy = true, want global config to win")
+	}
+	if loaded.Theme.ID != "light" {
+		t.Fatalf("loaded theme = %#v, want global light", loaded.Theme)
+	}
+}
+
+func TestThemePresetApplyReturnsClearScreenCommand(t *testing.T) {
+	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
+	defer resetThemeForTest()
+	m := initialModel(nil)
+	updated, cmd := m.applyThemePreset(1)
+	if cmd == nil {
+		t.Fatal("applyThemePreset cmd = nil, want clear screen command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("applyThemePreset command returned nil, want clear screen message")
+	}
+	if got := updated.(model).theme.ID; got != "light" {
+		t.Fatalf("theme ID = %q, want light", got)
+	}
+}
+
+func TestThemeChromaColorsFollowCurrentTheme(t *testing.T) {
+	applyTheme(builtinThemes[1])
+	defer applyTheme(defaultTheme())
+	style := noBackgroundMarkdownStyle()
+	if style.CodeBlock.Chroma == nil {
+		t.Fatal("style.CodeBlock.Chroma = nil")
+	}
+	if got := style.CodeBlock.Chroma.Keyword.Color; got == nil || *got != builtinThemes[1].Accent {
+		t.Fatalf("keyword color = %v, want light accent %q", got, builtinThemes[1].Accent)
+	}
+	if got := style.CodeBlock.Chroma.LiteralString.Color; got == nil || *got != builtinThemes[1].Green {
+		t.Fatalf("string color = %v, want light green %q", got, builtinThemes[1].Green)
+	}
+	if got := style.CodeBlock.Chroma.Comment.Color; got == nil || *got != builtinThemes[1].Muted {
+		t.Fatalf("comment color = %v, want light muted %q", got, builtinThemes[1].Muted)
+	}
+	if style.CodeBlock.Chroma.Keyword.BackgroundColor != nil || style.CodeBlock.Chroma.Background.BackgroundColor != nil {
+		t.Fatalf("chroma backgrounds were not cleared: keyword=%v background=%v", style.CodeBlock.Chroma.Keyword.BackgroundColor, style.CodeBlock.Chroma.Background.BackgroundColor)
+	}
+}
+
+func resetThemeForTest() {
+	if path, err := themeConfigPath(); err == nil {
+		_ = os.Remove(path)
+	}
+	applyTheme(defaultTheme())
 }

@@ -19,36 +19,63 @@ func legacyThemeConfigPath(qubitDir string) string {
 	return filepath.Join(qubitDir, "theme.json")
 }
 
+type themeLoadResult struct {
+	Theme      themeConfig
+	Path       string
+	LegacyPath string
+	FromLegacy bool
+}
+
 func loadThemeConfig(qubitDir string) (themeConfig, error) {
+	loaded, err := loadThemeConfigWithResult(qubitDir)
+	return loaded.Theme, err
+}
+
+func loadThemeConfigWithResult(qubitDir string) (themeLoadResult, error) {
 	path, err := themeConfigPath()
 	if err != nil {
-		return themeConfig{}, err
+		return themeLoadResult{}, err
 	}
+	result := themeLoadResult{Path: path}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return themeConfig{}, fmt.Errorf("read theme config: %w", err)
+			return result, fmt.Errorf("read theme config %s: %w", path, err)
 		}
 		if qubitDir == "" {
-			return themeConfig{}, nil
+			return result, nil
 		}
-		data, err = os.ReadFile(legacyThemeConfigPath(qubitDir))
+		legacyPath := legacyThemeConfigPath(qubitDir)
+		result.LegacyPath = legacyPath
+		data, err = os.ReadFile(legacyPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return themeConfig{}, nil
+				return result, nil
 			}
-			return themeConfig{}, fmt.Errorf("read legacy theme config: %w", err)
+			return result, fmt.Errorf("read legacy theme config %s: %w", legacyPath, err)
 		}
+		result.FromLegacy = true
 	}
 	var theme themeConfig
 	if err := json.Unmarshal(data, &theme); err != nil {
-		return themeConfig{}, fmt.Errorf("parse theme config: %w", err)
+		return result, fmt.Errorf("parse theme config %s: %w", result.SourcePath(), err)
 	}
 	resolved := resolveThemeConfig(theme)
-	if resolved.Background != "" && resolved.Text != "" && !fileExists(path) {
+	if resolved.Background == "" || resolved.Text == "" {
+		return result, fmt.Errorf("theme config %s did not resolve to a valid theme", result.SourcePath())
+	}
+	result.Theme = resolved
+	if result.FromLegacy && !fileExists(path) {
 		_ = saveThemeConfig(qubitDir, resolved)
 	}
-	return resolved, nil
+	return result, nil
+}
+
+func (r themeLoadResult) SourcePath() string {
+	if r.FromLegacy && r.LegacyPath != "" {
+		return r.LegacyPath
+	}
+	return r.Path
 }
 
 func saveThemeConfig(_ string, theme themeConfig) error {
@@ -104,4 +131,11 @@ func (m *model) saveThemeConfig() {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func themeLoadErrorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

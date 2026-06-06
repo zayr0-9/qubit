@@ -111,11 +111,73 @@ func noBackgroundMarkdownStyle() ansi.StyleConfig {
 	style.CodeBlock.Color = stringPtr(colorToHex(text))
 	style.CodeBlock.Margin = uintPtr(0)
 	if style.CodeBlock.Chroma != nil {
-		style.CodeBlock.Chroma.Text.Color = stringPtr(colorToHex(text))
-		style.CodeBlock.Chroma.Error.BackgroundColor = nil
-		style.CodeBlock.Chroma.Background.BackgroundColor = nil
+		applyThemeChromaColors(style.CodeBlock.Chroma)
 	}
 	return style
+}
+func applyThemeChromaColors(chroma *ansi.Chroma) {
+	if chroma == nil {
+		return
+	}
+	textHex := colorToHex(text)
+	mutedHex := colorToHex(muted)
+	accentHex := colorToHex(accent)
+	cyanHex := colorToHex(cyan)
+	redHex := colorToHex(red)
+	greenHex := colorToHex(green)
+	reasoningHex := colorToHex(reasoning)
+
+	setPrimitiveColor(&chroma.Text, textHex)
+	setPrimitiveColor(&chroma.Error, redHex)
+	setPrimitiveColor(&chroma.Comment, mutedHex)
+	setPrimitiveColor(&chroma.CommentPreproc, mutedHex)
+	setPrimitiveColor(&chroma.Keyword, accentHex)
+	setPrimitiveColor(&chroma.KeywordReserved, accentHex)
+	setPrimitiveColor(&chroma.KeywordNamespace, accentHex)
+	setPrimitiveColor(&chroma.KeywordType, cyanHex)
+	setPrimitiveColor(&chroma.Operator, accentHex)
+	setPrimitiveColor(&chroma.Punctuation, mutedHex)
+	setPrimitiveColor(&chroma.Name, textHex)
+	setPrimitiveColor(&chroma.NameBuiltin, cyanHex)
+	setPrimitiveColor(&chroma.NameTag, cyanHex)
+	setPrimitiveColor(&chroma.NameAttribute, accentHex)
+	setPrimitiveColor(&chroma.NameClass, cyanHex)
+	setPrimitiveColor(&chroma.NameConstant, reasoningHex)
+	setPrimitiveColor(&chroma.NameDecorator, reasoningHex)
+	setPrimitiveColor(&chroma.NameException, redHex)
+	setPrimitiveColor(&chroma.NameFunction, greenHex)
+	setPrimitiveColor(&chroma.NameOther, textHex)
+	setPrimitiveColor(&chroma.Literal, reasoningHex)
+	setPrimitiveColor(&chroma.LiteralNumber, reasoningHex)
+	setPrimitiveColor(&chroma.LiteralDate, reasoningHex)
+	setPrimitiveColor(&chroma.LiteralString, greenHex)
+	setPrimitiveColor(&chroma.LiteralStringEscape, cyanHex)
+	setPrimitiveColor(&chroma.GenericDeleted, redHex)
+	setPrimitiveColor(&chroma.GenericEmph, textHex)
+	setPrimitiveColor(&chroma.GenericInserted, greenHex)
+	setPrimitiveColor(&chroma.GenericStrong, textHex)
+	setPrimitiveColor(&chroma.GenericSubheading, accentHex)
+	setPrimitiveColor(&chroma.Background, textHex)
+	clearPrimitiveBackgrounds(chroma)
+}
+func setPrimitiveColor(primitive *ansi.StylePrimitive, value string) {
+	primitive.Color = stringPtr(value)
+}
+func clearPrimitiveBackgrounds(chroma *ansi.Chroma) {
+	primitives := []*ansi.StylePrimitive{
+		&chroma.Text, &chroma.Error, &chroma.Comment, &chroma.CommentPreproc,
+		&chroma.Keyword, &chroma.KeywordReserved, &chroma.KeywordNamespace, &chroma.KeywordType,
+		&chroma.Operator, &chroma.Punctuation, &chroma.Name, &chroma.NameBuiltin,
+		&chroma.NameTag, &chroma.NameAttribute, &chroma.NameClass, &chroma.NameConstant,
+		&chroma.NameDecorator, &chroma.NameException, &chroma.NameFunction, &chroma.NameOther,
+		&chroma.Literal, &chroma.LiteralNumber, &chroma.LiteralDate, &chroma.LiteralString,
+		&chroma.LiteralStringEscape, &chroma.GenericDeleted, &chroma.GenericEmph,
+		&chroma.GenericInserted, &chroma.GenericStrong, &chroma.GenericSubheading,
+		&chroma.Background,
+	}
+	for _, primitive := range primitives {
+		primitive.BackgroundColor = nil
+	}
 }
 func stripBackgroundANSI(s string) string {
 	var b strings.Builder
