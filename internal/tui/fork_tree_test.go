@@ -331,9 +331,8 @@ func TestRenderForkTreeNodeIncludesAssistantText(t *testing.T) {
 }
 
 func TestRenderForkTreeModalColorsSelectedNode(t *testing.T) {
-	applyTheme(defaultTheme())
+	m := initialModel(nil).applyThemeConfig(defaultTheme())
 	defer applyTheme(defaultTheme())
-	m := initialModel(nil)
 	m.width = 100
 	m.height = 30
 	m.mode = modeForkTree
@@ -776,6 +775,83 @@ func TestForkTreePreviewUsesFullTranscriptIncludingToolCalls(t *testing.T) {
 		if !strings.Contains(preview, want) {
 			t.Fatalf("preview = %q, want %q", preview, want)
 		}
+	}
+}
+
+func TestForkTreeRenderDoesNotRebuildPreviewAfterWheelScroll(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 120
+	m.height = 30
+	m.session = "sess_root"
+	m.mode = modeForkTree
+	m.forkTree = newForkTreeState()
+	m.applyForkTree(runtimeEvent{Type: "session.tree", SessionID: "sess_root", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_root", SessionID: "sess_root", SessionTitle: "Root", MessageCount: 40, TranscriptMessages: []chatMessage{
+			{Role: "user", Content: strings.Repeat("line 01 ", 4)},
+			{Role: "assistant", Content: strings.Repeat("line 02 ", 4)},
+			{Role: "user", Content: strings.Repeat("line 03 ", 4)},
+			{Role: "assistant", Content: strings.Repeat("line 04 ", 4)},
+			{Role: "user", Content: strings.Repeat("line 05 ", 4)},
+			{Role: "assistant", Content: strings.Repeat("line 06 ", 4)},
+			{Role: "user", Content: strings.Repeat("line 07 ", 4)},
+			{Role: "assistant", Content: strings.Repeat("line 08 ", 4)},
+			{Role: "user", Content: strings.Repeat("line 09 ", 4)},
+			{Role: "assistant", Content: strings.Repeat("line 10 ", 4)},
+		}},
+	}})
+
+	m.configureForkTreePreview(10)
+	m.updateForkTreePreview(false)
+	m.renderForkTreeModal(10)
+	contentNodeID := m.forkTree.PreviewContentNodeID
+	contentWidth := m.forkTree.PreviewContentWidth
+	if contentNodeID == "" || contentWidth == 0 {
+		t.Fatalf("preview cache not initialized: node=%q width=%d", contentNodeID, contentWidth)
+	}
+
+	m.forkTree.Preview.ScrollDown(3)
+	if got := m.forkTree.Preview.YOffset(); got <= 0 {
+		t.Fatalf("preview YOffset after scroll = %d, want scrolled", got)
+	}
+	scrolledOffset := m.forkTree.Preview.YOffset()
+
+	m.renderForkTreeModal(10)
+	if got := m.forkTree.Preview.YOffset(); got != scrolledOffset {
+		t.Fatalf("preview YOffset after render = %d, want preserved %d", got, scrolledOffset)
+	}
+	if m.forkTree.PreviewContentNodeID != contentNodeID || m.forkTree.PreviewContentWidth != contentWidth {
+		t.Fatalf("preview cache changed after scroll render: node %q/%q width %d/%d", m.forkTree.PreviewContentNodeID, contentNodeID, m.forkTree.PreviewContentWidth, contentWidth)
+	}
+}
+
+func TestForkTreeRenderInvalidatesPreviewWhenWidthChanges(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 120
+	m.height = 30
+	m.session = "sess_root"
+	m.mode = modeForkTree
+	m.forkTree = newForkTreeState()
+	m.applyForkTree(runtimeEvent{Type: "session.tree", SessionID: "sess_root", ForkTreeNodes: []forkTreeNode{
+		{ID: "sess_root", SessionID: "sess_root", SessionTitle: "Root", MessageCount: 1, LineageMessages: []forkTreeLineageMessage{{Role: "user", Content: strings.Repeat("wide content ", 12)}}},
+	}})
+
+	m.configureForkTreePreview(12)
+	m.updateForkTreePreview(false)
+	m.renderForkTreeModal(12)
+	firstWidth := m.forkTree.PreviewContentWidth
+	if firstWidth == 0 {
+		t.Fatal("preview cache width not initialized")
+	}
+
+	m.width = 60
+	m.configureForkTreePreview(12)
+	m.updateForkTreePreview(false)
+	m.renderForkTreeModal(12)
+	if got := m.forkTree.PreviewContentWidth; got == 0 || got == firstWidth {
+		t.Fatalf("preview cache width = %d, want changed from %d after resize", got, firstWidth)
+	}
+	if !strings.Contains(plainText(m.forkTree.Preview.View()), "wide content") {
+		t.Fatalf("preview after resize = %q, want content still rendered", plainText(m.forkTree.Preview.View()))
 	}
 }
 

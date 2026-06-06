@@ -32,11 +32,14 @@ func (m *model) applyForkTree(ev runtimeEvent) {
 	state.Preview = viewport.New()
 	state.PreviewWidth = 0
 	state.PreviewHeight = 0
+	state.PreviewContentNodeID = ""
+	state.PreviewContentWidth = 0
 	state.buildForkTreeLayout(focalSessionID)
 	m.forkTree = state
 	m.busy = false
 	m.status = "fork tree"
 	m.err = ""
+	m.configureForkTreePreview(m.currentForkTreeBodyHeight())
 	m.updateForkTreePreview(false)
 }
 
@@ -399,24 +402,42 @@ func (m *model) updateForkTreePreview(focusSelectedMessage bool) {
 	if m.forkTree.Preview.Height() <= 0 {
 		m.forkTree.Preview.SetHeight(max(1, m.forkTree.PreviewHeight))
 	}
+	width := max(20, m.forkTree.PreviewWidth)
 	if !m.forkTree.hasSelectedNode() {
-		m.forkTree.Preview.SetContent(mutedSt.Render("No fork tree nodes yet."))
+		if m.forkTree.PreviewContentNodeID != "__empty__" || m.forkTree.PreviewContentWidth != width {
+			m.forkTree.Preview.SetContent(mutedSt.Render("No fork tree nodes yet."))
+			m.forkTree.PreviewContentNodeID = "__empty__"
+			m.forkTree.PreviewContentWidth = width
+		}
 		return
 	}
 	node := m.forkTree.Nodes[m.forkTree.Selected]
-	width := max(20, m.forkTree.PreviewWidth)
-	header := lipgloss.NewStyle().Foreground(accent).Bold(true).Render(fallback(node.SessionTitle, "Untitled chat"))
-	metaParts := []string{fmt.Sprintf("%d msgs", node.MessageCount)}
-	if showForkTreeDevDetails() {
-		metaParts = append(metaParts, short(node.SessionID, 14))
-		if node.ParentSessionID != "" {
-			metaParts = append(metaParts, "fork of "+short(node.ParentSessionID, 14))
-		}
+	contentNodeID := node.ID
+	if contentNodeID == "" {
+		contentNodeID = node.SessionID
 	}
-	meta := mutedSt.Render(strings.Join(metaParts, " · "))
-	content, selectedMessageOffset := m.renderForkTreeLineagePreviewWithOffset(node, width)
-	m.forkTree.Preview.SetContent(header + "\n" + meta + "\n\n" + content)
+	needsContent := m.forkTree.PreviewContentNodeID != contentNodeID || m.forkTree.PreviewContentWidth != width
+	if needsContent {
+		header := lipgloss.NewStyle().Foreground(accent).Bold(true).Render(fallback(node.SessionTitle, "Untitled chat"))
+		metaParts := []string{fmt.Sprintf("%d msgs", node.MessageCount)}
+		if showForkTreeDevDetails() {
+			metaParts = append(metaParts, short(node.SessionID, 14))
+			if node.ParentSessionID != "" {
+				metaParts = append(metaParts, "fork of "+short(node.ParentSessionID, 14))
+			}
+		}
+		meta := mutedSt.Render(strings.Join(metaParts, " · "))
+		content, selectedMessageOffset := m.renderForkTreeLineagePreviewWithOffset(node, width)
+		m.forkTree.Preview.SetContent(header + "\n" + meta + "\n\n" + content)
+		m.forkTree.PreviewContentNodeID = contentNodeID
+		m.forkTree.PreviewContentWidth = width
+		if focusSelectedMessage {
+			m.forkTree.Preview.SetYOffset(selectedMessageOffset + 3)
+		}
+		return
+	}
 	if focusSelectedMessage {
+		_, selectedMessageOffset := m.renderForkTreeLineagePreviewWithOffset(node, width)
 		m.forkTree.Preview.SetYOffset(selectedMessageOffset + 3)
 	}
 }
@@ -588,6 +609,46 @@ func normalizedForkTreeRole(role string) string {
 	}
 }
 
+func (m model) forkTreePreviewWidth() int {
+	previewWidth := clampInt(m.width/3, 24, max(24, m.width-36))
+	if m.width < 90 {
+		previewWidth = min(max(20, m.width/2-2), max(20, m.width-24))
+	}
+	return previewWidth
+}
+
+func (m model) currentForkTreeBodyHeight() int {
+	if m.height <= 0 {
+		return 0
+	}
+	input := m.renderInput()
+	status := m.renderInputStatus()
+	footer := m.renderFooter()
+	header := m.renderHeader()
+	preOverlayBottomHeight := 1 + lipgloss.Height(input) + lipgloss.Height(status) + lipgloss.Height(footer)
+	bottomOverlay := m.renderBottomOverlay(max(0, min(maxBottomOverlayRows(m), m.height-preOverlayBottomHeight-4)))
+	bottomHeight := preOverlayBottomHeight + lipgloss.Height(bottomOverlay)
+	mainHeight := max(1, m.height-bottomHeight)
+	return max(1, mainHeight-lipgloss.Height(header))
+}
+
+func (m *model) configureForkTreePreview(height int) {
+	if height <= 0 || len(m.forkTree.Nodes) == 0 {
+		return
+	}
+	previewWidth := m.forkTreePreviewWidth()
+	paneHeight := max(1, height-2)
+	newPreviewWidth := max(20, previewWidth-2)
+	if m.forkTree.PreviewWidth != newPreviewWidth {
+		m.forkTree.PreviewContentNodeID = ""
+		m.forkTree.PreviewContentWidth = 0
+	}
+	m.forkTree.PreviewWidth = newPreviewWidth
+	m.forkTree.PreviewHeight = paneHeight
+	m.forkTree.Preview.SetWidth(m.forkTree.PreviewWidth)
+	m.forkTree.Preview.SetHeight(paneHeight)
+}
+
 func (m model) renderForkTreeModal(height int) string {
 	if height <= 0 {
 		return ""
@@ -599,17 +660,9 @@ func (m model) renderForkTreeModal(height int) string {
 		return mutedSt.Render("no sessions yet")
 	}
 
-	previewWidth := clampInt(m.width/3, 24, max(24, m.width-36))
-	if m.width < 90 {
-		previewWidth = min(max(20, m.width/2-2), max(20, m.width-24))
-	}
+	previewWidth := m.forkTreePreviewWidth()
 	treeWidth := max(20, m.width-previewWidth-4)
 	paneHeight := max(1, height-2)
-	m.forkTree.PreviewWidth = max(20, previewWidth-2)
-	m.forkTree.PreviewHeight = paneHeight
-	m.forkTree.Preview.SetWidth(m.forkTree.PreviewWidth)
-	m.forkTree.Preview.SetHeight(paneHeight)
-	m.updateForkTreePreview(false)
 
 	previewTitle := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("chat lineage")
 	preview := previewTitle + "\n" + m.forkTree.Preview.View()
