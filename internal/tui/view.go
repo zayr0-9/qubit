@@ -7,7 +7,7 @@ import (
 
 func (m model) View() tea.View {
 	if m.width == 0 || m.height == 0 {
-		return newAppView("loading...")
+		return newAppView("loading...", m.terminalWindowTitle())
 	}
 
 	queuedStatus := m.renderQueuedStatus()
@@ -30,14 +30,15 @@ func (m model) View() tea.View {
 		),
 	)
 
-	return newAppView(content)
+	return newAppView(content, m.terminalWindowTitle())
 }
 
-func newAppView(content string) tea.View {
+func newAppView(content, windowTitle string) tea.View {
 	view := tea.NewView(content)
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeCellMotion
 	view.KeyboardEnhancements.ReportEventTypes = true
+	view.WindowTitle = windowTitle
 	return view
 }
 
