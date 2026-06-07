@@ -25,6 +25,7 @@
     "@ai-sdk/amazon-bedrock": "^4.0.92",
     "@ai-sdk/openai": "^3.0.53",
     "@hyper-labs/hyper-router": "file:hyper-labs-hyper-router-0.1.10.tgz",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@openrouter/agent": "^0.3.2",
     "ai": "^6.0.168",
     "better-sqlite3": "^12.10.0",

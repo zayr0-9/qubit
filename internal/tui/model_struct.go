@@ -31,6 +31,8 @@ type model struct {
 	models                []modelInfo
 	subagentModels        []modelInfo
 	subagentProviders     []modelInfo
+	mcpServers            []mcpServerInfo
+	mcpCatalog            []mcpCatalogEntry
 	busy                  bool
 	ready                 bool
 	runtimeConnected      bool
@@ -72,12 +74,16 @@ type model struct {
 	sessionSearchMode          bool
 	sessionSearchQuery         string
 	apiKeyCursor               int
+	mcpCursor                  int
+	mcpCatalogCursor           int
 	slashCursor                int
 	fileMention                fileMentionState
 	modal                      *modalState
 	planClarification          planClarificationState
 	keyEntry                   *keyEntryState
 	themeEntry                 *themeEntryState
+	mcpAddEntry                *mcpAddEntryState
+	mcpSecretEntry             *mcpSecretEntryState
 	forkTree                   forkTreeState
 	mdEditor                   mdEditorState
 	autoScroll                 bool

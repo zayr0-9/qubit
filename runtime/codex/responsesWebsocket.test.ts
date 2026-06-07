@@ -7,6 +7,10 @@ import type { CodexWebSocketLike } from "./types.js";
 class FakeSocket extends EventEmitter implements CodexWebSocketLike {
   sent: string[] = [];
   closed = false;
+  closeCount = 0;
+  terminated = false;
+  terminateCount = 0;
+  readyState: number | undefined;
 
   send(data: string, callback?: (error?: Error) => void): void {
     this.sent.push(data);
@@ -15,6 +19,14 @@ class FakeSocket extends EventEmitter implements CodexWebSocketLike {
 
   close(): void {
     this.closed = true;
+    this.closeCount += 1;
+    this.readyState = 2;
+  }
+
+  terminate(): void {
+    this.terminated = true;
+    this.terminateCount += 1;
+    this.readyState = 3;
   }
 }
 
@@ -49,7 +61,11 @@ describe("Codex responses websocket helpers", () => {
       body: { model: "gpt", input: [], stream: true },
       webSocketFactory: () => {
         socket = new FakeSocket();
-        queueMicrotask(() => socket?.emit("open"));
+        socket.readyState = 0;
+        queueMicrotask(() => {
+          if (socket) socket.readyState = 1;
+          socket?.emit("open");
+        });
         return socket;
       },
       idleTimeoutMs: 1_000,
@@ -77,7 +93,11 @@ describe("Codex responses websocket helpers", () => {
       body: { model: "gpt", input: [], stream: true },
       webSocketFactory: () => {
         socket = new FakeSocket();
-        queueMicrotask(() => socket?.emit("open"));
+        socket.readyState = 0;
+        queueMicrotask(() => {
+          if (socket) socket.readyState = 1;
+          socket?.emit("open");
+        });
         return socket;
       },
       idleTimeoutMs: 1_000,
@@ -105,7 +125,11 @@ describe("Codex websocket listener cleanup", () => {
       body: { model: "gpt", input: [], stream: true },
       webSocketFactory: () => {
         socket = new FakeSocket();
-        queueMicrotask(() => socket?.emit("open"));
+        socket.readyState = 0;
+        queueMicrotask(() => {
+          if (socket) socket.readyState = 1;
+          socket?.emit("open");
+        });
         return socket;
       },
       idleTimeoutMs: 1_000,
@@ -138,5 +162,60 @@ describe("Codex websocket listener cleanup", () => {
     assert.equal(socket?.listenerCount("error"), 0);
     assert.equal(socket?.listenerCount("close"), 0);
     assert.equal(socket?.closed, true);
+  });
+});
+
+describe("Codex websocket connect failures", () => {
+  it("rejects retryably when the socket closes before open", async () => {
+    let socket: FakeSocket | undefined;
+    const parsedPromise = parseCodexWebSocketResponse({
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: new Headers({ authorization: "Bearer token" }),
+      body: { model: "gpt", input: [], stream: true },
+      webSocketFactory: () => {
+        socket = new FakeSocket();
+        socket.readyState = 0;
+        queueMicrotask(() => {
+          socket!.readyState = 3;
+          socket?.emit("close", 1006, Buffer.from("handshake rejected"));
+        });
+        return socket;
+      },
+      connectTimeoutMs: 1_000,
+      idleTimeoutMs: 1_000,
+    });
+
+    await assert.rejects(parsedPromise, (error: any) => {
+      assert.equal(error.retryable, true);
+      assert.match(error.message, /closed before connection was established/);
+      assert.match(error.message, /handshake rejected/);
+      return true;
+    });
+    assert.equal(socket?.terminateCount, 0);
+    assert.equal(socket?.closeCount, 0);
+  });
+
+  it("terminates instead of closing sockets that time out while connecting", async () => {
+    let socket: FakeSocket | undefined;
+    const parsedPromise = parseCodexWebSocketResponse({
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: new Headers({ authorization: "Bearer token" }),
+      body: { model: "gpt", input: [], stream: true },
+      webSocketFactory: () => {
+        socket = new FakeSocket();
+        socket.readyState = 0;
+        return socket;
+      },
+      connectTimeoutMs: 1,
+      idleTimeoutMs: 1_000,
+    });
+
+    await assert.rejects(parsedPromise, (error: any) => {
+      assert.equal(error.retryable, true);
+      assert.match(error.message, /connect timeout/);
+      return true;
+    });
+    assert.equal(socket?.terminateCount, 1);
+    assert.equal(socket?.closeCount, 0);
   });
 });

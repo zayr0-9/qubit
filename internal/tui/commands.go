@@ -21,6 +21,7 @@ var slashCommands = []slashCommand{
 	{Name: "models", Usage: "/models", Description: "Choose the active model", NeedsArg: false, OpensOnSelect: true},
 	{Name: "providers", Usage: "/providers", Description: "Choose the active provider", NeedsArg: false, OpensOnSelect: true},
 	{Name: "subagents", Usage: "/subagents", Description: "Choose the default subagent model", NeedsArg: false, OpensOnSelect: true},
+	{Name: "mcp", Usage: "/mcp", Description: "Manage Model Context Protocol servers", NeedsArg: false, OpensOnSelect: true},
 	{Name: "codex-login", Usage: "/codex-login", Description: "Sign in to ChatGPT Codex", NeedsArg: false},
 	{Name: "codex-status", Usage: "/codex-status", Description: "Show ChatGPT Codex sign-in status", NeedsArg: false},
 	{Name: "codex-logout", Usage: "/codex-logout", Description: "Sign out of ChatGPT Codex", NeedsArg: false},
@@ -325,6 +326,8 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.busy = true
 		m.status = "loading subagent models"
 		return m, sendRuntime(m.runtime, map[string]any{"type": "subagent.config"})
+	case "mcp", "mcps":
+		return m.openMcpManager()
 	case "codex-login", "codexlogin":
 		m.status = "starting Codex login"
 		m.appendSystemDirect("Starting ChatGPT Codex sign-in...")
@@ -651,7 +654,7 @@ func (m model) showSlashPalette() bool {
 
 func slashCommandRunsDuringActiveRun(cmd string) bool {
 	switch strings.ToLower(strings.TrimSpace(cmd)) {
-	case "help", "h", "permission", "permissions", "perm", "cwd-remove-block", "cwd-enable-block", "cwd-unblock", "cwd-block", "cwd-open", "cwd-close", "theme", "themes", "colors", "color", "permission-test", "modal-test", "md-editor", "md", "docs", "subagents", "subagent":
+	case "help", "h", "permission", "permissions", "perm", "cwd-remove-block", "cwd-enable-block", "cwd-unblock", "cwd-block", "cwd-open", "cwd-close", "theme", "themes", "colors", "color", "permission-test", "modal-test", "md-editor", "md", "docs", "subagents", "subagent", "mcp", "mcps":
 		return true
 	default:
 		return false

@@ -8,6 +8,8 @@ Update this file whenever tool-related changes affect durable standards, archite
 
 ## Current Tool Surface
 
+Qubit currently registers migrated tools from `tools/index.ts`. Runtime MCP support can additionally generate dynamic wrapper tools named `mcp__<serverId>__<toolName>` from enabled MCP servers; read `agent_mcp.md` before changing that area.
+
 Qubit currently registers migrated tools from `tools/index.ts`:
 
 ```txt
@@ -356,6 +358,8 @@ tool.call.finish
 ```
 
 Runtime summary helpers must keep these events user-relevant and bounded. Do not send unbounded file contents, stdout/stderr, edit replacements, or raw tool payloads over stdout. Summaries should include paths, commands, counts, success/error messages, and capped previews with obvious secrets redacted.
+
+MCP wrapper tools use names shaped as `mcp__<serverId>__<toolName>`. Runtime summaries must include bounded/redacted server/tool metadata and never expose bearer/OAuth tokens. The Go UI labels these as MCP calls while reusing normal tool rows.
 
 The Go UI groups tool calls by `(step, toolName)` and renders them as expandable tool rows in the chat transcript. Collapsed rows show compact summaries such as `Read 2 files`, `Searched 3 times · 12 matches`, or `Ran 2 subagents`; clicking a row expands per-call details. When expanding a `multiCall` row, the details should list each nested tool invocation as its own row using the summarized nested args/results, not just the outer multiCall wrapper payload. When expanding a `subagent` row, details show per-task status and bounded response/error previews while hiding hidden session/run IDs unless developer details are enabled. `session.messages` reconstructs persisted tool groups from Hyper Router assistant `toolCalls` plus matching `role: "tool"` messages so session reloads preserve tool-call UI rows instead of dropping tool activity.
 

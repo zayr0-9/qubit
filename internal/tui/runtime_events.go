@@ -122,6 +122,13 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 	case "subagent.config":
 		m.applySubagentConfig(ev)
 		m = m.openSubagentModelSelectorModal(ev.Models)
+	case "mcp.catalog", "mcp.list", "mcp.updated", "mcp.test.started", "mcp.test.finished", "mcp.auth.completed", "mcp.auth.error":
+		m.applyMcpEvent(ev)
+	case "mcp.auth.started":
+		m.applyMcpAuthStarted(ev)
+		if ev.AuthURL != "" {
+			return m, tea.Batch(waitRuntimeEvent(m.runtime), openBrowserCmd(ev.AuthURL))
+		}
 	case "reasoning.updated":
 		m.applyReasoningUpdated(ev)
 	case "key.updated":

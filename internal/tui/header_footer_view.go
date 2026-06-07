@@ -134,6 +134,12 @@ func (m model) renderFooter() string {
 		}
 	} else if m.mode == modeKeyEntry {
 		footer = "enter next/save | ctrl+v paste | esc cancel | secret input is masked"
+	} else if m.mode == modeMcpAddEntry {
+		footer = "enter next/save | left/right field | ctrl+v paste | esc cancel"
+	} else if m.mode == modeMcpSecretEntry {
+		footer = "enter save | ctrl+v paste | esc cancel | secret input is masked"
+	} else if m.mode == modeMcpManager {
+		footer = "up/down choose MCP | a add | t test | o OAuth | b bearer | e toggle | d delete | esc close"
 	} else if m.mode == modeThemeEntry {
 		footer = "up/down preset | enter apply/next | tab field | d default | esc cancel"
 	} else if m.mode == modeKeyPicker {

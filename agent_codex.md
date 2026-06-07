@@ -130,7 +130,7 @@ response.failed
 response.incomplete
 ```
 
-Reasoning capture must handle both streaming deltas and completed output items. Codex may return reasoning as `response.reasoning_text.delta` / `response.reasoning_summary_text.delta`, or later as `item.type === "reasoning"` inside `response.output_item.done` / `response.completed` output arrays with `summary` or `content` text parts. Preserve extracted text on `message.reasoningContent` so the Go TUI can surface a separate reasoning block.
+Reasoning capture must handle both streaming deltas and completed output items. Codex may return reasoning as `response.reasoning_text.delta` / `response.reasoning_summary_text.delta`, or later as `item.type === "reasoning"` inside `response.output_item.done` / `response.completed` output arrays with `summary` or `content` text parts. Preserve extracted text on `message.reasoningContent` so the Go TUI can surface a separate reasoning block. Hidden subagent Codex runs must suppress live `reasoning.delta` events so delegated reasoning stays hidden and the runtime server does not log dropped untargeted messages.
 
 Codex provider calls are logged as sanitized JSON lines to:
 

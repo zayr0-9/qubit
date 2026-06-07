@@ -98,6 +98,10 @@ async function connectCodexWebSocket(options: CodexWebSocketRequestOptions): Pro
     const onAbort = () => finish(abortError());
     const onOpen = () => finish();
     const onError = (error: Error) => finish(createRetryableCodexWebSocketError(error.message, { retryable: true, cause: error }));
+    const onClose = (code: number, reason: Buffer) => {
+      const reasonText = reason?.toString("utf8") || "";
+      finish(createRetryableCodexWebSocketError(`websocket closed before connection was established${code ? ` code=${code}` : ""}${reasonText ? `: ${reasonText}` : ""}`, { retryable: true }));
+    };
     const finish = (error?: unknown) => {
       if (settled) return;
       settled = true;
@@ -105,6 +109,7 @@ async function connectCodexWebSocket(options: CodexWebSocketRequestOptions): Pro
       options.signal?.removeEventListener("abort", onAbort);
       socket.off("open", onOpen);
       socket.off("error", onError);
+      socket.off("close", onClose);
       if (error) {
         closeSocket(socket);
         reject(error);
@@ -115,6 +120,7 @@ async function connectCodexWebSocket(options: CodexWebSocketRequestOptions): Pro
     options.signal?.addEventListener("abort", onAbort, { once: true });
     socket.on("open", onOpen);
     socket.on("error", onError);
+    socket.on("close", onClose);
   });
   return socket;
 }
@@ -206,7 +212,19 @@ function socketDataToText(data: unknown): string {
 }
 
 function closeSocket(socket: CodexWebSocketLike): void {
+  const swallowError = () => undefined;
+  const readyState = socket.readyState;
   try {
+    if (readyState === WebSocket.CONNECTING) {
+      socket.on("error", swallowError);
+      try {
+        socket.terminate?.();
+      } finally {
+        queueMicrotask(() => socket.off("error", swallowError));
+      }
+      return;
+    }
+    if (readyState === WebSocket.CLOSING || readyState === WebSocket.CLOSED) return;
     socket.close();
   } catch {
     try {

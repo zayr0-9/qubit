@@ -63,6 +63,12 @@ func (m model) renderMainArea(height int) string {
 		chatContent = m.renderForkTreeModal(bodyHeight)
 	} else if m.mode == modeMdEditor {
 		chatContent = m.renderMdEditor(bodyHeight)
+	} else if m.mode == modeMcpManager {
+		chatContent = m.renderMcpManager(bodyHeight)
+	} else if m.mode == modeMcpAddEntry {
+		chatContent = m.renderMcpAddEntry(bodyHeight)
+	} else if m.mode == modeMcpSecretEntry {
+		chatContent = m.renderMcpSecretEntry(bodyHeight)
 	}
 	chat := renderChat(chatContent, m.width, max(1, bodyHeight))
 	if m.mode != modeChat {

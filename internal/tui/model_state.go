@@ -28,6 +28,9 @@ const (
 	modeModal
 	modeForkTree
 	modeMdEditor
+	modeMcpManager
+	modeMcpAddEntry
+	modeMcpSecretEntry
 )
 
 type permissionMode string

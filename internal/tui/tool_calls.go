@@ -292,6 +292,9 @@ func (m *model) toolStatusStyle(status string) lipgloss.Style {
 }
 
 func (m *model) toolKindStyle(toolName string) lipgloss.Style {
+	if isMcpToolName(toolName) {
+		return toolOtherSt
+	}
 	switch toolName {
 	case "readFile", "readFileContinuation", "readFiles":
 		return toolReadSt
@@ -322,6 +325,18 @@ func (m *model) visibleToolGroupLabel(group *toolGroup) string {
 
 func toolGroupLabel(group *toolGroup) string {
 	count := len(group.Calls)
+	if group != nil && isMcpToolName(group.Name) {
+		server := "MCP"
+		tool := group.Name
+		if len(group.Calls) > 0 {
+			server = firstNonEmpty(stringValue(group.Calls[0].Args, "serverName"), stringValue(group.Calls[0].Result, "serverName"), server)
+			tool = firstNonEmpty(stringValue(group.Calls[0].Args, "toolName"), stringValue(group.Calls[0].Result, "toolName"), tool)
+		}
+		if count > 1 {
+			return fmt.Sprintf("Used %s MCP %d %s", server, count, plural(count, "time", "times"))
+		}
+		return fmt.Sprintf("Used %s MCP: %s", server, tool)
+	}
 	if count <= 0 {
 		count = 1
 	}
@@ -530,6 +545,10 @@ func toolCallDetailLines(call toolCallUI, width int) []string {
 	}
 	appendString("cwd", "cwd", call.Args)
 	appendString("description", "description", call.Args)
+	appendString("server", "serverName", call.Args)
+	appendString("server", "serverName", call.Result)
+	appendString("MCP tool", "toolName", call.Args)
+	appendString("MCP tool", "toolName", call.Result)
 	appendString("message", "message", call.Result)
 	if n, ok := numberValue(call.Result, "totalLines"); ok {
 		lines = append(lines, fmt.Sprintf("lines: %d", n))
@@ -550,7 +569,9 @@ func toolCallDetailLines(call toolCallUI, width int) []string {
 			lines = append(lines, fmt.Sprintf("%s: %s", label, strings.ReplaceAll(oneLine(preview, width), "\t", "  ")))
 		}
 	}
+	appendPreview("args", "argsPreview")
 	appendPreview("preview", "contentPreview")
+	appendPreview("payload", "payloadPreview")
 	if call.Name == "subagent" {
 		appendPreview("response", "content")
 	}

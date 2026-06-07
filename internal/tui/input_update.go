@@ -28,6 +28,15 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modeKeyEntry {
 		return m.updateKeyEntry(msg)
 	}
+	if m.mode == modeMcpManager {
+		return m.updateMcpManager(msg)
+	}
+	if m.mode == modeMcpAddEntry {
+		return m.updateMcpAddEntry(msg)
+	}
+	if m.mode == modeMcpSecretEntry {
+		return m.updateMcpSecretEntry(msg)
+	}
 	if m.mode == modeThemeEntry {
 		return m.updateThemeEntry(msg)
 	}
@@ -206,6 +215,12 @@ func (m model) updateTeaPaste(msg tea.PasteMsg) model {
 	if m.mode == modeKeyEntry {
 		return m.updateKeyEntryTeaPaste(msg)
 	}
+	if m.mode == modeMcpAddEntry {
+		return m.updateMcpAddEntryTeaPaste(msg)
+	}
+	if m.mode == modeMcpSecretEntry {
+		return m.updateMcpSecretEntryTeaPaste(msg)
+	}
 	if m.mode != modeChat {
 		return m
 	}
@@ -227,6 +242,12 @@ func (m model) updateComposerPaste(msg composerPasteMsg) model {
 	}
 	if m.mode == modeKeyEntry {
 		return m.updateKeyEntryPaste(msg)
+	}
+	if m.mode == modeMcpAddEntry {
+		return m.updateMcpAddEntryPaste(msg)
+	}
+	if m.mode == modeMcpSecretEntry {
+		return m.updateMcpSecretEntryPaste(msg)
 	}
 	if m.mode != modeChat {
 		return m

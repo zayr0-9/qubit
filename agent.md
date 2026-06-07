@@ -52,6 +52,9 @@ agent_server.md
 agent_md_editor.md
   Mandatory when working on Qubit's `/md-editor` slash command, Markdown document list/editor UI, or runtime Markdown document protocol.
 
+agent_mcp.md
+  Mandatory when working on Qubit's Model Context Protocol (MCP) support, MCP server config/auth, dynamic MCP tools, `/mcp` UI, MCP integration tests, or MCP tool-call display.
+
 agent_distribution.md
   Mandatory when working on Qubit release archives, install scripts, GitHub Releases packaging, generated release assets, or installed-runtime layout.
 ```
@@ -64,6 +67,7 @@ When adding a new major subsystem or extracting detailed guidance from this file
 Project root
   package.json                         Node runtime package config
   runtime.ts                           Node sidecar runtime source
+  runtime/mcp/                         MCP client/config/catalog/tool wrapper modules
   dist/runtime.js                      Compiled Node sidecar runtime launched by Go
   go.mod                               Go module config
   main.go                              CLI entrypoint only; calls internal/tui.Run
@@ -116,6 +120,7 @@ Project root
                                        User-global Qubit config directory, overrideable with QUBIT_CONFIG_DIR
   <config>/theme.json                  User-global selected `/theme` palette
   <config>/settings.json               User-global non-secret app defaults, including default provider, per-provider default models, and the global subagent provider/model
+  <config>/mcp.json                    User-global non-secret MCP server config; raw MCP secrets/tokens are stored in the OS keychain
   .qubit/todos/*.md                    Project todo lists managed by todoMd
   .qubit/plans/*.md                    Project plans managed by planMd
 ```

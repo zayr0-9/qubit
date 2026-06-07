@@ -61,12 +61,13 @@ internal/tui/plan_clarification.go          Plan clarification manual input/past
   2. `/md-editor` active text target
   3. `/theme` entry
   4. `/keys` entry
-  5. default chat composer when in chat mode
+  5. `/mcp` bearer-token secret entry
+  6. default chat composer when in chat mode
 - Do not paste into hidden chat composer while a picker, modal, fork tree, or other non-text surface is focused.
 - Pasted multiline chat input should preserve line breaks. Pasted or typed fenced Markdown code blocks must retain line breaks and render as Markdown after send.
 - Pasting while a composer selection exists should replace only the selected text and clear the selection.
 - After chat composer paste or text edits, clear input-history navigation state, refresh file mention palette bounds if visible, and call `m.layout()`.
-- API key entry must never render raw secret text. Pasted or typed keys should display only as mask bullets, and tests should cover paste -> save flows, not only programmatic insertion.
+- API key and MCP bearer-token entry must never render raw secret text. Pasted or typed keys/tokens should display only as mask bullets, and tests should cover paste -> save flows, not only programmatic insertion.
 
 ## Mouse and Scrolling Behavior
 

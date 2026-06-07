@@ -381,6 +381,16 @@ func (m model) resolveModalAction(actionID string) (tea.Model, tea.Cmd) {
 			m.status = "deleting api key"
 			return m, sendRuntime(m.runtime, map[string]any{"type": "key.delete", "provider": provider, "alias": alias})
 		}
+		if modal.Payload["action"] == "mcp.delete" {
+			if actionID != "delete" {
+				m.status = "MCP delete cancelled"
+				return m, nil
+			}
+			serverID, _ := modal.Payload["serverId"].(string)
+			m.busy = true
+			m.status = "deleting MCP server"
+			return m, sendRuntime(m.runtime, map[string]any{"type": "mcp.delete", "serverId": serverID, "deleteSecrets": true})
+		}
 		if modal.Payload["action"] == "terminal.setup" {
 			if actionID != "run" {
 				m.status = "terminal setup cancelled"
@@ -391,6 +401,33 @@ func (m model) resolveModalAction(actionID string) (tea.Model, tea.Cmd) {
 			m.appendSystem("Updating Windows Terminal settings for Shift+Enter newline support and Qubit appearance defaults...")
 			return m, runTerminalSetup()
 		}
+	}
+
+	if modal.Payload["action"] == "mcp.add.menu" {
+		if actionID == "select" {
+			selected := modalSelectedOption(modal)
+			switch selected.ID {
+			case "catalog":
+				return m.openMcpCatalogModal(), nil
+			case "remote":
+				return m.openMcpAddEntry(mcpAddRemote), nil
+			case "stdio":
+				return m.openMcpAddEntry(mcpAddStdio), nil
+			}
+		}
+		m.status = "MCP add cancelled"
+		return m, nil
+	}
+
+	if modal.Payload["action"] == "mcp.catalog.add" {
+		if actionID == "add" {
+			selected := modalSelectedOption(modal)
+			m.busy = true
+			m.status = "adding MCP server"
+			return m, sendRuntime(m.runtime, map[string]any{"type": "mcp.add", "catalogId": selected.ID})
+		}
+		m.status = "MCP add cancelled"
+		return m, nil
 	}
 
 	if modal.Payload["action"] == "model.select" {

@@ -32,6 +32,7 @@ import { createMdDocument, listMdDocuments, readMdDocument, renameMdDocument, sa
 import { writeJsonAtomic } from "./runtime/jsonStore.js";
 import { ClientRegistry } from "./runtime/server/clientRegistry.js";
 import { broadcastTo, writeTo } from "./runtime/server/writer.js";
+import { McpClientManager, McpConfigStore, McpSecretStore, catalogEntryById, createMcpTools, isMcpToolName, mcpStarterCatalog, mcpContextChars, previewMcpValue, setMcpToolMappings, summarizeMcpArgs, summarizeMcpResult } from "./runtime/mcp/index.js";
 
 const entryDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = basename(entryDir) === "dist" ? dirname(entryDir) : entryDir;
@@ -181,20 +182,32 @@ try {
   keytarLoadError = error;
 }
 
+const mcpConfigStore = new McpConfigStore(configDir);
+let mcpConfig = await mcpConfigStore.load();
+const mcpSecretStore = new McpSecretStore({ service: keychainService, keytar });
+const mcpClientManager = new McpClientManager({
+  secrets: mcpSecretStore,
+  workspaceCwd: initialWorkspaceCwd,
+  authUrlEmitter: (event) => writeMcpMessage({ type: "mcp.auth.started", serverId: event.serverId, name: event.serverName, authUrl: event.authUrl, status: `Open browser to authorize ${event.serverName}.` }, currentResponseTarget),
+});
+let activeTools = qubitTools;
+let mcpToolMappings = new Map();
+await rebuildMcpTools();
+
 function createQubitAgent(modeOrOptions = "plan") {
   if (modeOrOptions && typeof modeOrOptions === "object") {
     return defineAgent({
       name: modeOrOptions.name || "qubit-chat",
       instructions: modeOrOptions.instructions || instructionsForMode(modeOrOptions.mode || "plan"),
       model: modeOrOptions.model || model,
-      tools: modeOrOptions.tools || qubitTools,
+      tools: modeOrOptions.tools || activeTools,
     });
   }
   return defineAgent({
     name: "qubit-chat",
     instructions: instructionsForMode(modeOrOptions),
     model,
-    tools: qubitTools,
+    tools: activeTools,
   });
 }
 
@@ -521,6 +534,14 @@ function write(message, target = null) {
   });
 }
 
+function writeMcpMessage(message, target = null) {
+  writeTo(target || currentResponseTarget, message, {
+    redactor: redactMessage,
+    serverMode: Boolean(serverAddress),
+    logger: (line) => console.error(line),
+  });
+}
+
 function broadcast(message) {
   broadcastTo(clients, message, {
     redactor: redactMessage,
@@ -734,6 +755,46 @@ async function handleLine(line) {
 
   if (request.type === "model.list") {
     await writeModelList(request.id);
+    return;
+  }
+
+  if (request.type === "mcp.catalog") {
+    writeMcpCatalog(request.id);
+    return;
+  }
+
+  if (request.type === "mcp.list") {
+    writeMcpList(request.id);
+    return;
+  }
+
+  if (request.type === "mcp.add") {
+    await handleMcpAdd(request);
+    return;
+  }
+
+  if (request.type === "mcp.update") {
+    await handleMcpUpdate(request);
+    return;
+  }
+
+  if (request.type === "mcp.delete") {
+    await handleMcpDelete(request);
+    return;
+  }
+
+  if (request.type === "mcp.secret.set") {
+    await handleMcpSecretSet(request);
+    return;
+  }
+
+  if (request.type === "mcp.test") {
+    await handleMcpTest(request);
+    return;
+  }
+
+  if (request.type === "mcp.auth.start") {
+    await handleMcpAuthStart(request, currentResponseTarget);
     return;
   }
 
@@ -977,7 +1038,7 @@ async function handleLine(line) {
     return;
   }
 
-  write({ type: "error", id: request.id, error: "Expected chat/session/key command" });
+  write({ type: "error", id: request.id, error: "Unknown runtime command. Expected chat/session/key/model/MCP/session command." });
 }
 
 async function handleChatRequest(request, responseTarget = null, requestContext = { target: responseTarget }) {
@@ -1443,13 +1504,14 @@ async function createRuntimeState(promptMode = "plan") {
 }
 
 async function createRuntimeStateFor({ providerName, model: modelName, instructions, promptMode = "plan", requireRealProvider = false, agentName = "qubit-chat" }) {
+  await rebuildMcpTools();
   const normalizedPromptMode = normalizePromptMode(promptMode);
   const normalizedProvider = normalizeProvider(providerName || defaultProviderName);
   const normalizedModel = normalizeModel(modelName || defaultModelForProvider(normalizedProvider));
   const providerConfig = await resolveProviderConfig(normalizedProvider, { requireRealProvider });
   const provider = createProvider(providerConfig);
   const runtime = createQubitRuntime({
-    agent: createQubitAgent({ name: agentName, instructions, model: normalizedModel, tools: qubitTools }),
+    agent: createQubitAgent({ name: agentName, instructions, model: normalizedModel, tools: activeTools }),
     provider,
     storage,
     toolPermission: {
@@ -1516,6 +1578,7 @@ function createProvider(config) {
         reasoningEffort: codexReasoningEffort(),
         reasoningSummary: process.env.QUBIT_CODEX_REASONING_SUMMARY === "off" ? null : (process.env.QUBIT_CODEX_REASONING_SUMMARY || "auto"),
         onReasoningDelta: (event) => {
+          if (isHiddenRunId(event.runId)) return;
           write({
             type: "reasoning.delta",
             sessionId: event.sessionId,
@@ -2189,6 +2252,7 @@ function resultPayload(result) {
 }
 
 function summarizeToolArgs(toolName, args) {
+  if (isMcpToolName(toolName)) return summarizeMcpArgs(toolName, args);
   const source = plainObject(args);
   switch (toolName) {
     case "readFile":
@@ -2229,6 +2293,7 @@ function summarizeToolArgs(toolName, args) {
 }
 
 function toolCallContextChars(toolName, args, result) {
+  if (isMcpToolName(toolName)) return mcpContextChars(result);
   const sourceArgs = plainObject(args);
   const payload = resultPayload(result);
   const data = plainObject(payload);
@@ -2261,6 +2326,7 @@ function toolCallContextChars(toolName, args, result) {
 }
 
 function summarizeToolResult(toolName, result) {
+  if (isMcpToolName(toolName)) return summarizeMcpResult(toolName, result);
   const base = plainObject(result);
   const payload = resultPayload(result);
   const data = plainObject(payload);
@@ -3299,3 +3365,270 @@ function numberField(source, keys) {
   return 0;
 }
 
+
+function mcpConfiguredServerItems() {
+  return mcpConfig.servers.map((server) => {
+    const catalog = server.catalogId ? catalogEntryById(server.catalogId) : undefined;
+    const cachedTools = Array.isArray(server.tools) ? server.tools : mcpClientManager.toolCache(server.id);
+    return {
+      id: server.id,
+      name: server.name,
+      enabled: server.enabled,
+      transport: server.transport,
+      url: server.url,
+      command: server.command,
+      authType: server.auth?.type || "none",
+      authStatus: server.auth?.status || (server.auth?.type === "none" ? "none" : "not connected"),
+      status: server.status || "unknown",
+      statusMessage: server.statusMessage || "",
+      toolCount: cachedTools.length || server.toolCount || 0,
+      catalogId: server.catalogId || "",
+      caveat: catalog?.caveat || "",
+    };
+  });
+}
+
+function writeMcpList(id) {
+  write({ type: "mcp.list", id, servers: mcpConfiguredServerItems(), catalog: mcpStarterCatalog });
+}
+
+function writeMcpCatalog(id) {
+  write({ type: "mcp.catalog", id, catalog: mcpStarterCatalog });
+}
+
+async function saveMcpConfigAndRebuild() {
+  await mcpConfigStore.save(mcpConfig);
+  await rebuildMcpTools();
+}
+
+async function rebuildMcpTools() {
+  mcpClientManager.setServers(mcpConfig.servers);
+  const toolMap = new Map();
+  for (const server of mcpConfig.servers) {
+    if (!server.enabled) continue;
+    const tools = Array.isArray(server.tools) ? server.tools : mcpClientManager.toolCache(server.id);
+    if (tools.length > 0) toolMap.set(server.id, tools);
+  }
+  const built = createMcpTools(mcpConfig.servers, toolMap, mcpClientManager);
+  mcpToolMappings = built.mappings;
+  setMcpToolMappings(mcpToolMappings);
+  activeTools = [...qubitTools, ...built.tools];
+}
+
+function mcpServerById(id) {
+  return mcpConfig.servers.find((server) => server.id === String(id || ""));
+}
+
+function mcpServerIndexById(id) {
+  return mcpConfig.servers.findIndex((server) => server.id === String(id || ""));
+}
+
+async function handleMcpAdd(request) {
+  const now = new Date().toISOString();
+  let server = null;
+  if (request.catalogId) {
+    const catalog = catalogEntryById(String(request.catalogId));
+    if (!catalog) throw new Error(`Unknown MCP catalog entry: ${request.catalogId}`);
+    server = {
+      id: uniqueMcpServerId(catalog.id),
+      name: catalog.name,
+      enabled: true,
+      transport: catalog.transport,
+      url: catalog.url,
+      auth: { type: request.authType || catalog.defaultAuthType, status: "not connected" },
+      catalogId: catalog.id,
+      createdAt: now,
+      updatedAt: now,
+      status: "unknown",
+      statusMessage: "Added from starter catalog.",
+    };
+  } else if (String(request.transport || "") === "stdio") {
+    const command = String(request.command || "").trim();
+    if (!command) throw new Error("MCP stdio command is required.");
+    server = {
+      id: uniqueMcpServerId(request.id || request.name || "custom-stdio"),
+      name: String(request.name || request.id || "Custom stdio MCP").trim() || "Custom stdio MCP",
+      enabled: true,
+      transport: "stdio",
+      command,
+      args: Array.isArray(request.args) ? request.args.map(String) : [],
+      cwd: typeof request.cwd === "string" ? request.cwd : undefined,
+      env: request.env && typeof request.env === "object" ? request.env : undefined,
+      auth: { type: "none" },
+      createdAt: now,
+      updatedAt: now,
+      status: "unknown",
+      statusMessage: "Added custom stdio MCP server.",
+    };
+  } else {
+    const url = String(request.url || "").trim();
+    if (!url) throw new Error("MCP server URL is required.");
+    new URL(url);
+    server = {
+      id: uniqueMcpServerId(request.id || request.name || new URL(url).hostname),
+      name: String(request.name || new URL(url).hostname).trim() || "Remote MCP",
+      enabled: true,
+      transport: "streamable_http",
+      url,
+      auth: { type: request.authType || "oauth", status: "not connected" },
+      createdAt: now,
+      updatedAt: now,
+      status: "unknown",
+      statusMessage: "Added custom remote MCP server.",
+    };
+  }
+  mcpConfig.servers.push(server);
+  await saveMcpConfigAndRebuild();
+  runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
+  writeMcpMessage({ type: "mcp.updated", id: request.id, serverId: server.id, status: `Added MCP server ${server.name}.`, servers: mcpConfiguredServerItems(), catalog: mcpStarterCatalog });
+}
+
+function uniqueMcpServerId(seed) {
+  const base = String(seed || "mcp").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "-").replace(/^-+|-+$/g, "") || "mcp";
+  if (!mcpServerById(base)) return base;
+  for (let i = 2; i < 1000; i += 1) {
+    const candidate = `${base}-${i}`;
+    if (!mcpServerById(candidate)) return candidate;
+  }
+  throw new Error(`Unable to create unique MCP server id for ${base}`);
+}
+
+async function handleMcpUpdate(request) {
+  const server = mcpServerById(request.serverId);
+  if (!server) throw new Error(`Unknown MCP server: ${request.serverId}`);
+  if (typeof request.enabled === "boolean") server.enabled = request.enabled;
+  if (typeof request.name === "string" && request.name.trim()) server.name = request.name.trim();
+  if (typeof request.authType === "string") server.auth = { ...server.auth, type: request.authType, status: server.auth?.status || "not connected" };
+  server.updatedAt = new Date().toISOString();
+  server.statusMessage = server.enabled ? "Enabled." : "Disabled.";
+  await mcpClientManager.close(server.id);
+  await saveMcpConfigAndRebuild();
+  runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
+  writeMcpMessage({ type: "mcp.updated", id: request.id, serverId: server.id, status: `Updated MCP server ${server.name}.`, servers: mcpConfiguredServerItems(), catalog: mcpStarterCatalog });
+}
+
+async function handleMcpDelete(request) {
+  const index = mcpServerIndexById(request.serverId);
+  if (index < 0) throw new Error(`Unknown MCP server: ${request.serverId}`);
+  const [server] = mcpConfig.servers.splice(index, 1);
+  await mcpClientManager.close(server.id);
+  if (request.deleteSecrets === true) {
+    const accounts = [];
+    if (server.auth?.account) accounts.push(server.auth.account);
+    for (const ref of Object.values(server.env || {})) {
+      if (ref?.source === "keychain" && ref.account) accounts.push(ref.account);
+    }
+    await mcpSecretStore.deleteServerSecrets(server.id, accounts);
+  }
+  await saveMcpConfigAndRebuild();
+  runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
+  writeMcpMessage({ type: "mcp.updated", id: request.id, serverId: server.id, status: `Deleted MCP server ${server.name}.`, servers: mcpConfiguredServerItems(), catalog: mcpStarterCatalog });
+}
+
+async function handleMcpSecretSet(request) {
+  const server = mcpServerById(request.serverId);
+  if (!server) throw new Error(`Unknown MCP server: ${request.serverId}`);
+  const value = String(request.value || request.token || "").trim();
+  if (!value) throw new Error("MCP secret value is required.");
+  const secretName = String(request.name || "bearer-token").replace(/[^A-Za-z0-9_.:-]/g, "_");
+  const saved = await mcpSecretStore.set(mcpSecretStore.account(server.id, secretName), value);
+  server.auth = { type: "bearer", source: "keychain", account: saved.account, masked: saved.masked, status: "stored" };
+  server.updatedAt = new Date().toISOString();
+  await mcpClientManager.close(server.id);
+  await saveMcpConfigAndRebuild();
+  runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
+  writeMcpMessage({ type: "mcp.updated", id: request.id, serverId: server.id, status: `Stored MCP secret for ${server.name}.`, servers: mcpConfiguredServerItems(), catalog: mcpStarterCatalog });
+}
+
+async function handleMcpTest(request) {
+  const server = mcpServerById(request.serverId);
+  if (!server) throw new Error(`Unknown MCP server: ${request.serverId}`);
+  writeMcpMessage({ type: "mcp.test.started", id: request.id, serverId: server.id, name: server.name, status: `Testing ${server.name}...` });
+  const result = await mcpClientManager.test(server.id);
+  server.status = result.status;
+  server.statusMessage = result.message;
+  server.toolCount = result.tools.length;
+  if (result.success) {
+    server.tools = result.tools;
+    if (server.auth?.type !== "none") server.auth.status = "connected";
+  }
+  server.updatedAt = new Date().toISOString();
+  await saveMcpConfigAndRebuild();
+  runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
+  writeMcpMessage({ type: "mcp.test.finished", id: request.id, serverId: server.id, name: server.name, status: result.message, success: result.success, tools: result.tools, servers: mcpConfiguredServerItems(), catalog: mcpStarterCatalog });
+}
+
+async function startOAuthCallbackServer(timeoutMs = 180000) {
+  const { createServer } = await import("node:http");
+  let resolveCode;
+  let rejectCode;
+  const codePromise = new Promise((resolve, reject) => {
+    resolveCode = resolve;
+    rejectCode = reject;
+  });
+  const server = createServer((req, res) => {
+    const parsed = new URL(req.url || "/", "http://localhost");
+    const code = parsed.searchParams.get("code");
+    const error = parsed.searchParams.get("error");
+    if (code) {
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end("<html><body><h1>Qubit MCP authorization complete</h1><p>You can close this window.</p></body></html>");
+      clearTimeout(timer);
+      server.close();
+      resolveCode(code);
+      return;
+    }
+    if (error) {
+      res.writeHead(400, { "Content-Type": "text/html" });
+      res.end("<html><body><h1>Qubit MCP authorization failed</h1></body></html>");
+      clearTimeout(timer);
+      server.close();
+      rejectCode(new Error(`MCP OAuth failed: ${error}`));
+      return;
+    }
+    res.writeHead(400);
+    res.end("Missing OAuth code.");
+  });
+  const timer = setTimeout(() => {
+    server.close();
+    rejectCode(new Error("Timed out waiting for MCP OAuth callback."));
+  }, timeoutMs);
+  const callbackUrl = await new Promise((resolve, reject) => {
+    server.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    server.listen(0, "localhost", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      resolve(`http://localhost:${port}/mcp/oauth/callback`);
+    });
+  });
+  return { url: callbackUrl, codePromise };
+}
+
+async function handleMcpAuthStart(request, target = null) {
+  const server = mcpServerById(request.serverId);
+  if (!server) throw new Error(`Unknown MCP server: ${request.serverId}`);
+  if (server.auth?.type !== "oauth") throw new Error(`${server.name} is not configured for OAuth auth.`);
+  const callback = await startOAuthCallbackServer();
+  const callbackUrl = callback.url;
+  const codePromise = callback.codePromise;
+  void mcpClientManager.startOAuth(server.id, callbackUrl, codePromise, (event) => {
+    writeMcpMessage({ type: "mcp.auth.started", id: request.id, serverId: server.id, name: server.name, authUrl: event.authUrl, status: `Open browser to authorize ${server.name}.` }, target);
+  }).then(async (result) => {
+    server.status = result.status;
+    server.statusMessage = result.message;
+    server.toolCount = result.tools.length;
+    if (result.success) {
+      server.tools = result.tools;
+      server.auth.status = "connected";
+    }
+    server.updatedAt = new Date().toISOString();
+    await saveMcpConfigAndRebuild();
+    runtimeState = await createRuntimeState(runtimeState?.promptMode || "plan");
+    writeMcpMessage({ type: result.success ? "mcp.auth.completed" : "mcp.auth.error", id: request.id, serverId: server.id, name: server.name, status: result.message, success: result.success, servers: mcpConfiguredServerItems(), catalog: mcpStarterCatalog }, target);
+  }).catch((error) => {
+    writeMcpMessage({ type: "mcp.auth.error", id: request.id, serverId: server.id, name: server.name, error: redactSecrets(error instanceof Error ? error.message : String(error)) }, target);
+  });
+}

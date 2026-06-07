@@ -89,6 +89,44 @@ type ModelInfo struct {
 	MaxContext  int    `json:"maxContext,omitempty"`
 }
 
+type McpCatalogEntry struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Transport    string   `json:"transport"`
+	URL          string   `json:"url"`
+	AuthTypes    []string `json:"authTypes,omitempty"`
+	DefaultAuth  string   `json:"defaultAuthType,omitempty"`
+	DocsURL      string   `json:"docsUrl,omitempty"`
+	RepoURL      string   `json:"repoUrl,omitempty"`
+	ToolsSummary string   `json:"toolsSummary,omitempty"`
+	Caveat       string   `json:"caveat,omitempty"`
+	Safety       string   `json:"safety,omitempty"`
+}
+
+type McpServerInfo struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Enabled       bool   `json:"enabled"`
+	Transport     string `json:"transport"`
+	URL           string `json:"url,omitempty"`
+	Command       string `json:"command,omitempty"`
+	AuthType      string `json:"authType,omitempty"`
+	AuthStatus    string `json:"authStatus,omitempty"`
+	Status        string `json:"status,omitempty"`
+	StatusMessage string `json:"statusMessage,omitempty"`
+	ToolCount     int    `json:"toolCount,omitempty"`
+	CatalogID     string `json:"catalogId,omitempty"`
+	Caveat        string `json:"caveat,omitempty"`
+}
+
+type McpToolInfo struct {
+	Name        string         `json:"name"`
+	Title       string         `json:"title,omitempty"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"inputSchema,omitempty"`
+}
+
 type PlanClarificationOption struct {
 	ID          string `json:"id,omitempty"`
 	Label       string `json:"label,omitempty"`
@@ -167,6 +205,10 @@ type RuntimeEvent struct {
 	SubagentModel    string                      `json:"subagentModel,omitempty"`
 	Keys             []ApiKeyInfo                `json:"keys,omitempty"`
 	Models           []ModelInfo                 `json:"models,omitempty"`
+	McpServers       []McpServerInfo             `json:"servers,omitempty"`
+	McpCatalog       []McpCatalogEntry           `json:"catalog,omitempty"`
+	McpTools         []McpToolInfo               `json:"tools,omitempty"`
+	Success          bool                        `json:"success,omitempty"`
 	ForkTreeNodes    []ForkTreeNode              `json:"nodes,omitempty"`
 	Files            []MdFileInfo                `json:"files,omitempty"`
 	File             *MdFileInfo                 `json:"file,omitempty"`
