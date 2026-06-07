@@ -31,6 +31,7 @@ type messageRenderSegmentKey struct {
 	ToolCallRevealVisible    int
 	Width                    int
 	DisplayNumber            int
+	UserMessageBg            string
 	PreviousRole             string
 	PreviousContent          string
 	PreviousReasoningContent string

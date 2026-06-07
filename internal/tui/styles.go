@@ -13,196 +13,206 @@ import (
 )
 
 type themeConfig struct {
-	ID         string
-	Name       string
-	Background string
-	Surface    string
-	SurfaceHi  string
-	Text       string
-	Muted      string
-	Accent     string
-	Cyan       string
-	Red        string
-	Green      string
-	Reasoning  string
-	ToolRead   string
-	ToolSearch string
-	ToolWrite  string
-	ToolShell  string
-	ToolOther  string
+	ID            string
+	Name          string
+	Background    string
+	Surface       string
+	SurfaceHi     string
+	Text          string
+	Muted         string
+	Accent        string
+	Cyan          string
+	Red           string
+	Green         string
+	Reasoning     string
+	UserMessageBg string
+	ToolRead      string
+	ToolSearch    string
+	ToolWrite     string
+	ToolShell     string
+	ToolOther     string
 }
 
 var builtinThemes = []themeConfig{
 	{
-		ID:         "dark",
-		Name:       "Dark",
-		Background: "#101214",
-		Surface:    "#16191c",
-		SurfaceHi:  "#1e2327",
-		Text:       "#e8e3d8",
-		Muted:      "#8a8378",
-		Accent:     "#e8a15d",
-		Cyan:       "#89cdd6",
-		Red:        "#ff6b6b",
-		Green:      "#9be28f",
-		Reasoning:  "#c7a0ff",
-		ToolRead:   "#89cdd6",
-		ToolSearch: "#c7a0ff",
-		ToolWrite:  "#e8a15d",
-		ToolShell:  "#9be28f",
-		ToolOther:  "#b8aea2",
+		ID:            "dark",
+		Name:          "Dark",
+		Background:    "#101214",
+		Surface:       "#16191c",
+		SurfaceHi:     "#1e2327",
+		Text:          "#e8e3d8",
+		Muted:         "#8a8378",
+		Accent:        "#e8a15d",
+		Cyan:          "#89cdd6",
+		Red:           "#ff6b6b",
+		Green:         "#9be28f",
+		Reasoning:     "#c7a0ff",
+		UserMessageBg: "#302820",
+		ToolRead:      "#89cdd6",
+		ToolSearch:    "#c7a0ff",
+		ToolWrite:     "#e8a15d",
+		ToolShell:     "#9be28f",
+		ToolOther:     "#b8aea2",
 	},
 	{
-		ID:         "light",
-		Name:       "Light",
-		Background: "#f7f3ea",
-		Surface:    "#ebe3d4",
-		SurfaceHi:  "#ddd0bd",
-		Text:       "#24201a",
-		Muted:      "#756b5f",
-		Accent:     "#9a5b00",
-		Cyan:       "#006d77",
-		Red:        "#b42318",
-		Green:      "#287a3e",
-		Reasoning:  "#7a3eb1",
-		ToolRead:   "#006d77",
-		ToolSearch: "#7a3eb1",
-		ToolWrite:  "#9a5b00",
-		ToolShell:  "#287a3e",
-		ToolOther:  "#675f56",
+		ID:            "light",
+		Name:          "Light",
+		Background:    "#f7f3ea",
+		Surface:       "#ebe3d4",
+		SurfaceHi:     "#ddd0bd",
+		Text:          "#24201a",
+		Muted:         "#756b5f",
+		Accent:        "#9a5b00",
+		Cyan:          "#006d77",
+		Red:           "#b42318",
+		Green:         "#287a3e",
+		Reasoning:     "#7a3eb1",
+		UserMessageBg: "#eadbc7",
+		ToolRead:      "#006d77",
+		ToolSearch:    "#7a3eb1",
+		ToolWrite:     "#9a5b00",
+		ToolShell:     "#287a3e",
+		ToolOther:     "#675f56",
 	},
 	{
-		ID:         "neon",
-		Name:       "Neon",
-		Background: "#000000",
-		Surface:    "#000000",
-		SurfaceHi:  "#000000",
-		Text:       "#f8f7ff",
-		Muted:      "#a39bff",
-		Accent:     "#ff2bd6",
-		Cyan:       "#00f5ff",
-		Red:        "#ff9aa2",
-		Green:      "#b8f7b1",
-		Reasoning:  "#ffd166",
-		ToolRead:   "#00f5ff",
-		ToolSearch: "#ff2bd6",
-		ToolWrite:  "#ffd166",
-		ToolShell:  "#b8f7b1",
-		ToolOther:  "#f8f7ff",
+		ID:            "neon",
+		Name:          "Neon",
+		Background:    "#000000",
+		Surface:       "#000000",
+		SurfaceHi:     "#000000",
+		Text:          "#f8f7ff",
+		Muted:         "#a39bff",
+		Accent:        "#ff2bd6",
+		Cyan:          "#00f5ff",
+		Red:           "#ff9aa2",
+		Green:         "#b8f7b1",
+		Reasoning:     "#ffd166",
+		UserMessageBg: "#24101f",
+		ToolRead:      "#00f5ff",
+		ToolSearch:    "#ff2bd6",
+		ToolWrite:     "#ffd166",
+		ToolShell:     "#b8f7b1",
+		ToolOther:     "#f8f7ff",
 	},
 	{
-		ID:         "dracula",
-		Name:       "Dracula",
-		Background: "#282a36",
-		Surface:    "#343746",
-		SurfaceHi:  "#44475a",
-		Text:       "#f8f8f2",
-		Muted:      "#6272a4",
-		Accent:     "#ff79c6",
-		Cyan:       "#8be9fd",
-		Red:        "#ff5555",
-		Green:      "#50fa7b",
-		Reasoning:  "#bd93f9",
-		ToolRead:   "#8be9fd",
-		ToolSearch: "#ffb86c",
-		ToolWrite:  "#ff79c6",
-		ToolShell:  "#50fa7b",
-		ToolOther:  "#f1fa8c",
+		ID:            "dracula",
+		Name:          "Dracula",
+		Background:    "#282a36",
+		Surface:       "#343746",
+		SurfaceHi:     "#44475a",
+		Text:          "#f8f8f2",
+		Muted:         "#6272a4",
+		Accent:        "#ff79c6",
+		Cyan:          "#8be9fd",
+		Red:           "#ff5555",
+		Green:         "#50fa7b",
+		Reasoning:     "#bd93f9",
+		UserMessageBg: "#3d3348",
+		ToolRead:      "#8be9fd",
+		ToolSearch:    "#ffb86c",
+		ToolWrite:     "#ff79c6",
+		ToolShell:     "#50fa7b",
+		ToolOther:     "#f1fa8c",
 	},
 	{
-		ID:         "one-dark",
-		Name:       "One Dark",
-		Background: "#282c34",
-		Surface:    "#2c313a",
-		SurfaceHi:  "#3e4451",
-		Text:       "#abb2bf",
-		Muted:      "#5c6370",
-		Accent:     "#c678dd",
-		Cyan:       "#56b6c2",
-		Red:        "#e06c75",
-		Green:      "#98c379",
-		Reasoning:  "#e5c07b",
-		ToolRead:   "#56b6c2",
-		ToolSearch: "#61afef",
-		ToolWrite:  "#c678dd",
-		ToolShell:  "#98c379",
-		ToolOther:  "#abb2bf",
+		ID:            "one-dark",
+		Name:          "One Dark",
+		Background:    "#282c34",
+		Surface:       "#2c313a",
+		SurfaceHi:     "#3e4451",
+		Text:          "#abb2bf",
+		Muted:         "#5c6370",
+		Accent:        "#c678dd",
+		Cyan:          "#56b6c2",
+		Red:           "#e06c75",
+		Green:         "#98c379",
+		Reasoning:     "#e5c07b",
+		UserMessageBg: "#373142",
+		ToolRead:      "#56b6c2",
+		ToolSearch:    "#61afef",
+		ToolWrite:     "#c678dd",
+		ToolShell:     "#98c379",
+		ToolOther:     "#abb2bf",
 	},
 	{
-		ID:         "solarized-dark",
-		Name:       "Solarized Dark",
-		Background: "#002b36",
-		Surface:    "#073642",
-		SurfaceHi:  "#0b4552",
-		Text:       "#839496",
-		Muted:      "#586e75",
-		Accent:     "#b58900",
-		Cyan:       "#2aa198",
-		Red:        "#dc322f",
-		Green:      "#859900",
-		Reasoning:  "#6c71c4",
-		ToolRead:   "#2aa198",
-		ToolSearch: "#268bd2",
-		ToolWrite:  "#cb4b16",
-		ToolShell:  "#859900",
-		ToolOther:  "#93a1a1",
+		ID:            "solarized-dark",
+		Name:          "Solarized Dark",
+		Background:    "#002b36",
+		Surface:       "#073642",
+		SurfaceHi:     "#0b4552",
+		Text:          "#839496",
+		Muted:         "#586e75",
+		Accent:        "#b58900",
+		Cyan:          "#2aa198",
+		Red:           "#dc322f",
+		Green:         "#859900",
+		Reasoning:     "#6c71c4",
+		UserMessageBg: "#183f43",
+		ToolRead:      "#2aa198",
+		ToolSearch:    "#268bd2",
+		ToolWrite:     "#cb4b16",
+		ToolShell:     "#859900",
+		ToolOther:     "#93a1a1",
 	},
 	{
-		ID:         "gruvbox-dark",
-		Name:       "Gruvbox Dark",
-		Background: "#282828",
-		Surface:    "#32302f",
-		SurfaceHi:  "#3c3836",
-		Text:       "#ebdbb2",
-		Muted:      "#928374",
-		Accent:     "#fe8019",
-		Cyan:       "#8ec07c",
-		Red:        "#fb4934",
-		Green:      "#b8bb26",
-		Reasoning:  "#d3869b",
-		ToolRead:   "#83a598",
-		ToolSearch: "#fabd2f",
-		ToolWrite:  "#fe8019",
-		ToolShell:  "#b8bb26",
-		ToolOther:  "#d5c4a1",
+		ID:            "gruvbox-dark",
+		Name:          "Gruvbox Dark",
+		Background:    "#282828",
+		Surface:       "#32302f",
+		SurfaceHi:     "#3c3836",
+		Text:          "#ebdbb2",
+		Muted:         "#928374",
+		Accent:        "#fe8019",
+		Cyan:          "#8ec07c",
+		Red:           "#fb4934",
+		Green:         "#b8bb26",
+		Reasoning:     "#d3869b",
+		UserMessageBg: "#3f3528",
+		ToolRead:      "#83a598",
+		ToolSearch:    "#fabd2f",
+		ToolWrite:     "#fe8019",
+		ToolShell:     "#b8bb26",
+		ToolOther:     "#d5c4a1",
 	},
 	{
-		ID:         "monokai",
-		Name:       "Monokai",
-		Background: "#272822",
-		Surface:    "#303127",
-		SurfaceHi:  "#3e3d32",
-		Text:       "#f8f8f2",
-		Muted:      "#75715e",
-		Accent:     "#fd971f",
-		Cyan:       "#66d9ef",
-		Red:        "#f92672",
-		Green:      "#a6e22e",
-		Reasoning:  "#ae81ff",
-		ToolRead:   "#66d9ef",
-		ToolSearch: "#e6db74",
-		ToolWrite:  "#fd971f",
-		ToolShell:  "#a6e22e",
-		ToolOther:  "#f8f8f2",
+		ID:            "monokai",
+		Name:          "Monokai",
+		Background:    "#272822",
+		Surface:       "#303127",
+		SurfaceHi:     "#3e3d32",
+		Text:          "#f8f8f2",
+		Muted:         "#75715e",
+		Accent:        "#fd971f",
+		Cyan:          "#66d9ef",
+		Red:           "#f92672",
+		Green:         "#a6e22e",
+		Reasoning:     "#ae81ff",
+		UserMessageBg: "#3a3328",
+		ToolRead:      "#66d9ef",
+		ToolSearch:    "#e6db74",
+		ToolWrite:     "#fd971f",
+		ToolShell:     "#a6e22e",
+		ToolOther:     "#f8f8f2",
 	},
 }
 
 var (
-	bg         color.Color
-	surface    color.Color
-	surfaceHi  color.Color
-	muted      color.Color
-	text       color.Color
-	accent     color.Color
-	cyan       color.Color
-	red        color.Color
-	green      color.Color
-	reasoning  color.Color
-	toolRead   color.Color
-	toolSearch color.Color
-	toolWrite  color.Color
-	toolShell  color.Color
-	toolOther  color.Color
+	bg            color.Color
+	surface       color.Color
+	surfaceHi     color.Color
+	muted         color.Color
+	text          color.Color
+	accent        color.Color
+	cyan          color.Color
+	red           color.Color
+	green         color.Color
+	reasoning     color.Color
+	userMessageBg color.Color
+	toolRead      color.Color
+	toolSearch    color.Color
+	toolWrite     color.Color
+	toolShell     color.Color
+	toolOther     color.Color
 
 	appStyle              lipgloss.Style
 	headerStyle           lipgloss.Style
@@ -217,6 +227,7 @@ var (
 	okSt                  lipgloss.Style
 	selectSt              lipgloss.Style
 	reasoningSt           lipgloss.Style
+	userMessageRowSt      lipgloss.Style
 	inputSelectSt         lipgloss.Style
 	inputHistorySt        lipgloss.Style
 	forkSelectInputSt     lipgloss.Style
@@ -260,6 +271,7 @@ func applyTheme(theme themeConfig) {
 	red = lipgloss.Color(fallback(theme.Red, "#ff6b6b"))
 	green = lipgloss.Color(fallback(theme.Green, "#9be28f"))
 	reasoning = lipgloss.Color(fallback(theme.Reasoning, fallback(theme.ToolSearch, "#c7a0ff")))
+	userMessageBg = lipgloss.Color(fallback(theme.UserMessageBg, subtleUserMessageBackground(theme)))
 	toolRead = lipgloss.Color(fallback(theme.ToolRead, fallback(theme.Cyan, "#8bd3dd")))
 	toolSearch = lipgloss.Color(fallback(theme.ToolSearch, fallback(theme.Accent, "#f2a65a")))
 	toolWrite = lipgloss.Color(fallback(theme.ToolWrite, fallback(theme.Accent, "#f2a65a")))
@@ -279,6 +291,7 @@ func applyTheme(theme themeConfig) {
 	okSt = lipgloss.NewStyle().Foreground(green)
 	selectSt = lipgloss.NewStyle().Foreground(accent).Bold(true)
 	reasoningSt = lipgloss.NewStyle().Foreground(reasoning)
+	userMessageRowSt = lipgloss.NewStyle().Background(userMessageBg)
 	inputSelectSt = lipgloss.NewStyle().Foreground(bg).Background(accent)
 	inputHistorySt = lipgloss.NewStyle().Foreground(muted)
 	forkSelectInputSt = lipgloss.NewStyle().Foreground(cyan)
@@ -297,6 +310,12 @@ func applyTheme(theme themeConfig) {
 	diffAddedSt = lipgloss.NewStyle().Foreground(green)
 	diffGutterSt = lipgloss.NewStyle().Foreground(muted)
 	toolStatusPulseStyles = smoothForegroundStyles(fallback(theme.Muted, "#7c838a"), fallback(theme.Accent, "#f2a65a"))
+}
+
+func subtleUserMessageBackground(theme themeConfig) string {
+	base := fallback(theme.SurfaceHi, fallback(theme.Surface, theme.Background))
+	accentHex := fallback(theme.Accent, "#f2a65a")
+	return blendHexColor(base, accentHex, 0.18)
 }
 
 func smoothCursorStyles(backgroundHex, lowHex, highHex string) []lipgloss.Style {

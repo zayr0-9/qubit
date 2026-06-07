@@ -3813,6 +3813,73 @@ func TestChatListVisibleRangeOverLongTranscript(t *testing.T) {
 	}
 }
 
+func TestUserMessageRowsUseThemeBackground(t *testing.T) {
+	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
+	defer resetThemeForTest()
+	m := initialModel(nil).applyThemeConfig(builtinThemes[0])
+	m.width = 80
+	m.height = 12
+	m.layout()
+	m.messages = []chatMessage{
+		{Role: "user", Content: "first line\nsecond line"},
+		{Role: "assistant", Content: "assistant line"},
+	}
+
+	visible := m.renderChatListVisible()
+	if !strings.Contains(visible.Content, "48;2;48;40;32") {
+		t.Fatalf("visible content missing dark theme user row background ANSI: %q", visible.Content)
+	}
+	if count := strings.Count(visible.Content, "48;2;48;40;32"); count < 2 {
+		t.Fatalf("user row background count = %d, want at least both user lines: %q", count, visible.Content)
+	}
+	plainVisible := plainText(visible.Content)
+	assistantIndex := strings.LastIndex(plainVisible, "assistant line")
+	if assistantIndex < 0 {
+		t.Fatalf("visible content missing assistant line: %q", visible.Content)
+	}
+	if strings.Contains(plainVisible[assistantIndex:], "first line") {
+		t.Fatalf("assistant row check sliced the wrong content: %q", plainVisible)
+	}
+}
+
+func TestUserMessageBackgroundSkipsSeparatorRows(t *testing.T) {
+	t.Setenv("QUBIT_CONFIG_DIR", t.TempDir())
+	defer resetThemeForTest()
+	m := initialModel(nil).applyThemeConfig(builtinThemes[0])
+	m.width = 80
+	m.height = 12
+	m.layout()
+	m.messages = []chatMessage{
+		{Role: "assistant", Content: "assistant first"},
+		{Role: "user", Content: "user second"},
+	}
+
+	visible := m.renderChatListVisible()
+	for i, line := range strings.Split(visible.Content, "\n") {
+		hasBackground := strings.Contains(line, "48;2;48;40;32")
+		plain := strings.TrimSpace(plainText(line))
+		if plain == "" && hasBackground {
+			t.Fatalf("blank/separator row %d has user background: %q", i, visible.Content)
+		}
+		if strings.Contains(plain, "user second") && !hasBackground {
+			t.Fatalf("user message row %d missing background: %q", i, visible.Content)
+		}
+	}
+}
+
+func TestCustomThemeDerivesSubtleUserMessageBackground(t *testing.T) {
+	custom, err := customThemeFrom("#101010", "#eeeeee", themeConfig{Accent: "#f0c080"})
+	if err != nil {
+		t.Fatalf("customThemeFrom error = %v", err)
+	}
+	applyTheme(custom)
+	defer applyTheme(defaultTheme())
+
+	if got := colorToHex(userMessageBg); got != "#383024" {
+		t.Fatalf("custom user message background = %q, want subtle accent blend", got)
+	}
+}
+
 func TestChatListStreamingWhileScrolledUpPreservesOffset(t *testing.T) {
 	m := initialModel(nil)
 	m.width = 100

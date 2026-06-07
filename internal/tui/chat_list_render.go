@@ -1,6 +1,11 @@
 package tui
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+
+	"charm.land/lipgloss/v2"
+)
 
 func (m *model) ensureChatList() {
 	if m.chatList.Cache == nil {
@@ -53,11 +58,16 @@ func (m *model) renderChatListItem(item chatListItem) chatListRenderedItem {
 	m.ensureSegmentCacheSize()
 	segment, _ := m.renderMessageSegment(item.StartIndex, 0)
 	lines := splitRenderedLines(segment.Text)
+	plain := transcriptRenderLines(segment.Text)
+	if m.messages[item.StartIndex].Role == "user" {
+		lines = renderUserMessageRows(lines, m.chatList.Width)
+		plain = transcriptRenderLines(strings.Join(lines, "\n"))
+	}
 	rendered := chatListRenderedItem{
 		Key:       item.Key,
 		Text:      segment.Text,
 		Lines:     lines,
-		Plain:     transcriptRenderLines(segment.Text),
+		Plain:     plain,
 		Links:     segment.Links,
 		Tools:     segment.Tools,
 		Height:    len(lines),
@@ -196,4 +206,70 @@ func (m *model) chatListPlainLines(start, end int) []transcriptRenderLine {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+func renderUserMessageRows(lines []string, width int) []string {
+	if len(lines) == 0 {
+		return lines
+	}
+	styled := make([]string, len(lines))
+	targetWidth := max(1, width-chatStyle.GetHorizontalPadding())
+	for i, line := range lines {
+		if strings.TrimSpace(stripANSI(line)) == "" {
+			styled[i] = line
+			continue
+		}
+		padding := strings.Repeat(" ", max(0, targetWidth-lipgloss.Width(line)))
+		styled[i] = applyRowBackground(line+padding, colorToHex(userMessageBg))
+	}
+	return styled
+}
+
+func applyRowBackground(line string, bgHex string) string {
+	rgb, err := parseHexRGB(bgHex)
+	if err != nil {
+		return line
+	}
+	bgSeq := fmt.Sprintf("\x1b[48;2;%d;%d;%dm", rgb[0], rgb[1], rgb[2])
+	return bgSeq + reapplyBackgroundAfterANSIReset(line, bgSeq) + "\x1b[0m"
+}
+
+func reapplyBackgroundAfterANSIReset(s string, bgSeq string) string {
+	var b strings.Builder
+	b.Grow(len(s) + strings.Count(s, "\x1b[")*len(bgSeq))
+	for i := 0; i < len(s); {
+		if s[i] != '\x1b' || i+1 >= len(s) || s[i+1] != '[' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		end := i + 2
+		for end < len(s) && s[end] != 'm' {
+			end++
+		}
+		if end >= len(s) {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		sequence := s[i+2 : end]
+		b.WriteString(s[i : end+1])
+		if sgrResetsBackground(sequence) {
+			b.WriteString(bgSeq)
+		}
+		i = end + 1
+	}
+	return b.String()
+}
+
+func sgrResetsBackground(sequence string) bool {
+	if sequence == "" {
+		return true
+	}
+	for _, part := range strings.Split(sequence, ";") {
+		if part == "0" || part == "49" {
+			return true
+		}
+	}
+	return false
 }

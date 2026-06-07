@@ -96,6 +96,9 @@ func (m *model) messageSegmentKey(index int, width int) messageRenderSegmentKey 
 		Width:            width,
 		DisplayNumber:    messageDisplayNumber(m.messages, index),
 	}
+	if message.Role == "user" {
+		key.UserMessageBg = colorToHex(userMessageBg)
+	}
 	if index > 0 {
 		prev := m.messages[index-1]
 		key.PreviousRole = prev.Role
