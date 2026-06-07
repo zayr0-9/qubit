@@ -318,6 +318,10 @@ func (r *Client) appendLog(stream string, line string) {
 
 func summarizeRuntimeEvent(raw []byte, ev protocol.RuntimeEvent) string {
 	switch ev.Type {
+	case "assistant":
+		return fmt.Sprintf("%s id=%s sessionId=%s runId=%s status=%s contentBytes=%d reasoningBytes=%d", ev.Type, ev.ID, ev.SessionID, ev.RunID, ev.Status, len(ev.Content), len(ev.ReasoningContent))
+	case "reasoning.delta":
+		return fmt.Sprintf("%s id=%s sessionId=%s runId=%s contentBytes=%d", ev.Type, ev.ID, ev.SessionID, ev.RunID, len(ev.Content))
 	case "session.list":
 		return fmt.Sprintf("%s id=%s sessionId=%s sessionTitle=%q sessions=%d", ev.Type, ev.ID, ev.SessionID, ev.SessionTitle, len(ev.Sessions))
 	case "session.messages":

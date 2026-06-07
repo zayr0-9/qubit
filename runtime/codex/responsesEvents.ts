@@ -118,10 +118,59 @@ function captureCompletedResponseMetadata(response: any, state: CodexResponsePar
 
 function appendReasoning(state: CodexResponseParseState, value: unknown): void {
   const reasoningText = textFromUnknown(value);
-  if (!reasoningText) return;
+  if (!reasoningText.trim()) return;
   const current = state.reasoningParts.join("");
-  if (current.includes(reasoningText)) return;
+  if (!current) {
+    state.reasoningParts.push(reasoningText);
+    return;
+  }
+  const normalizedCurrent = normalizeReasoningText(current);
+  const normalizedNext = normalizeReasoningText(reasoningText);
+  if (!normalizedNext) return;
+  if (normalizedCurrent === normalizedNext || normalizedCurrent.includes(normalizedNext)) return;
+  if (normalizedNext.includes(normalizedCurrent) || reasoningTextLooksLikeCorrection(normalizedCurrent, normalizedNext)) {
+    state.reasoningParts = [reasoningText];
+    return;
+  }
+  const lastIndex = state.reasoningParts.length - 1;
+  const last = state.reasoningParts[lastIndex] || "";
+  const normalizedLast = normalizeReasoningText(last);
+  if (normalizedLast && (normalizedLast === normalizedNext || normalizedLast.includes(normalizedNext))) return;
+  if (normalizedLast && (normalizedNext.includes(normalizedLast) || reasoningTextLooksLikeCorrection(normalizedLast, normalizedNext))) {
+    state.reasoningParts[lastIndex] = reasoningText;
+    return;
+  }
   state.reasoningParts.push(reasoningText);
+}
+
+function normalizeReasoningText(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function reasoningTextLooksLikeCorrection(current: string, next: string): boolean {
+  if (current.length < 8 || next.length < 8) return false;
+  const shorter = current.length <= next.length ? current : next;
+  const longer = current.length > next.length ? current : next;
+  if (longer.length - shorter.length > Math.max(12, Math.floor(longer.length / 3))) return false;
+  return levenshteinDistanceAtMost(shorter, longer, Math.max(2, Math.floor(longer.length / 5)));
+}
+
+function levenshteinDistanceAtMost(a: string, b: string, limit: number): boolean {
+  if (Math.abs(a.length - b.length) > limit) return false;
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array<number>(b.length + 1);
+    current[0] = i;
+    let rowMin = current[0];
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + cost);
+      if (current[j] < rowMin) rowMin = current[j];
+    }
+    if (rowMin > limit) return false;
+    previous = current;
+  }
+  return previous[b.length] <= limit;
 }
 
 function recordOutputItemType(state: CodexResponseParseState, item: any): void {

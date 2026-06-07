@@ -130,40 +130,218 @@ func (m *model) applyFinalReasoningContent(ev runtimeEvent) {
 		m.messages = append(m.messages, chatMessage{Role: "reasoning", Content: reasoningContent})
 		return
 	}
-	if m.streamedReasoningContent(m.activeReasoningStart) == reasoningContent {
+	if m.reconcileFinalReasoningContent(reasoningContent) {
 		return
+	}
+	m.messages = append(m.messages, chatMessage{Role: "reasoning", Content: reasoningContent})
+}
+
+func (m *model) reconcileFinalReasoningContent(reasoningContent string) bool {
+	indexes := m.reasoningBlockIndexesSince(m.activeReasoningStart)
+	if len(indexes) == 0 {
+		return false
+	}
+	if len(indexes) == 1 {
+		idx := indexes[0]
+		current := strings.TrimSpace(m.messages[idx].Content)
+		if current != reasoningContent {
+			m.messages[idx].Content = reasoningContent
+		}
+		return true
+	}
+	streamed := m.streamedReasoningContentFromIndexes(indexes)
+	if m.replaceMatchingReasoningBlocks(indexes, reasoningContent) {
+		return true
+	}
+	if reasoningEquivalent(streamed, reasoningContent) || reasoningLooseMatch(streamed, reasoningContent) {
+		m.replaceReasoningBlocksFromFinal(indexes, reasoningContent)
+		return true
 	}
 	if m.activeReasoningIndex >= 0 && m.activeReasoningIndex < len(m.messages) && m.messages[m.activeReasoningIndex].Role == "reasoning" {
 		current := strings.TrimSpace(m.messages[m.activeReasoningIndex].Content)
 		switch {
 		case current == reasoningContent:
-			return
-		case strings.HasPrefix(reasoningContent, current):
+			return true
+		case strings.HasPrefix(reasoningContent, current), strings.Contains(reasoningContent, current):
 			m.messages[m.activeReasoningIndex].Content = reasoningContent
-			return
-		case strings.Contains(reasoningContent, current):
-			m.messages[m.activeReasoningIndex].Content = reasoningContent
-			return
+			return true
 		}
 	}
-	m.messages = append(m.messages, chatMessage{Role: "reasoning", Content: reasoningContent})
+	return false
 }
 
-func (m *model) streamedReasoningContent(start int) string {
-	parts := []string{}
+func (m *model) reasoningBlockIndexesSince(start int) []int {
 	if start < 0 || start > len(m.messages) {
 		start = 0
 	}
-	for _, message := range m.messages[start:] {
-		if message.Role != "reasoning" {
+	indexes := []int{}
+	for i := start; i < len(m.messages); i++ {
+		if m.messages[i].Role == "reasoning" && strings.TrimSpace(m.messages[i].Content) != "" {
+			indexes = append(indexes, i)
+		}
+	}
+	return indexes
+}
+
+func (m *model) replaceReasoningBlocksFromFinal(indexes []int, reasoningContent string) {
+	parts := splitReasoningSections(reasoningContent)
+	if len(parts) != len(indexes) {
+		return
+	}
+	for i, idx := range indexes {
+		m.messages[idx].Content = parts[i]
+	}
+}
+
+func (m *model) replaceMatchingReasoningBlocks(indexes []int, reasoningContent string) bool {
+	parts := splitReasoningSections(reasoningContent)
+	if len(parts) != len(indexes) {
+		return false
+	}
+	matched := false
+	for i, idx := range indexes {
+		current := strings.TrimSpace(m.messages[idx].Content)
+		part := strings.TrimSpace(parts[i])
+		if part == "" {
 			continue
 		}
-		content := strings.TrimSpace(message.Content)
+		if current == part {
+			matched = true
+			continue
+		}
+		if reasoningLooseMatch(current, part) || strings.Contains(part, current) || strings.Contains(current, part) || reasoningEditDistanceClose(current, part) {
+			m.messages[idx].Content = part
+			matched = true
+		}
+	}
+	return matched
+}
+
+func (m *model) streamedReasoningContent(start int) string {
+	return m.streamedReasoningContentFromIndexes(m.reasoningBlockIndexesSince(start))
+}
+
+func (m *model) streamedReasoningContentFromIndexes(indexes []int) string {
+	parts := []string{}
+	for _, idx := range indexes {
+		if idx < 0 || idx >= len(m.messages) || m.messages[idx].Role != "reasoning" {
+			continue
+		}
+		content := strings.TrimSpace(m.messages[idx].Content)
 		if content != "" {
 			parts = append(parts, content)
 		}
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func splitReasoningSections(content string) []string {
+	sections := strings.Split(strings.TrimSpace(content), "\n\n")
+	parts := make([]string, 0, len(sections))
+	for _, section := range sections {
+		section = strings.TrimSpace(section)
+		if section != "" {
+			parts = append(parts, section)
+		}
+	}
+	return parts
+}
+
+func reasoningEquivalent(a, b string) bool {
+	return normalizeReasoningForCompare(a) == normalizeReasoningForCompare(b)
+}
+
+func reasoningLooseMatch(a, b string) bool {
+	na := normalizeReasoningForCompare(a)
+	nb := normalizeReasoningForCompare(b)
+	if na == "" || nb == "" {
+		return false
+	}
+	if strings.Contains(na, nb) || strings.Contains(nb, na) {
+		return true
+	}
+	shorter, longer := na, nb
+	if len(shorter) > len(longer) {
+		shorter, longer = longer, shorter
+	}
+	return len(shorter) >= 20 && longestCommonReasoningRunes(shorter, longer)*100/len(longer) >= 70
+}
+
+func normalizeReasoningForCompare(content string) string {
+	return strings.ToLower(strings.Join(strings.Fields(content), " "))
+}
+
+func reasoningEditDistanceClose(a, b string) bool {
+	na := normalizeReasoningForCompare(a)
+	nb := normalizeReasoningForCompare(b)
+	if len(na) < 8 || len(nb) < 8 {
+		return false
+	}
+	shorter, longer := na, nb
+	if len(shorter) > len(longer) {
+		shorter, longer = longer, shorter
+	}
+	allowed := max(2, len(longer)/5)
+	return levenshteinDistanceAtMost(shorter, longer, allowed)
+}
+
+func levenshteinDistanceAtMost(a, b string, limit int) bool {
+	ar := []rune(a)
+	br := []rune(b)
+	if len(ar) > len(br) {
+		ar, br = br, ar
+	}
+	if len(br)-len(ar) > limit {
+		return false
+	}
+	prev := make([]int, len(br)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ar); i++ {
+		current := make([]int, len(br)+1)
+		current[0] = i
+		rowMin := current[0]
+		for j := 1; j <= len(br); j++ {
+			cost := 0
+			if ar[i-1] != br[j-1] {
+				cost = 1
+			}
+			current[j] = min(min(current[j-1]+1, prev[j]+1), prev[j-1]+cost)
+			if current[j] < rowMin {
+				rowMin = current[j]
+			}
+		}
+		if rowMin > limit {
+			return false
+		}
+		prev = current
+	}
+	return prev[len(br)] <= limit
+}
+
+func longestCommonReasoningRunes(a, b string) int {
+	ar := []rune(a)
+	br := []rune(b)
+	if len(ar) == 0 || len(br) == 0 {
+		return 0
+	}
+	prev := make([]int, len(br)+1)
+	best := 0
+	for i := 1; i <= len(ar); i++ {
+		current := make([]int, len(br)+1)
+		for j := 1; j <= len(br); j++ {
+			if ar[i-1] != br[j-1] {
+				continue
+			}
+			current[j] = prev[j-1] + 1
+			if current[j] > best {
+				best = current[j]
+			}
+		}
+		prev = current
+	}
+	return best
 }
 
 func (m model) updateFakeStreamTick() (tea.Model, tea.Cmd) {

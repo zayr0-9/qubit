@@ -174,12 +174,10 @@ func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.submitInput()
 	case "pgup":
-		m.autoScroll = false
-		m.viewport.PageUp()
+		m.chatPageUp()
 		return m, nil
 	case "pgdown":
-		m.viewport.PageDown()
-		m.autoScroll = m.viewport.AtBottom()
+		m.chatPageDown()
 		return m, nil
 	}
 
@@ -267,13 +265,7 @@ func (m model) insertInputNewline() (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateInputAndViewport(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-	previousYOffset := m.viewport.YOffset()
-	m.viewport, cmd = m.viewport.Update(msg)
-	if m.viewport.YOffset() != previousYOffset {
-		m.autoScroll = m.viewport.AtBottom()
-	}
-	return m, cmd
+	return m, nil
 }
 
 func isOpenForkTreeShortcut(msg tea.KeyPressMsg) bool {

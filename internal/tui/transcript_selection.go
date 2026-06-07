@@ -48,11 +48,9 @@ func (m model) updateMouseWheelRouted(msg tea.MouseWheelMsg) tea.Model {
 func (m model) updateChatMouseWheel(msg tea.MouseWheelMsg) tea.Model {
 	switch msg.Mouse().Button {
 	case tea.MouseWheelUp:
-		m.autoScroll = false
-		m.viewport.ScrollUp(max(1, m.viewport.MouseWheelDelta))
+		m.chatScrollUp(max(1, m.viewport.MouseWheelDelta))
 	case tea.MouseWheelDown:
-		m.viewport.ScrollDown(max(1, m.viewport.MouseWheelDelta))
-		m.autoScroll = m.viewport.AtBottom()
+		m.chatScrollDown(max(1, m.viewport.MouseWheelDelta))
 	}
 	return m
 }
@@ -253,11 +251,12 @@ func (m model) updateMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 }
 
 func (m model) linkAtMouse(mouse tea.Mouse) (string, bool) {
-	if mouse.Button != tea.MouseLeft || mouse.Y < m.chatTopY || mouse.Y >= m.chatTopY+m.viewport.Height() {
+	if mouse.Button != tea.MouseLeft || mouse.Y < m.chatTopY || mouse.Y >= m.chatTopY+m.chatList.Height {
 		return "", false
 	}
-	line := m.viewport.YOffset() + mouse.Y - m.chatTopY
-	for _, hitbox := range m.linkHitboxes {
+	m.renderChatListVisible()
+	line := m.chatList.YOffset + mouse.Y - m.chatTopY
+	for _, hitbox := range m.chatList.Visible.LinkHitboxes {
 		if hitbox.Line == line && mouse.X >= hitbox.StartX && mouse.X <= hitbox.EndX {
 			return hitbox.URL, true
 		}
@@ -266,11 +265,12 @@ func (m model) linkAtMouse(mouse tea.Mouse) (string, bool) {
 }
 
 func (m model) toggleHitboxAtMouse(mouse tea.Mouse) model {
-	if mouse.Button != tea.MouseLeft || mouse.Y < m.chatTopY || mouse.Y >= m.chatTopY+m.viewport.Height() {
+	if mouse.Button != tea.MouseLeft || mouse.Y < m.chatTopY || mouse.Y >= m.chatTopY+m.chatList.Height {
 		return m
 	}
-	contentY := m.viewport.YOffset() + mouse.Y - m.chatTopY
-	for _, hitbox := range m.toolHitboxes {
+	m.renderChatListVisible()
+	contentY := m.chatList.YOffset + mouse.Y - m.chatTopY
+	for _, hitbox := range m.chatList.Visible.ToolHitboxes {
 		if contentY >= hitbox.StartY && contentY <= hitbox.EndY && mouse.X >= hitbox.StartX && mouse.X <= hitbox.EndX {
 			m.autoScroll = false
 			if hitbox.Kind == "reasoning" {
@@ -285,41 +285,40 @@ func (m model) toggleHitboxAtMouse(mouse tea.Mouse) model {
 }
 
 func (m model) mouseToTranscriptPoint(mouse tea.Mouse) (transcriptSelectionPoint, bool) {
-	if mouse.Y < m.chatTopY || mouse.Y >= m.chatTopY+m.viewport.Height() {
+	if mouse.Y < m.chatTopY || mouse.Y >= m.chatTopY+m.chatList.Height {
 		return transcriptSelectionPoint{}, false
 	}
-	line := m.viewport.YOffset() + mouse.Y - m.chatTopY
-	if line < 0 || line >= len(m.transcriptLines) {
+	line := m.chatList.YOffset + mouse.Y - m.chatTopY
+	plainLine, ok := m.chatListLineAtAbsoluteY(line)
+	if !ok {
 		return transcriptSelectionPoint{}, false
 	}
-	plain := m.transcriptLines[line].Text
-	col := clampInt(mouse.X, 0, runewidth.StringWidth(plain))
+	col := clampInt(mouse.X, 0, runewidth.StringWidth(plainLine.Text))
 	return transcriptSelectionPoint{Line: line, Col: col}, true
 }
 
 func (m model) clampMouseToTranscriptPoint(mouse tea.Mouse) transcriptSelectionPoint {
-	if len(m.transcriptLines) == 0 {
+	m.ensureChatList()
+	if m.chatList.TotalHeight == 0 {
 		return transcriptSelectionPoint{}
 	}
-	line := m.viewport.YOffset() + mouse.Y - m.chatTopY
-	line = clampInt(line, 0, len(m.transcriptLines)-1)
-	plain := m.transcriptLines[line].Text
-	col := clampInt(mouse.X, 0, runewidth.StringWidth(plain))
+	line := m.chatList.YOffset + mouse.Y - m.chatTopY
+	line = clampInt(line, 0, m.chatList.TotalHeight-1)
+	plainLine, _ := m.chatListLineAtAbsoluteY(line)
+	col := clampInt(mouse.X, 0, runewidth.StringWidth(plainLine.Text))
 	return transcriptSelectionPoint{Line: line, Col: col}
 }
 
 func (m model) scrollTranscriptSelectionAtEdges(mouse tea.Mouse) model {
-	if m.viewport.Height() <= 0 {
+	if m.chatList.Height <= 0 {
 		return m
 	}
 	if mouse.Y <= m.chatTopY {
-		m.autoScroll = false
-		m.viewport.ScrollUp(max(1, m.viewport.MouseWheelDelta))
+		m.chatScrollUp(max(1, m.viewport.MouseWheelDelta))
 		m.transcriptSelection.Cursor = m.clampMouseToTranscriptPoint(tea.Mouse{X: mouse.X, Y: m.chatTopY})
-	} else if mouse.Y >= m.chatTopY+m.viewport.Height()-1 {
-		m.viewport.ScrollDown(max(1, m.viewport.MouseWheelDelta))
-		m.autoScroll = m.viewport.AtBottom()
-		m.transcriptSelection.Cursor = m.clampMouseToTranscriptPoint(tea.Mouse{X: mouse.X, Y: m.chatTopY + m.viewport.Height() - 1})
+	} else if mouse.Y >= m.chatTopY+m.chatList.Height-1 {
+		m.chatScrollDown(max(1, m.viewport.MouseWheelDelta))
+		m.transcriptSelection.Cursor = m.clampMouseToTranscriptPoint(tea.Mouse{X: mouse.X, Y: m.chatTopY + m.chatList.Height - 1})
 	}
 	return m
 }
@@ -331,18 +330,22 @@ func (m model) transcriptSelectedText() string {
 	}
 	selected := make([]string, 0, len(ranges))
 	for _, r := range ranges {
-		if r.Line < 0 || r.Line >= len(m.transcriptLines) {
+		line, ok := m.chatListLineAtAbsoluteY(r.Line)
+		if !ok {
 			continue
 		}
-		line := m.transcriptLines[r.Line].Text
-		part := strings.TrimRight(sliceStringByCells(line, r.StartCol, r.EndCol), " ")
+		part := strings.TrimRight(sliceStringByCells(line.Text, r.StartCol, r.EndCol), " ")
 		selected = append(selected, part)
 	}
 	return strings.TrimRight(strings.Join(selected, "\n"), "\n")
 }
 
 func (m model) transcriptSelectedRanges() []transcriptSelectedLineRange {
-	if !m.transcriptSelection.Active || len(m.transcriptLines) == 0 {
+	if !m.transcriptSelection.Active {
+		return nil
+	}
+	m.ensureChatList()
+	if m.chatList.TotalHeight == 0 {
 		return nil
 	}
 	start := m.transcriptSelection.Anchor
@@ -350,14 +353,18 @@ func (m model) transcriptSelectedRanges() []transcriptSelectedLineRange {
 	if compareTranscriptPoints(end, start) < 0 {
 		start, end = end, start
 	}
-	start.Line = clampInt(start.Line, 0, len(m.transcriptLines)-1)
-	end.Line = clampInt(end.Line, 0, len(m.transcriptLines)-1)
+	start.Line = clampInt(start.Line, 0, m.chatList.TotalHeight-1)
+	end.Line = clampInt(end.Line, 0, m.chatList.TotalHeight-1)
 	if start.Line == end.Line && start.Col == end.Col {
 		return nil
 	}
 	ranges := make([]transcriptSelectedLineRange, 0, end.Line-start.Line+1)
 	for line := start.Line; line <= end.Line; line++ {
-		lineWidth := runewidth.StringWidth(m.transcriptLines[line].Text)
+		plainLine, ok := m.chatListLineAtAbsoluteY(line)
+		if !ok {
+			continue
+		}
+		lineWidth := runewidth.StringWidth(plainLine.Text)
 		startCol := 0
 		endCol := lineWidth
 		if line == start.Line {
@@ -394,16 +401,26 @@ func compareTranscriptPoints(a transcriptSelectionPoint, b transcriptSelectionPo
 }
 
 func (m *model) repaintTranscriptSelection() {
-	content := m.transcriptContent
-	if content == "" {
-		content = m.viewport.View()
-	}
+	content := m.renderChatListView()
+	m.viewport.SetContent(content)
+}
+
+func (m *model) applyTranscriptSelectionToVisible(content string) string {
 	ranges := m.transcriptSelectedRanges()
 	if len(ranges) == 0 {
-		m.viewport.SetContent(content)
-		return
+		return content
 	}
-	m.viewport.SetContent(applyTranscriptSelection(content, ranges))
+	visibleRanges := make([]transcriptSelectedLineRange, 0, len(ranges))
+	start := m.chatList.YOffset
+	end := start + m.chatList.Height
+	for _, r := range ranges {
+		if r.Line < start || r.Line >= end {
+			continue
+		}
+		r.Line -= start
+		visibleRanges = append(visibleRanges, r)
+	}
+	return applyTranscriptSelection(content, visibleRanges)
 }
 
 func applyTranscriptSelection(content string, ranges []transcriptSelectedLineRange) string {

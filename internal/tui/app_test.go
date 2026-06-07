@@ -786,12 +786,12 @@ func TestRefreshViewportPreservesOffsetWhenAutoScrollDisabled(t *testing.T) {
 		"line 6", "line 7", "line 8", "line 9", "line 10",
 	}, "\n")}}
 	m.refreshViewport()
-	m.viewport.SetYOffset(2)
+	m.setChatYOffset(2)
 	m.autoScroll = false
 
 	m.refreshViewport()
 
-	if got := m.viewport.YOffset(); got != 2 {
+	if got := m.chatYOffset(); got != 2 {
 		t.Fatalf("YOffset = %d, want preserved offset 2", got)
 	}
 }
@@ -807,12 +807,12 @@ func TestLayoutPreservesOffsetWhenAutoScrollDisabled(t *testing.T) {
 		"line 6", "line 7", "line 8", "line 9", "line 10",
 	}, "\n")}}
 	m.refreshViewport()
-	m.viewport.SetYOffset(2)
+	m.setChatYOffset(2)
 	m.autoScroll = false
 
 	m.layout()
 
-	if got := m.viewport.YOffset(); got != 2 {
+	if got := m.chatYOffset(); got != 2 {
 		t.Fatalf("YOffset = %d, want preserved offset 2", got)
 	}
 }
@@ -2366,6 +2366,36 @@ func TestForkCommandWithMessageNumberStartsEdit(t *testing.T) {
 		t.Fatalf("composer value = %q, want second question", got.composer.Value())
 	}
 }
+
+func TestForkCommandWithMessageNumberAndPreviewStartsEdit(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 80
+	m.height = 24
+	m.messages = []chatMessage{
+		{Role: "user", Content: "first question"},
+		{Role: "assistant", Content: "first answer"},
+		{Role: "user", Content: "second question"},
+		{Role: "assistant", Content: "second answer"},
+	}
+	m.layout()
+
+	updated, cmd := m.handleSlashCommand("/fork 3 second question")
+	got := updated.(model)
+
+	if cmd != nil {
+		t.Fatalf("/fork 3 second question returned command = %T, want nil while editing", cmd)
+	}
+	if !got.messageEdit.Active {
+		t.Fatal("message edit inactive, want active")
+	}
+	if got.messageEdit.MessageIndex != 2 {
+		t.Fatalf("edit message index = %d, want 2", got.messageEdit.MessageIndex)
+	}
+	if got.composer.Value() != "second question" {
+		t.Fatalf("composer value = %q, want second question", got.composer.Value())
+	}
+}
 func TestConsecutiveToolGroupsWrapEveryFour(t *testing.T) {
 	m := initialModel(nil)
 	m.session = "sess_1"
@@ -2403,7 +2433,7 @@ func TestAutoScrollStaysOffDuringNewContentUntilUserReachesBottom(t *testing.T) 
 		"line 6", "line 7", "line 8", "line 9", "line 10",
 	}, "\n")}}
 	m.refreshViewport()
-	m.viewport.GotoBottom()
+	m.chatGotoBottom()
 	m.autoScroll = true
 
 	updated, _ := m.updateKey(tea.KeyPressMsg{Code: tea.KeyPgUp})
@@ -2411,21 +2441,21 @@ func TestAutoScrollStaysOffDuringNewContentUntilUserReachesBottom(t *testing.T) 
 	if m.autoScroll {
 		t.Fatal("autoScroll = true after PgUp, want false")
 	}
-	yOffset := m.viewport.YOffset()
+	yOffset := m.chatYOffset()
 	m.messages[0].Content += "\nline 11\nline 12"
 	m.refreshViewport()
 	if m.autoScroll {
 		t.Fatal("autoScroll restarted before user reached bottom")
 	}
-	if got := m.viewport.YOffset(); got != yOffset {
+	if got := m.chatYOffset(); got != yOffset {
 		t.Fatalf("YOffset after new content = %d, want preserved %d", got, yOffset)
 	}
 
-	for i := 0; i < 20 && !m.viewport.AtBottom(); i++ {
+	for i := 0; i < 20 && !m.chatAtBottom(); i++ {
 		m = m.updateMouseWheelRouted(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
 	}
-	if !m.viewport.AtBottom() {
-		t.Fatal("viewport did not reach bottom")
+	if !m.chatAtBottom() {
+		t.Fatal("chat did not reach bottom")
 	}
 	if !m.autoScroll {
 		t.Fatal("autoScroll = false at bottom, want true")
@@ -2746,7 +2776,8 @@ func TestTranscriptMouseDragSelectsTextAndEscClears(t *testing.T) {
 	m.layout()
 	m.messages = []chatMessage{{Role: "assistant", Content: "line 1\nline 2\nline 3\nline 4"}}
 	m.refreshViewport()
-	m.viewport.GotoTop()
+	m.autoScroll = false
+	m.setChatYOffset(0)
 
 	clicked := m.updateMouseClick(tea.MouseClickMsg{X: 0, Y: m.chatTopY, Button: tea.MouseLeft}).(model)
 	if !clicked.transcriptSelection.Active {
@@ -2884,11 +2915,11 @@ func TestCtrlClickTranscriptLinkReturnsOpenCommand(t *testing.T) {
 	m.height = 10
 	m.layout()
 	content := "see https://example.com/docs now"
-	m.viewport.SetContent(content)
-	m.transcriptContent = content
-	m.transcriptLines = transcriptRenderLines(content)
-	m.linkHitboxes = transcriptLinkHitboxes(m.transcriptLines)
-	m.viewport.GotoTop()
+	m.messages = []chatMessage{{Role: "assistant", Content: content}}
+	m.autoScroll = false
+	m.refreshViewport()
+	m.setChatYOffset(0)
+	m.renderChatListVisible()
 
 	if len(m.linkHitboxes) != 1 {
 		t.Fatalf("link hitboxes = %d, want 1", len(m.linkHitboxes))
@@ -2915,11 +2946,11 @@ func TestCtrlDragTranscriptLinkDoesNotOpen(t *testing.T) {
 	m.height = 10
 	m.layout()
 	content := "see https://example.com/docs now"
-	m.viewport.SetContent(content)
-	m.transcriptContent = content
-	m.transcriptLines = transcriptRenderLines(content)
-	m.linkHitboxes = transcriptLinkHitboxes(m.transcriptLines)
-	m.viewport.GotoTop()
+	m.messages = []chatMessage{{Role: "assistant", Content: content}}
+	m.autoScroll = false
+	m.refreshViewport()
+	m.setChatYOffset(0)
+	m.renderChatListVisible()
 
 	x := m.linkHitboxes[0].StartX
 	clicked := m.updateMouseClick(tea.MouseClickMsg{X: x, Y: m.chatTopY, Button: tea.MouseLeft, Mod: tea.ModCtrl}).(model)
@@ -2941,11 +2972,11 @@ func TestPlainClickTranscriptLinkDoesNotOpen(t *testing.T) {
 	m.height = 10
 	m.layout()
 	content := "see https://example.com/docs now"
-	m.viewport.SetContent(content)
-	m.transcriptContent = content
-	m.transcriptLines = transcriptRenderLines(content)
-	m.linkHitboxes = transcriptLinkHitboxes(m.transcriptLines)
-	m.viewport.GotoTop()
+	m.messages = []chatMessage{{Role: "assistant", Content: content}}
+	m.autoScroll = false
+	m.refreshViewport()
+	m.setChatYOffset(0)
+	m.renderChatListVisible()
 
 	x := m.linkHitboxes[0].StartX
 	clicked := m.updateMouseClick(tea.MouseClickMsg{X: x, Y: m.chatTopY, Button: tea.MouseLeft}).(model)
@@ -3729,5 +3760,143 @@ func TestRuntimeDisconnectPreservesVisibleStreamAndReconnectRefreshesTranscript(
 	payload := runBatchSendCommand(t, refreshCmd, stdin, "session.messages")
 	if payload["type"] != "session.messages" || payload["sessionId"] != "sess_1" {
 		t.Fatalf("payload = %#v, want session.messages refresh for active session", payload)
+	}
+}
+
+func TestChatListBuildGroupsContiguousToolMessages(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 20
+	m.layout()
+	m.messages = []chatMessage{
+		{Role: "user", Content: "one"},
+		{Role: "tool", ToolGroup: &toolGroup{ID: "a", Name: "readFile"}},
+		{Role: "tool", ToolGroup: &toolGroup{ID: "b", Name: "ripgrep"}},
+		{Role: "assistant", Content: "two"},
+		{Role: "reasoning", Content: "thinking"},
+	}
+
+	items := m.buildChatListItems(80)
+	if len(items) != 4 {
+		t.Fatalf("items = %d, want 4: %#v", len(items), items)
+	}
+	if items[1].Kind != chatItemToolGroup || items[1].StartIndex != 1 || items[1].EndIndex != 2 {
+		t.Fatalf("tool group item = %#v, want grouped indexes 1..2", items[1])
+	}
+	if items[3].Kind != chatItemReasoning {
+		t.Fatalf("last item kind = %v, want reasoning", items[3].Kind)
+	}
+}
+
+func TestChatListVisibleRangeOverLongTranscript(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 12
+	m.layout()
+	m.messages = make([]chatMessage, 0, 1200)
+	for i := 0; i < 1200; i++ {
+		m.messages = append(m.messages, chatMessage{Role: "assistant", Content: fmt.Sprintf("message %04d", i)})
+	}
+	m.autoScroll = false
+	m.refreshViewport()
+	m.setChatYOffset(600)
+	visible := m.renderChatListVisible()
+
+	if visible.TotalHeight <= 1200 {
+		t.Fatalf("total height = %d, want separators included over messages", visible.TotalHeight)
+	}
+	if len(visible.VisibleRows) != m.chatList.Height {
+		t.Fatalf("visible rows = %d, want viewport height %d", len(visible.VisibleRows), m.chatList.Height)
+	}
+	if strings.Contains(plainText(visible.Content), "message 0000") || strings.Contains(plainText(visible.Content), "message 1199") {
+		t.Fatalf("visible content includes transcript edges while scrolled middle: %q", plainText(visible.Content))
+	}
+}
+
+func TestChatListStreamingWhileScrolledUpPreservesOffset(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 12
+	m.layout()
+	for i := 0; i < 40; i++ {
+		m.messages = append(m.messages, chatMessage{Role: "assistant", Content: fmt.Sprintf("history %02d", i)})
+	}
+	m.messages = append(m.messages, chatMessage{Role: "assistant", Content: "stream"})
+	m.streaming = true
+	m.streamingMessageIndex = len(m.messages) - 1
+	m.autoScroll = false
+	m.refreshViewport()
+	m.setChatYOffset(5)
+	yOffset := m.chatYOffset()
+
+	m.messages[m.streamingMessageIndex].Content = "stream more content"
+	m.refreshViewportForStreaming()
+
+	if got := m.chatYOffset(); got != yOffset {
+		t.Fatalf("YOffset after streaming tick = %d, want preserved %d", got, yOffset)
+	}
+}
+
+func TestForkEditAtDisplayedMessageElevenDoesNotKeepOriginalEleven(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.width = 100
+	m.height = 30
+	m.session = "sess_parent"
+	m.autoNewSessionOnChat = false
+	m.messages = []chatMessage{
+		{Role: "user", Content: "message 1"},
+		{Role: "assistant", Content: "answer 2"},
+		{Role: "user", Content: "message 3"},
+		{Role: "assistant", Content: "answer 4"},
+		{Role: "user", Content: "message 5"},
+		{Role: "assistant", Content: "answer 6"},
+		{Role: "user", Content: "message 7"},
+		{Role: "assistant", Content: "answer 8"},
+		{Role: "user", Content: "message 9"},
+		{Role: "assistant", Content: "answer 10"},
+		{Role: "user", Content: "original message 11"},
+		{Role: "assistant", Content: "answer 12"},
+	}
+	m.layout()
+
+	updated, cmd := m.handleSlashCommand("/fork 11 how does run status different from session?")
+	got := updated.(model)
+	if cmd != nil {
+		t.Fatalf("/fork 11 returned command = %T, want nil while editing", cmd)
+	}
+	if !got.messageEdit.Active {
+		t.Fatal("message edit inactive, want active")
+	}
+	if got.messageEdit.MessageIndex != 10 {
+		t.Fatalf("edit message index = %d, want raw displayed-message index 10", got.messageEdit.MessageIndex)
+	}
+	if got.composer.Value() != "original message 11" {
+		t.Fatalf("composer value = %q, want original message 11", got.composer.Value())
+	}
+
+	got.composer.SetValue("edited message 11a")
+	updated, cmd = got.submitInput()
+	got = updated.(model)
+	if len(got.messages) != 11 {
+		t.Fatalf("message count = %d, want 11 after replacing displayed message 11", len(got.messages))
+	}
+	if got.messages[10].Role != "user" || got.messages[10].Content != "edited message 11a" {
+		t.Fatalf("last message = %#v, want edited replacement at displayed message 11", got.messages[10])
+	}
+	for i, message := range got.messages {
+		if message.Content == "original message 11" || message.Content == "answer 12" {
+			t.Fatalf("message[%d] = %#v, original branch tail leaked into edited fork preview: %#v", i, message, got.messages)
+		}
+	}
+
+	payload := runBatchSendCommand(t, cmd, stdin, "chat")
+	assertPayload(t, payload, "chat", "sess_parent")
+	if payload["input"] != "edited message 11a" {
+		t.Fatalf("chat input = %#v, want edited message 11a", payload["input"])
+	}
+	if payload["replaceFromMessageIndex"] != float64(10) {
+		t.Fatalf("replaceFromMessageIndex = %#v, want 10 for displayed message 11", payload["replaceFromMessageIndex"])
 	}
 }

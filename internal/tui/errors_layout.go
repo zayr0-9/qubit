@@ -140,11 +140,14 @@ func (m *model) layout() {
 	mainHeight := max(1, m.height-bottomHeight)
 	bodyHeight := max(1, mainHeight-lipgloss.Height(header))
 	m.chatTopY = lipgloss.Height(header)
-	previousYOffset := m.viewport.YOffset()
+	previousYOffset := m.chatYOffset()
 	previousWidth := m.viewport.Width()
 	m.viewport.SetWidth(chatW)
 	m.viewport.SetHeight(max(1, bodyHeight))
+	m.chatList.Width = chatW
+	m.chatList.Height = max(1, bodyHeight)
 	if previousWidth != chatW {
+		m.chatList.Cache = make(map[chatListItemKey]chatListRenderedItem)
 		m.refreshViewport()
 		return
 	}

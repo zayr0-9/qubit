@@ -155,6 +155,33 @@ describe("parseCodexSseText", () => {
     assert.equal(parsed.reasoningContent, "same reasoning");
   });
 
+  it("replaces partial streamed reasoning with fuller completed reasoning", () => {
+    const parsed = parseCodexSseText([
+      frame("response.reasoning_summary_text.delta", { type: "response.reasoning_summary_text.delta", delta: "I see that the is asking me." }),
+      frame("response.output_item.done", {
+        type: "response.output_item.done",
+        item: { type: "reasoning", summary: [{ type: "summary_text", text: "I see that the user is asking me." }] },
+      }),
+    ].join("\n"));
+
+    assert.equal(parsed.reasoningContent, "I see that the user is asking me.");
+  });
+
+  it("does not duplicate reasoning seen in output item done and completed", () => {
+    const parsed = parseCodexSseText([
+      frame("response.output_item.done", {
+        type: "response.output_item.done",
+        item: { type: "reasoning", summary: [{ type: "summary_text", text: "Inspect code and patch." }] },
+      }),
+      frame("response.completed", {
+        type: "response.completed",
+        response: { output: [{ type: "reasoning", summary: [{ type: "summary_text", text: "Inspect code and patch." }] }] },
+      }),
+    ].join("\n"));
+
+    assert.equal(parsed.reasoningContent, "Inspect code and patch.");
+  });
+
   it("keeps hosted web search calls in outputItems without creating local tool calls", () => {
     const webSearchCall = {
       id: "ws_123",

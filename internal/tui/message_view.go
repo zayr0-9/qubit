@@ -8,26 +8,7 @@ import (
 )
 
 func (m *model) refreshViewport() {
-	previousYOffset := m.viewport.YOffset()
-	m.ensureSegmentCacheSize()
-	m.toolHitboxes = nil
-	var b strings.Builder
-	contentLine := 0
-	for i := 0; i < len(m.messages); i++ {
-		segment, nextIndex := m.renderMessageSegment(i, contentLine)
-		b.WriteString(segment.Text)
-		for _, hitbox := range segment.Tools {
-			hitbox.StartY += contentLine
-			hitbox.EndY += contentLine
-			m.toolHitboxes = append(m.toolHitboxes, hitbox)
-		}
-		contentLine += appendedLineCountDelta(segment.Text, contentLine == 0)
-		i = nextIndex
-	}
-	content := b.String()
-	m.transcriptContent = content
-	m.rebuildTranscriptMetadata()
-	m.repaintTranscriptSelection()
+	previousYOffset := m.chatYOffset()
 	m.restoreViewportPosition(previousYOffset)
 }
 func (m *model) ensureSegmentCacheSize() {
@@ -164,11 +145,16 @@ func (m *model) rebuildTranscriptMetadata() {
 	m.linkHitboxes = transcriptLinkHitboxes(m.transcriptLines)
 }
 func (m *model) restoreViewportPosition(yOffset int) {
+	m.ensureChatList()
+	m.remeasureChatList()
 	if m.autoScroll {
-		m.viewport.GotoBottom()
-		return
+		m.chatList.YOffset = max(0, m.chatList.TotalHeight-m.chatList.Height)
+	} else {
+		m.chatList.YOffset = clampInt(yOffset, 0, max(0, m.chatList.TotalHeight-m.chatList.Height))
 	}
-	m.viewport.SetYOffset(clampInt(yOffset, 0, max(0, m.viewport.TotalLineCount()-m.viewport.Height())))
+	visible := m.renderChatListVisible()
+	m.viewport.SetContent(visible.Content)
+	m.viewport.SetYOffset(m.chatList.YOffset)
 }
 func messageSeparator(prev chatMessage, next chatMessage) string {
 	if prev.Role == "user" {
@@ -183,11 +169,7 @@ func messageSeparator(prev chatMessage, next chatMessage) string {
 	return "\n\n"
 }
 func separatorBlankLineCount(separator string) int {
-	newlines := strings.Count(separator, "\n")
-	if newlines == 0 {
-		return 0
-	}
-	return newlines - 1
+	return strings.Count(separator, "\n")
 }
 func (m *model) renderViewMessage(message chatMessage) string {
 	title := fallback(message.Title, "View")
@@ -325,20 +307,10 @@ func (m *model) clearRenderCaches() {
 }
 
 func (m *model) refreshViewportForStreaming() {
-	if !m.streaming || m.streamingMessageIndex < 0 || m.streamingMessageIndex >= len(m.messages) {
-		m.refreshViewport()
-		return
+	if m.streaming && m.streamingMessageIndex > 0 {
+		m.streamingPrefix(max(20, m.viewport.Width()))
 	}
-	previousYOffset := m.viewport.YOffset()
-	width := max(20, m.viewport.Width())
-	prefix := m.streamingPrefix(width)
-	segment, _ := m.renderMessageSegment(m.streamingMessageIndex, prefix.PrefixLineCount)
-	content := prefix.Prefix + segment.Text
-	m.transcriptContent = content
-	m.rebuildTranscriptMetadata()
-	m.toolHitboxes = append([]toolHitbox{}, prefix.PrefixTools...)
-	m.repaintTranscriptSelection()
-	m.restoreViewportPosition(previousYOffset)
+	m.refreshViewport()
 }
 
 func (m *model) streamingPrefix(width int) streamingTranscriptCache {

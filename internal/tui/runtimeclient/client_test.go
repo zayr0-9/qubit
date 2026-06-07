@@ -129,3 +129,31 @@ func TestReadStdoutHandlesLargeRuntimeEventLine(t *testing.T) {
 		t.Fatal("large runtime event was not delivered")
 	}
 }
+
+func TestSummarizeRuntimeEventCompactsAssistantContent(t *testing.T) {
+	raw := []byte(`{"type":"assistant","id":"msg-1","runId":"run-1","sessionId":"sess-1","status":"completed","content":"full assistant response that should not be logged"}`)
+	ev := protocol.RuntimeEvent{Type: "assistant", ID: "msg-1", RunID: "run-1", SessionID: "sess-1", Status: "completed", Content: "full assistant response that should not be logged"}
+
+	got := summarizeRuntimeEvent(raw, ev)
+
+	if !strings.Contains(got, "assistant") || !strings.Contains(got, "runId=run-1") || !strings.Contains(got, "contentBytes=49") {
+		t.Fatalf("summary = %q, want assistant metadata and content length", got)
+	}
+	if strings.Contains(got, "full assistant response") || strings.Contains(got, `"content"`) {
+		t.Fatalf("summary = %q, want assistant content omitted", got)
+	}
+}
+
+func TestSummarizeRuntimeEventCompactsReasoningDeltaContent(t *testing.T) {
+	raw := []byte(`{"type":"reasoning.delta","runId":"run-1","sessionId":"sess-1","content":" one token at a time"}`)
+	ev := protocol.RuntimeEvent{Type: "reasoning.delta", RunID: "run-1", SessionID: "sess-1", Content: " one token at a time"}
+
+	got := summarizeRuntimeEvent(raw, ev)
+
+	if !strings.Contains(got, "reasoning.delta") || !strings.Contains(got, "runId=run-1") || !strings.Contains(got, "contentBytes=20") {
+		t.Fatalf("summary = %q, want reasoning delta metadata and content length", got)
+	}
+	if strings.Contains(got, "one token") || strings.Contains(got, `"content"`) {
+		t.Fatalf("summary = %q, want reasoning delta content omitted", got)
+	}
+}

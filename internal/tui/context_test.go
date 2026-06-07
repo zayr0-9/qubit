@@ -179,6 +179,62 @@ func TestAssistantEventDoesNotDuplicateStreamedReasoningBlock(t *testing.T) {
 	}
 }
 
+func TestAssistantEventReplacesMalformedStreamedReasoningDraft(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.activeRunID = "run_1"
+
+	m.applyReasoningDeltaEvent(runtimeEvent{Type: "reasoning.delta", RunID: "run_1", Content: "I see that the is asking me to inspect code."})
+	m.applyAssistantEvent(runtimeEvent{Type: "assistant", RunID: "run_1", Content: "final answer", ReasoningContent: "I see that the user is asking me to inspect code."})
+
+	reasoningBlocks := 0
+	for _, message := range m.messages {
+		if message.Role == "reasoning" {
+			reasoningBlocks++
+			if message.Content != "I see that the user is asking me to inspect code." {
+				t.Fatalf("reasoning content = %q, want final corrected reasoning", message.Content)
+			}
+		}
+	}
+	if reasoningBlocks != 1 {
+		t.Fatalf("reasoning blocks = %d, messages = %#v; want one corrected reasoning block", reasoningBlocks, m.messages)
+	}
+}
+
+func TestAssistantEventDoesNotAppendAggregateWhenFinalCorrectsToolInterleavedReasoning(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.activeRunID = "run_1"
+	m.session = "sess_1"
+
+	m.applyReasoningDeltaEvent(runtimeEvent{Type: "reasoning.delta", RunID: "run_1", SessionID: "sess_1", Content: "before tol"})
+	m.applyToolCallStart(runtimeEvent{Type: "tool.call.start", RunID: "run_1", SessionID: "sess_1", Step: 1, ToolCallID: "call_1", ToolName: "readFiles", Status: "running"})
+	m.applyReasoningDeltaEvent(runtimeEvent{Type: "reasoning.delta", RunID: "run_1", SessionID: "sess_1", Content: "after tool"})
+	m.applyAssistantEvent(runtimeEvent{Type: "assistant", RunID: "run_1", SessionID: "sess_1", Content: "final", ReasoningContent: "before tool\n\nafter tool"})
+
+	reasoningBlocks := 0
+	for _, message := range m.messages {
+		if message.Role == "reasoning" {
+			reasoningBlocks++
+		}
+	}
+	if reasoningBlocks != 2 {
+		t.Fatalf("reasoning blocks = %d, messages = %#v; want two corrected streamed reasoning blocks and no aggregate duplicate", reasoningBlocks, m.messages)
+	}
+	for _, message := range m.messages {
+		if message.Role == "reasoning" {
+			if message.Content != "before tool" {
+				t.Fatalf("first reasoning message = %#v, want corrected first reasoning", message)
+			}
+			break
+		}
+	}
+}
+
 func TestReasoningDeltaAfterToolStartsNewReasoningBlock(t *testing.T) {
 	m := initialModel(nil)
 	m.width = 100

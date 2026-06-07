@@ -435,7 +435,7 @@ func (m model) updateForkSelector(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m model) forkPointByNumber(arg string) (forkPoint, bool) {
 	fields := strings.Fields(arg)
-	if len(fields) != 1 {
+	if len(fields) == 0 {
 		return forkPoint{}, false
 	}
 	number, err := strconv.Atoi(fields[0])

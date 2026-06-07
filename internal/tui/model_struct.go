@@ -12,6 +12,7 @@ type model struct {
 	height int
 
 	viewport         viewport.Model
+	chatList         chatListState
 	composer         composerModel
 	spinner          spinner.Model
 	inputCursorPulse int

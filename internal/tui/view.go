@@ -48,7 +48,7 @@ func (m model) renderMainArea(height int) string {
 	}
 	header := m.renderHeader()
 	bodyHeight := max(0, height-lipgloss.Height(header))
-	chatContent := m.viewport.View()
+	chatContent := m.renderChatListView()
 	if m.mode == modeSessionPicker {
 		chatContent = m.renderSessionPicker(bodyHeight)
 	} else if m.mode == modeKeyPicker {
