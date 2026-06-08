@@ -46,6 +46,9 @@ agent_tools.md
 agent_codex.md
   Mandatory when working on Qubit's local Codex provider, ChatGPT OAuth flow, Codex token storage/refresh, or Codex Responses API integration.
 
+agent_autocompact.md
+  Mandatory when working on Qubit's auto-compaction flow, context estimation, `/compact`, compact-fork transcript shaping, or compact status display.
+
 agent_server.md
   Mandatory when working on Qubit's singleton Node runtime server, multi-TUI attachment, runtime process lifetime, client routing, or JSON-lines transport.
 
