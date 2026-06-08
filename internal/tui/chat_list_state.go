@@ -8,6 +8,7 @@ type chatListState struct {
 	YOffset     int
 	Items       []chatListItem
 	Cache       map[chatListItemKey]chatListRenderedItem
+	Metrics     chatListMetrics
 	Visible     chatListVisibleRender
 	TotalHeight int
 }
@@ -32,12 +33,18 @@ type chatListItemKey struct {
 	Segment messageRenderSegmentKey
 }
 
+type chatListMetrics struct {
+	Width       int
+	Keys        []chatListItemKey
+	Starts      []int
+	Heights     []int
+	TotalHeight int
+}
+
 type chatListRenderedItem struct {
 	Key       chatListItemKey
 	Text      string
 	Lines     []string
-	Plain     []transcriptRenderLine
-	Links     []linkHitbox
 	Tools     []toolHitbox
 	Height    int
 	LastIndex int

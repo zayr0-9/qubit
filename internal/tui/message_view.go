@@ -65,12 +65,9 @@ func (m *model) renderMessageSegment(index int, contentLine int) (messageRenderS
 			localToolHitboxes[i].EndY += sepLines
 		}
 	}
-	lines := transcriptRenderLines(rendered)
 	segment := messageRenderSegment{
 		Key:       key,
 		Text:      rendered,
-		Lines:     lines,
-		Links:     transcriptLinkHitboxes(lines),
 		Tools:     localToolHitboxes,
 		LineCount: renderedLineCount(rendered),
 		LastIndex: lastIndex,
@@ -322,18 +319,11 @@ func (m *model) streamingPrefix(width int) streamingTranscriptCache {
 	}
 	m.ensureSegmentCacheSize()
 	var b strings.Builder
-	var lines []transcriptRenderLine
-	var links []linkHitbox
 	var tools []toolHitbox
 	lineOffset := 0
 	for i := 0; i < m.streamingMessageIndex; i++ {
 		segment, nextIndex := m.renderMessageSegment(i, lineOffset)
 		b.WriteString(segment.Text)
-		lines = append(lines, segment.Lines...)
-		for _, hitbox := range segment.Links {
-			hitbox.Line += lineOffset
-			links = append(links, hitbox)
-		}
 		for _, hitbox := range segment.Tools {
 			hitbox.StartY += lineOffset
 			hitbox.EndY += lineOffset
@@ -342,7 +332,7 @@ func (m *model) streamingPrefix(width int) streamingTranscriptCache {
 		lineOffset += appendedLineCountDelta(segment.Text, lineOffset == 0)
 		i = nextIndex
 	}
-	cache := streamingTranscriptCache{MessageIndex: m.streamingMessageIndex, Width: width, Prefix: b.String(), PrefixLines: lines, PrefixLinks: links, PrefixTools: tools, PrefixLineCount: lineOffset}
+	cache := streamingTranscriptCache{MessageIndex: m.streamingMessageIndex, Width: width, Prefix: b.String(), PrefixTools: tools, PrefixLineCount: lineOffset}
 	m.streamingTranscriptCache = cache
 	return cache
 }

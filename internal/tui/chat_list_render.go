@@ -58,17 +58,13 @@ func (m *model) renderChatListItem(item chatListItem) chatListRenderedItem {
 	m.ensureSegmentCacheSize()
 	segment, _ := m.renderMessageSegment(item.StartIndex, 0)
 	lines := splitRenderedLines(segment.Text)
-	plain := transcriptRenderLines(segment.Text)
 	if m.messages[item.StartIndex].Role == "user" {
 		lines = renderUserMessageRows(lines, m.chatList.Width)
-		plain = transcriptRenderLines(strings.Join(lines, "\n"))
 	}
 	rendered := chatListRenderedItem{
 		Key:       item.Key,
 		Text:      segment.Text,
 		Lines:     lines,
-		Plain:     plain,
-		Links:     segment.Links,
 		Tools:     segment.Tools,
 		Height:    len(lines),
 		LastIndex: segment.LastIndex,
@@ -80,29 +76,65 @@ func (m *model) renderChatListItem(item chatListItem) chatListRenderedItem {
 	return rendered
 }
 
-func (m *model) remeasureChatList() {
+func (m *model) ensureChatListMetrics() chatListMetrics {
 	m.ensureChatList()
+	if chatListMetricsValid(m.chatList.Metrics, m.chatList.Width, m.chatList.Items) {
+		m.chatList.TotalHeight = m.chatList.Metrics.TotalHeight
+		return m.chatList.Metrics
+	}
+	metrics := chatListMetrics{
+		Width:   m.chatList.Width,
+		Keys:    make([]chatListItemKey, len(m.chatList.Items)),
+		Starts:  make([]int, len(m.chatList.Items)),
+		Heights: make([]int, len(m.chatList.Items)),
+	}
 	total := 0
-	for _, item := range m.chatList.Items {
+	for i, item := range m.chatList.Items {
 		rendered := m.renderChatListItem(item)
+		metrics.Keys[i] = item.Key
+		metrics.Starts[i] = total
+		metrics.Heights[i] = rendered.Height
 		total += rendered.Height
 	}
+	metrics.TotalHeight = total
+	m.chatList.Metrics = metrics
 	m.chatList.TotalHeight = total
+	return metrics
+}
+
+func chatListMetricsValid(metrics chatListMetrics, width int, items []chatListItem) bool {
+	if metrics.Width != width || len(metrics.Keys) != len(items) || len(metrics.Starts) != len(items) || len(metrics.Heights) != len(items) {
+		return false
+	}
+	for i, item := range items {
+		if metrics.Keys[i] != item.Key {
+			return false
+		}
+	}
+	return true
+}
+
+func chatListFirstVisibleItem(starts []int, heights []int, start int) int {
+	low, high := 0, len(starts)
+	for low < high {
+		mid := low + (high-low)/2
+		if starts[mid]+heights[mid] <= start {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+	return low
+}
+
+func (m *model) remeasureChatList() {
+	m.ensureChatListMetrics()
 }
 
 func (m *model) renderChatListVisible() chatListVisibleRender {
-	m.ensureChatList()
+	metrics := m.ensureChatListMetrics()
 	height := max(1, m.chatList.Height)
-	renderedItems := make([]chatListRenderedItem, len(m.chatList.Items))
-	itemStarts := make([]int, len(m.chatList.Items))
-	total := 0
-	for i, item := range m.chatList.Items {
-		itemStarts[i] = total
-		rendered := m.renderChatListItem(item)
-		renderedItems[i] = rendered
-		total += rendered.Height
-	}
-	m.chatList.TotalHeight = total
+	total := metrics.TotalHeight
 	if m.autoScroll {
 		m.chatList.YOffset = max(0, total-height)
 	} else {
@@ -112,20 +144,17 @@ func (m *model) renderChatListVisible() chatListVisibleRender {
 	end := start + height
 	var outLines []string
 	var plain []transcriptRenderLine
-	var links []linkHitbox
 	var tools []toolHitbox
 	var rows []chatVisibleRow
-	for itemIndex, rendered := range renderedItems {
-		itemStart := itemStarts[itemIndex]
-		itemEnd := itemStart + rendered.Height
-		if itemEnd <= start {
-			continue
-		}
+	for itemIndex := chatListFirstVisibleItem(metrics.Starts, metrics.Heights, start); itemIndex < len(m.chatList.Items); itemIndex++ {
+		itemStart := metrics.Starts[itemIndex]
+		itemHeight := metrics.Heights[itemIndex]
 		if itemStart >= end {
 			break
 		}
+		rendered := m.renderChatListItem(m.chatList.Items[itemIndex])
 		localStart := max(0, start-itemStart)
-		localEnd := min(rendered.Height, end-itemStart)
+		localEnd := min(itemHeight, end-itemStart)
 		for localY := localStart; localY < localEnd; localY++ {
 			absoluteY := itemStart + localY
 			screenY := absoluteY - start
@@ -133,20 +162,10 @@ func (m *model) renderChatListVisible() chatListVisibleRender {
 			if localY < len(rendered.Lines) {
 				line = rendered.Lines[localY]
 			}
-			plainLine := transcriptRenderLine{}
-			if localY < len(rendered.Plain) {
-				plainLine = rendered.Plain[localY]
-			}
+			plainLine := renderedPlainLine(rendered, localY)
 			outLines = append(outLines, line)
 			plain = append(plain, plainLine)
 			rows = append(rows, chatVisibleRow{ScreenY: screenY, AbsoluteY: absoluteY, ItemIndex: itemIndex, LocalY: localY, Text: line, Plain: plainLine})
-		}
-		for _, box := range rendered.Links {
-			absLine := itemStart + box.Line
-			if absLine >= start && absLine < end {
-				box.Line = absLine
-				links = append(links, box)
-			}
 		}
 		for _, box := range rendered.Tools {
 			box.StartY += itemStart
@@ -156,6 +175,7 @@ func (m *model) renderChatListVisible() chatListVisibleRender {
 			}
 		}
 	}
+	links := visibleLinkHitboxes(plain, start)
 	visible := chatListVisibleRender{Content: strings.Join(outLines, "\n"), Lines: plain, ToolHitboxes: tools, LinkHitboxes: links, VisibleRows: rows, TotalHeight: total}
 	m.chatList.Visible = visible
 	m.transcriptContent = visible.Content
@@ -163,6 +183,22 @@ func (m *model) renderChatListVisible() chatListVisibleRender {
 	m.linkHitboxes = visible.LinkHitboxes
 	m.toolHitboxes = visible.ToolHitboxes
 	return visible
+}
+
+func renderedPlainLine(rendered chatListRenderedItem, localY int) transcriptRenderLine {
+	if localY < 0 || localY >= len(rendered.Lines) {
+		return transcriptRenderLine{}
+	}
+	text := stripANSI(rendered.Lines[localY])
+	return transcriptRenderLine{Text: text, Selectable: strings.TrimSpace(text) != ""}
+}
+
+func visibleLinkHitboxes(lines []transcriptRenderLine, absoluteStart int) []linkHitbox {
+	boxes := transcriptLinkHitboxes(lines)
+	for i := range boxes {
+		boxes[i].Line += absoluteStart
+	}
+	return boxes
 }
 
 func (m *model) renderChatListView() string {
@@ -174,23 +210,23 @@ func (m *model) renderChatListView() string {
 }
 
 func (m *model) chatListLineAtAbsoluteY(y int) (transcriptRenderLine, bool) {
-	m.ensureChatList()
 	if y < 0 {
 		return transcriptRenderLine{}, false
 	}
-	current := 0
-	for _, item := range m.chatList.Items {
-		rendered := m.renderChatListItem(item)
-		if y < current+rendered.Height {
-			local := y - current
-			if local >= 0 && local < len(rendered.Plain) {
-				return rendered.Plain[local], true
-			}
-			return transcriptRenderLine{}, false
-		}
-		current += rendered.Height
+	metrics := m.ensureChatListMetrics()
+	itemIndex := chatListFirstVisibleItem(metrics.Starts, metrics.Heights, y)
+	if itemIndex < 0 || itemIndex >= len(m.chatList.Items) {
+		return transcriptRenderLine{}, false
 	}
-	return transcriptRenderLine{}, false
+	local := y - metrics.Starts[itemIndex]
+	if local < 0 || local >= metrics.Heights[itemIndex] {
+		return transcriptRenderLine{}, false
+	}
+	rendered := m.renderChatListItem(m.chatList.Items[itemIndex])
+	if local >= len(rendered.Lines) {
+		return transcriptRenderLine{}, false
+	}
+	return renderedPlainLine(rendered, local), true
 }
 
 func (m *model) chatListPlainLines(start, end int) []transcriptRenderLine {

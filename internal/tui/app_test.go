@@ -775,6 +775,51 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	}
 }
 
+func TestChatMouseWheelUsesRawMouseDelta(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 100
+	m.height = 30
+	m.layout()
+	m.viewport.MouseWheelDelta = 1
+	lines := make([]string, 120)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %03d", i+1)
+	}
+	m.messages = []chatMessage{{Role: "assistant", Content: strings.Join(lines, "\n")}}
+	m.refreshViewport()
+	m.autoScroll = false
+	m.setChatYOffset(0)
+
+	wheelDelta := m.chatWheelDelta()
+	if wheelDelta != max(1, m.viewport.MouseWheelDelta) {
+		t.Fatalf("chatWheelDelta = %d, want raw mouse delta %d", wheelDelta, m.viewport.MouseWheelDelta)
+	}
+
+	before := plainText(m.renderMainArea(m.height))
+	wheelScrolled := m.updateMouseWheelRouted(tea.MouseWheelMsg{Button: tea.MouseWheelDown}).(model)
+	if got := wheelScrolled.chatYOffset(); got != wheelDelta {
+		t.Fatalf("YOffset after wheel = %d, want %d", got, wheelDelta)
+	}
+	visible := wheelScrolled.renderChatListVisible()
+	if len(visible.VisibleRows) == 0 || visible.VisibleRows[0].AbsoluteY != wheelDelta {
+		t.Fatalf("first visible absolute row = %#v, want %d", visible.VisibleRows, wheelDelta)
+	}
+	after := plainText(wheelScrolled.renderMainArea(wheelScrolled.height))
+	if firstBefore, firstAfter := strings.Split(before, "\n")[1], strings.Split(after, "\n")[1]; firstBefore == firstAfter {
+		t.Fatalf("first displayed chat row did not change after one wheel event: before=%q after=%q", firstBefore, firstAfter)
+	}
+
+	pageScrolledModel, _ := m.updateKey(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	pageScrolled := pageScrolledModel.(model)
+	if got := pageScrolled.chatYOffset(); got != m.chatList.Height {
+		t.Fatalf("YOffset after PgDown = %d, want page height %d", got, m.chatList.Height)
+	}
+	if pageScrolled.chatYOffset() <= wheelScrolled.chatYOffset() {
+		t.Fatalf("PgDown offset = %d, want greater than wheel offset %d", pageScrolled.chatYOffset(), wheelScrolled.chatYOffset())
+	}
+}
+
 func TestRefreshViewportPreservesOffsetWhenAutoScrollDisabled(t *testing.T) {
 	m := initialModel(nil)
 	m.ready = true
@@ -3551,8 +3596,8 @@ func TestRefreshViewportReusesRenderedMessageSegments(t *testing.T) {
 		t.Fatalf("segments = %d, want %d", len(m.messageRenderSegments), len(m.messages))
 	}
 	first := m.messageRenderSegments[1]
-	if first.Text == "" || len(first.Lines) == 0 || len(first.Links) == 0 {
-		t.Fatalf("segment missing metadata: %#v", first)
+	if first.Text == "" || first.LineCount == 0 {
+		t.Fatalf("segment missing rendered content: %#v", first)
 	}
 
 	m.refreshViewport()
@@ -3560,8 +3605,8 @@ func TestRefreshViewportReusesRenderedMessageSegments(t *testing.T) {
 	if second.Text != first.Text {
 		t.Fatalf("cached segment text changed")
 	}
-	if len(second.Lines) != len(first.Lines) || len(second.Links) != len(first.Links) {
-		t.Fatalf("cached segment metadata changed: lines %d/%d links %d/%d", len(second.Lines), len(first.Lines), len(second.Links), len(first.Links))
+	if second.LineCount != first.LineCount {
+		t.Fatalf("cached segment line count changed: %d/%d", second.LineCount, first.LineCount)
 	}
 }
 
@@ -3805,11 +3850,125 @@ func TestChatListVisibleRangeOverLongTranscript(t *testing.T) {
 	if visible.TotalHeight <= 1200 {
 		t.Fatalf("total height = %d, want separators included over messages", visible.TotalHeight)
 	}
+	if len(m.chatList.Metrics.Starts) != len(m.chatList.Items) || len(m.chatList.Metrics.Heights) != len(m.chatList.Items) {
+		t.Fatalf("metrics starts/heights = %d/%d, want items %d", len(m.chatList.Metrics.Starts), len(m.chatList.Metrics.Heights), len(m.chatList.Items))
+	}
+	if m.chatList.Metrics.TotalHeight != visible.TotalHeight {
+		t.Fatalf("metrics total height = %d, visible total height = %d", m.chatList.Metrics.TotalHeight, visible.TotalHeight)
+	}
+	if first := chatListFirstVisibleItem(m.chatList.Metrics.Starts, m.chatList.Metrics.Heights, m.chatList.YOffset); first < 0 || first >= len(m.chatList.Items) {
+		t.Fatalf("first visible item = %d outside items %d", first, len(m.chatList.Items))
+	}
 	if len(visible.VisibleRows) != m.chatList.Height {
 		t.Fatalf("visible rows = %d, want viewport height %d", len(visible.VisibleRows), m.chatList.Height)
 	}
 	if strings.Contains(plainText(visible.Content), "message 0000") || strings.Contains(plainText(visible.Content), "message 1199") {
 		t.Fatalf("visible content includes transcript edges while scrolled middle: %q", plainText(visible.Content))
+	}
+}
+
+func TestChatListVisibleRangeWithinSingleTallMessageBuildsOnlyVisibleMetadata(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 12
+	m.layout()
+	lines := make([]string, 3000)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("tall row %04d", i)
+	}
+	lines[1498] = "offscreen top https://offscreen-top.example"
+	lines[1503] = "visible link https://visible.example/docs"
+	lines[2999] = "offscreen bottom https://offscreen-bottom.example"
+	m.messages = []chatMessage{{Role: "assistant", Content: strings.Join(lines, "\n")}}
+	m.autoScroll = false
+	m.refreshViewport()
+	m.setChatYOffset(1500)
+	visible := m.renderChatListVisible()
+
+	if len(visible.VisibleRows) != m.chatList.Height {
+		t.Fatalf("visible rows = %d, want viewport height %d", len(visible.VisibleRows), m.chatList.Height)
+	}
+	if len(visible.Lines) != m.chatList.Height {
+		t.Fatalf("visible plain lines = %d, want viewport height %d", len(visible.Lines), m.chatList.Height)
+	}
+	if len(m.transcriptLines) != m.chatList.Height {
+		t.Fatalf("model transcript lines = %d, want viewport height %d", len(m.transcriptLines), m.chatList.Height)
+	}
+	plainVisible := plainText(visible.Content)
+	if strings.Contains(plainVisible, "tall row 0000") || strings.Contains(plainVisible, "tall row 2999") {
+		t.Fatalf("visible content includes offscreen sentinels: %q", plainVisible)
+	}
+	if !strings.Contains(plainVisible, "visible link https://visible.example/docs") {
+		t.Fatalf("visible content missing expected middle row: %q", plainVisible)
+	}
+	if len(visible.LinkHitboxes) != 1 {
+		t.Fatalf("visible link hitboxes = %d, want only visible link: %#v", len(visible.LinkHitboxes), visible.LinkHitboxes)
+	}
+	if visible.LinkHitboxes[0].URL != "https://visible.example/docs" {
+		t.Fatalf("visible link URL = %q", visible.LinkHitboxes[0].URL)
+	}
+	if visible.LinkHitboxes[0].Line < m.chatList.YOffset || visible.LinkHitboxes[0].Line >= m.chatList.YOffset+m.chatList.Height {
+		t.Fatalf("visible link line = %d outside viewport offset %d height %d", visible.LinkHitboxes[0].Line, m.chatList.YOffset, m.chatList.Height)
+	}
+}
+
+func TestChatListLineAtAbsoluteYDerivesOffscreenTallMessageLine(t *testing.T) {
+	m := initialModel(nil)
+	m.width = 100
+	m.height = 12
+	m.layout()
+	lines := make([]string, 2000)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("offscreen row %04d", i)
+	}
+	m.messages = []chatMessage{{Role: "assistant", Content: strings.Join(lines, "\n")}}
+	m.autoScroll = false
+	m.refreshViewport()
+	m.setChatYOffset(1000)
+
+	line, ok := m.chatListLineAtAbsoluteY(100)
+	if !ok {
+		t.Fatal("chatListLineAtAbsoluteY returned false for valid offscreen row")
+	}
+	if !strings.Contains(line.Text, "offscreen row 0100") {
+		t.Fatalf("line text = %q, want offscreen row 0100", line.Text)
+	}
+}
+
+func TestCtrlClickTranscriptLinkInScrolledTallMessageReturnsOpenCommand(t *testing.T) {
+	m := initialModel(nil)
+	m.ready = true
+	m.width = 100
+	m.height = 12
+	m.layout()
+	lines := make([]string, 2000)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("link row %04d", i)
+	}
+	lines[990] = "offscreen https://offscreen.example/docs"
+	lines[1002] = "visible https://visible.example/docs now"
+	m.messages = []chatMessage{{Role: "assistant", Content: strings.Join(lines, "\n")}}
+	m.autoScroll = false
+	m.refreshViewport()
+	m.setChatYOffset(1000)
+	m.renderChatListVisible()
+
+	if len(m.linkHitboxes) != 1 {
+		t.Fatalf("link hitboxes = %d, want only visible link: %#v", len(m.linkHitboxes), m.linkHitboxes)
+	}
+	if m.linkHitboxes[0].URL != "https://visible.example/docs" {
+		t.Fatalf("link URL = %q", m.linkHitboxes[0].URL)
+	}
+	x := m.linkHitboxes[0].StartX
+	y := m.chatTopY + m.linkHitboxes[0].Line - m.chatList.YOffset
+	clicked := m.updateMouseClick(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft, Mod: tea.ModCtrl}).(model)
+	updatedModel, cmd := clicked.updateMouseRelease(tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft, Mod: tea.ModCtrl})
+	updated := updatedModel.(model)
+	if cmd == nil {
+		t.Fatal("ctrl+click scrolled link command = nil, want open browser command")
+	}
+	if updated.status != "opening link" {
+		t.Fatalf("status = %q, want opening link", updated.status)
 	}
 }
 

@@ -49,6 +49,10 @@ func (m *model) chatAtBottom() bool {
 	return m.chatList.YOffset >= max(0, m.chatList.TotalHeight-m.chatList.Height)
 }
 
+func (m *model) chatWheelDelta() int {
+	return max(1, m.viewport.MouseWheelDelta)
+}
+
 func (m *model) chatScrollUp(n int) {
 	m.ensureChatList()
 	m.autoScroll = false

@@ -10,11 +10,13 @@ func renderChat(content string, width int, height int) string {
 	for len(lines) < height {
 		lines = append(lines, "")
 	}
+	leftPad := strings.Repeat(" ", max(0, chatStyle.GetPaddingLeft()))
 	for i, line := range lines {
-		lines[i] = chatStyle.Render(line)
+		lines[i] = leftPad + line
 	}
 	return strings.Join(lines, "\n")
 }
+
 func renderFixedHeight(content string, height int) string {
 	if height <= 0 {
 		return ""
