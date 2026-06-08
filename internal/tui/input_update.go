@@ -332,14 +332,23 @@ func (m model) submitInput() (tea.Model, tea.Cmd) {
 	}
 	m.recordInputHistory(input)
 	m.saveInputHistory()
+	if m.shouldAutoCompactBeforeSend(input) {
+		return m.requestCompaction("auto", input)
+	}
 	return m.startChatRun(input)
 }
 
 func (m model) startChatRun(input string) (model, tea.Cmd) {
+	return m.startChatRunWithExtra(input)
+}
+
+func (m model) startChatRunWithExtra(input string, extraCmds ...tea.Cmd) (model, tea.Cmd) {
 	runID := newRunID()
 	m.messages = append(m.messages, chatMessage{Role: "user", Content: input})
 	m.busy = true
 	m.activeRunID = runID
+	m.compacting = false
+	m.pendingCompactInput = ""
 	m.status = "thinking"
 	m.autoScroll = true
 	m.refreshViewport()
@@ -352,7 +361,9 @@ func (m model) startChatRun(input string) (model, tea.Cmd) {
 		payload["sessionId"] = m.session
 		m.touchLocalSessionActivity(m.session, titleFromInput(input))
 	}
-	return m, tea.Batch(sendRuntime(m.runtime, payload), m.spinner.Tick)
+	cmds := append([]tea.Cmd{}, extraCmds...)
+	cmds = append(cmds, sendRuntime(m.runtime, payload), m.spinner.Tick)
+	return m, tea.Batch(cmds...)
 }
 
 func (m model) submitMessageEdit(input string) (tea.Model, tea.Cmd) {

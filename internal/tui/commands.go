@@ -13,6 +13,7 @@ import (
 var slashCommands = []slashCommand{
 	{Name: "new", Usage: "/new [title]", Description: "Create a new chat session", NeedsArg: false},
 	{Name: "fork", Usage: "/fork [title|message-number]", Description: "Fork here or edit a numbered user message", NeedsArg: false},
+	{Name: "compact", Usage: "/compact", Description: "Summarize this session into a compact continuation fork", NeedsArg: false},
 	{Name: "tree", Usage: "/tree", Description: "Open the fork tree", NeedsArg: false, OpensOnSelect: true},
 	{Name: "sessions", Usage: "/sessions", Description: "Open the session picker", NeedsArg: false, OpensOnSelect: true},
 	{Name: "md-editor", Usage: "/md-editor", Description: "Edit project Markdown docs", NeedsArg: false, OpensOnSelect: true},
@@ -294,6 +295,8 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 			return m.startMessageEdit(point), nil
 		}
 		return m.requestFork(len(m.messages), arg)
+	case "compact", "compress":
+		return m.requestCompaction("manual", "")
 	case "tree", "branches", "forks", "map":
 		return m.openForkTree()
 	case "sessions", "session", "ls":
@@ -364,12 +367,31 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "permission-test", "modal-test":
 		return m.openDemoPermissionModal(), nil
 	case "help", "h":
-		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title|message-number] - fork current chat or edit a numbered user message\n/tree - open the fork tree\n/sessions - open the session picker\n/favourite-session - favourite the current session\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal keyboard and appearance setup\n/permission <plan|edit|allow-all> - switch tool permission mode\n/reasoning <none|low|medium|high> - set model reasoning effort\n/permission-test - open a demo permission modal\n/help - show this help")
+		m.appendSystem("Commands:\n/new [title] - create a new chat\n/fork [title|message-number] - fork current chat or edit a numbered user message\n/compact - summarize this session into a compact continuation fork\n/tree - open the fork tree\n/sessions - open the session picker\n/favourite-session - favourite the current session\n/keys - manage provider API keys in the OS keychain\n/providers - choose the active provider\n/models - choose the active provider's model\n/codex-login - sign in to ChatGPT Codex\n/codex-status - show ChatGPT Codex sign-in status\n/codex-logout - sign out of ChatGPT Codex\n/theme - customize terminal colors\n/rename <title> - rename current chat\n/terminal-setup - install Windows Terminal keyboard and appearance setup\n/permission <plan|edit|allow-all> - switch tool permission mode\n/reasoning <none|low|medium|high> - set model reasoning effort\n/permission-test - open a demo permission modal\n/help - show this help")
 		return m, nil
 	default:
 		m.appendSystem("Unknown command. Try /help")
 		return m, nil
 	}
+}
+
+func (m model) requestCompaction(reason string, pendingInput string) (tea.Model, tea.Cmd) {
+	if strings.TrimSpace(m.session) == "" {
+		m.appendSystem("No active session to compact.")
+		return m, nil
+	}
+	runID := newRunID()
+	m.busy = true
+	m.compacting = true
+	m.pendingCompactInput = pendingInput
+	m.activeRunID = runID
+	m.status = "compacting"
+	m.autoNewSessionOnChat = false
+	payload := map[string]any{"type": "chat.compact", "sessionId": m.session, "runId": runID, "reason": reason, "systemPromptMode": m.systemPromptMode(), "reasoningLevel": m.reasoningLevelValue(), "cwdBlockEnabled": m.cwdBlockEnabled}
+	if strings.TrimSpace(pendingInput) != "" {
+		payload["pendingInput"] = pendingInput
+	}
+	return m, tea.Batch(sendRuntime(m.runtime, payload), m.spinner.Tick)
 }
 
 func (m model) requestFork(messageIndex int, title string) (tea.Model, tea.Cmd) {

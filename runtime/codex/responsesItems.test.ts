@@ -43,3 +43,16 @@ describe("toCodexRequestParts", () => {
     ]);
   });
 });
+
+it("folds developer messages into instructions without replaying them as input", () => {
+  const parts = toCodexRequestParts([
+    { role: "system", content: "System rules" } as any,
+    { role: "developer", content: "Compacted context" } as any,
+    { role: "user", content: "Continue" } as any,
+  ], []);
+
+  assert.equal(parts.instructions, "System rules\n\n<developer>\nCompacted context\n</developer>");
+  assert.deepEqual(parts.input, [
+    { type: "message", role: "user", content: [{ type: "input_text", text: "Continue" }] },
+  ]);
+});

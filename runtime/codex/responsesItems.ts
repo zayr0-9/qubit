@@ -2,10 +2,12 @@ import { z } from "zod/v4";
 import type { AnyToolDefinition, Message, ToolCall } from "@hyper-labs/hyper-router";
 import type { CodexRequestParts } from "./types.js";
 
-export function toCodexRequestParts(messages: Message[], tools: AnyToolDefinition[]): CodexRequestParts {
+type CodexInputMessage = Omit<Message, "role"> & { role: Message["role"] | "developer" };
+
+export function toCodexRequestParts(messages: CodexInputMessage[], tools: AnyToolDefinition[]): CodexRequestParts {
   const instructions = messages
-    .filter((message) => message.role === "system" && message.content)
-    .map((message) => message.content)
+    .filter((message) => (message.role === "system" || message.role === "developer") && message.content)
+    .map((message) => message.role === "developer" ? `<developer>\n${message.content}\n</developer>` : message.content)
     .join("\n\n") || undefined;
   const input = messages.flatMap((message, index) => messageToCodexItems(message, index));
   return { instructions, input, tools: [...tools.map(toCodexTool), ...codexHostedTools()] };
@@ -18,8 +20,8 @@ function codexHostedTools(): unknown[] {
   ];
 }
 
-function messageToCodexItems(message: Message, index: number): unknown[] {
-  if (message.role === "system") return [];
+function messageToCodexItems(message: CodexInputMessage, index: number): unknown[] {
+  if (message.role === "system" || message.role === "developer") return [];
   if (message.role === "tool") {
     return [{ type: "function_call_output", call_id: message.toolCallId || `${message.name || "tool"}-result-${index}`, output: message.content || "" }];
   }

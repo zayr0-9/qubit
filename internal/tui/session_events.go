@@ -203,6 +203,7 @@ func (m *model) applySessionMessages(ev runtimeEvent) {
 		m.lastCodexUsage = nil
 	} else {
 		m.messages = ev.Messages
+		m.markCompactionMessages()
 		m.lastCodexUsage = latestCodexUsageFromMessages(m.messages)
 	}
 	m.layout()
@@ -216,4 +217,50 @@ func (m model) currentSessionTitle() string {
 		}
 	}
 	return ""
+}
+
+func (m *model) applyChatCompacted(ev runtimeEvent) {
+	m.clearFakeStream()
+	m.busy = false
+	m.compacting = false
+	m.activeRunID = ""
+	m.clearActiveRunStartedAt()
+	m.transcriptLoadRunID = ""
+	m.transcriptLoadSession = ""
+	if ev.SourceSessionID != "" {
+		m.lastCompactedSource = ev.SourceSessionID
+	}
+	if ev.SessionID != "" {
+		m.session = ev.SessionID
+	}
+	if ev.SessionTitle != "" {
+		m.title = ev.SessionTitle
+	}
+	if ev.Session != nil {
+		m.upsertSessionInfo(*ev.Session)
+	}
+	m.autoNewSessionOnChat = false
+	m.autoScroll = true
+	m.err = ""
+	m.status = "compacted"
+	m.pendingCompactInput = ""
+	if len(ev.Messages) > 0 {
+		m.messages = ev.Messages
+	} else if ev.Marker != "" {
+		m.messages = []chatMessage{{Role: "assistant", Content: ev.Marker, MessageKind: messageKindCompaction}}
+	} else {
+		m.messages = []chatMessage{{Role: "assistant", Content: ">summarised session", MessageKind: messageKindCompaction}}
+	}
+	m.markCompactionMessages()
+	m.lastCodexUsage = nil
+	m.layout()
+	m.refreshViewport()
+}
+
+func (m *model) markCompactionMessages() {
+	for i := range m.messages {
+		if strings.HasPrefix(strings.TrimSpace(m.messages[i].Content), ">summarised session") {
+			m.messages[i].MessageKind = messageKindCompaction
+		}
+	}
 }

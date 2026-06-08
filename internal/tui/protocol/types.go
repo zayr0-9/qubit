@@ -246,6 +246,11 @@ type RuntimeEvent struct {
 	Metadata         map[string]any              `json:"metadata,omitempty"`
 	InputSchema      map[string]any              `json:"inputSchema,omitempty"`
 	Error            string                      `json:"error,omitempty"`
+	SourceSessionID  string                      `json:"sourceSessionId,omitempty"`
+	PendingInput     string                      `json:"pendingInput,omitempty"`
+	AutoContinue     bool                        `json:"autoContinue,omitempty"`
+	Marker           string                      `json:"marker,omitempty"`
+	SummaryPreview   string                      `json:"summaryPreview,omitempty"`
 }
 
 type CodexUsage struct {

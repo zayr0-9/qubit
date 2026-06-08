@@ -211,7 +211,9 @@ func renderAccentBorderedPanel(body string, width int) string {
 }
 func renderMessageWithIcon(message chatMessage, content string, number int) string {
 	icon := aiIcon.Render("◆")
-	if message.LocalOnly || message.Role == "status" {
+	if message.MessageKind == messageKindCompaction {
+		icon = mutedSt.Render("↯")
+	} else if message.LocalOnly || message.Role == "status" {
 		icon = mutedSt.Render("◇")
 	} else if message.Role == "reasoning" {
 		icon = mutedSt.Render("◇")
