@@ -78,6 +78,54 @@ func TestCodexUsageRuntimeEventUpdatesStatus(t *testing.T) {
 	}
 }
 
+func TestLiveCodexUsageWinsOverPersistedMessageUsageDuringRun(t *testing.T) {
+	m := model{
+		activeRunID: "run_1",
+		maxContext:  400000,
+		messages: []chatMessage{
+			{Role: "assistant", Content: "older", CodexUsage: &codexUsage{InputTokens: 1000, CachedTokens: 800, OutputTokens: 200}},
+			{Role: "user", Content: "continue"},
+			{Role: "tool", ToolGroup: &toolGroup{Name: "readFile", Calls: []toolCallUI{{ID: "read-1", Name: "readFile", Status: "completed"}}}},
+		},
+	}
+
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "codex.usage", RunID: "run_1", CodexUsage: &codexUsage{InputTokens: 7000, CachedTokens: 6500, OutputTokens: 500}})
+	got := updated.(model)
+
+	status := plainText(got.renderInputStatus())
+	if !strings.Contains(status, "ctx 7.5k/400k cache 6.5k") {
+		t.Fatalf("status = %q, want live Codex usage instead of older persisted message usage", status)
+	}
+	if strings.Contains(status, "ctx 1.2k/400k") {
+		t.Fatalf("status = %q, used stale persisted message usage", status)
+	}
+}
+
+func TestRunStartedClearsStaleLiveCodexUsage(t *testing.T) {
+	m := model{
+		activeRunID:    "run_2",
+		maxContext:     400000,
+		lastCodexUsage: &codexUsage{InputTokens: 9000, CachedTokens: 8500, OutputTokens: 500},
+		messages: []chatMessage{
+			{Role: "assistant", Content: "previous", CodexUsage: &codexUsage{InputTokens: 2000, CachedTokens: 1500, OutputTokens: 250}},
+		},
+	}
+
+	updated, _ := m.updateRuntime(runtimeEvent{Type: "run_started", RunID: "run_2", SessionID: ""})
+	got := updated.(model)
+
+	if got.lastCodexUsage != nil {
+		t.Fatalf("lastCodexUsage = %#v, want cleared at new run start", got.lastCodexUsage)
+	}
+	status := plainText(got.renderInputStatus())
+	if !strings.Contains(status, "ctx 2.2k/400k cache 1.5k") {
+		t.Fatalf("status = %q, want current transcript usage after stale live usage is cleared", status)
+	}
+	if strings.Contains(status, "ctx 9.5k/400k") {
+		t.Fatalf("status = %q, used stale prior-run live usage", status)
+	}
+}
+
 func TestContextStatusUsesCodexUsageEvenWithoutProviderHint(t *testing.T) {
 	m := initialModel(nil)
 	m.provider = "openai"

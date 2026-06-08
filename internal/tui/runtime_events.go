@@ -39,6 +39,7 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		if ev.RunID != "" {
 			m.activeRunID = ev.RunID
 		}
+		m.lastCodexUsage = nil
 		m.activeReasoningRunID = ev.RunID
 		m.activeReasoningIndex = -1
 		m.activeReasoningStart = len(m.messages)

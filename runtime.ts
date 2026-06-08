@@ -33,6 +33,7 @@ import { writeJsonAtomic } from "./runtime/jsonStore.js";
 import { ClientRegistry } from "./runtime/server/clientRegistry.js";
 import { broadcastTo, writeTo } from "./runtime/server/writer.js";
 import { McpClientManager, McpConfigStore, McpSecretStore, catalogEntryById, createMcpTools, isMcpToolName, mcpStarterCatalog, mcpContextChars, previewMcpValue, setMcpToolMappings, summarizeMcpArgs, summarizeMcpResult } from "./runtime/mcp/index.js";
+import { createPromptBuilder, normalizePromptMode } from "./runtime/promptBuilder.js";
 
 const entryDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = basename(entryDir) === "dist" ? dirname(entryDir) : entryDir;
@@ -48,12 +49,7 @@ const legacySettingsPath = join(dataDir, "settings.json");
 const keyIndexPath = join(configDir, "api-key-index.json");
 const settingsPath = join(configDir, "settings.json");
 const promptsDir = join(rootDir, "prompts");
-const baseInstructions = "You are Qubit, a concise terminal coding assistant MVP. Be helpful, direct, and practical. Keep answers brief unless the user asks for detail.";
-const defaultModePrompts = {
-  plan: "You are in plan mode: reason carefully and propose changes before editing.",
-  edit: "You are in edit mode: implement changes directly and validate them.",
-};
-const defaultSubagentPrompt = "You are a delegated Qubit subagent. Complete the delegated task independently, use tools when helpful, and return concise findings/results to the calling agent. Do not ask the user directly unless the task truly cannot proceed.";
+const promptBuilder = await createPromptBuilder(promptsDir);
 const defaultSessionId = process.env.QUBIT_SESSION_ID || "qubit-default";
 function resolveConfigDir() {
   if (process.env.QUBIT_CONFIG_DIR) return process.env.QUBIT_CONFIG_DIR;
@@ -102,8 +98,6 @@ const providerDefinitions = {
 const providerAliasMap = new Map(Object.entries(providerDefinitions).flatMap(([name, definition]) => [name, ...(definition.aliases || [])].map((alias) => [alias, name])));
 const providerNames = Object.keys(providerDefinitions);
 let settings = await loadSettings();
-const modePrompts = await loadModePrompts();
-const subagentPrompt = await loadPromptFile("subagent", defaultSubagentPrompt);
 const defaultProviderName = normalizeProvider(process.env.QUBIT_PROVIDER || settings.defaultProvider || "glm");
 let activeProviderName = defaultProviderName;
 let model = defaultModelForProvider(activeProviderName);
@@ -212,15 +206,11 @@ function createQubitAgent(modeOrOptions = "plan") {
 }
 
 function instructionsForMode(mode) {
-  const normalized = normalizePromptMode(mode);
-  const modePrompt = modePrompts[normalized] || defaultModePrompts[normalized];
-  return [baseInstructions, modePrompt].filter(Boolean).join("\n\n");
+  return promptBuilder.instructionsForMode(mode);
 }
 
-function normalizePromptMode(mode) {
-  const normalized = String(mode || "").trim().toLowerCase();
-  if (["edit", "always", "always_allow", "always-allow", "allow"].includes(normalized)) return "edit";
-  return "plan";
+function instructionsForSubagent() {
+  return promptBuilder.instructionsForSubagent();
 }
 
 function normalizeReasoningLevel(value) {
@@ -230,20 +220,6 @@ function normalizeReasoningLevel(value) {
   if (["medium", "med", "m", ""].includes(normalized)) return "medium";
   if (["high", "h"].includes(normalized)) return "high";
   throw new Error("Reasoning level must be none, low, medium, or high.");
-}
-
-async function loadPromptFile(name, fallback) {
-  try {
-    const content = (await readFile(join(promptsDir, `${name}.md`), "utf8")).trim();
-    return content || fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-async function loadModePrompts() {
-  const entries = await Promise.all(Object.keys(defaultModePrompts).map(async (mode) => [mode, await loadPromptFile(mode, defaultModePrompts[mode])]));
-  return Object.fromEntries(entries);
 }
 
 const storage = new QubitSqliteStorage({
@@ -1225,7 +1201,7 @@ async function runSubagentTask({ task, index, context, parentRun, parentSessionI
     const runtimeStateForChild = await createRuntimeStateFor({
       providerName,
       model: selectedModel,
-      instructions: [baseInstructions, subagentPrompt].filter(Boolean).join("\n\n"),
+      instructions: instructionsForSubagent(),
       promptMode: "edit",
       requireRealProvider: true,
       agentName: "qubit-subagent",

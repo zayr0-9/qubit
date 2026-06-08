@@ -31,9 +31,18 @@ func (m model) contextStatusText() string {
 }
 
 func (m model) codexUsageForStatus() *codexUsage {
-	// Loaded transcripts are the durable source of truth for session status. Prefer
-	// the latest message-level Codex usage when present so reopening an older
-	// session cannot fall back to the local context estimator or a stale live run.
+	// During an active run, live codex.usage events are newer than any persisted
+	// assistant message metadata already in the transcript. Prefer them so the
+	// status grows after each model/tool step instead of staying pinned to the
+	// previous assistant response.
+	if m.activeRunID != "" && hasCodexUsageTokens(m.lastCodexUsage) {
+		return m.lastCodexUsage
+	}
+
+	// Loaded transcripts are the durable source of truth for idle session status.
+	// Prefer the latest message-level Codex usage when present so reopening an
+	// older session cannot fall back to the local context estimator or stale live
+	// usage from another run.
 	usage := latestCodexUsageFromMessages(m.messages)
 	if usage == nil {
 		usage = m.lastCodexUsage
