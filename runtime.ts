@@ -34,6 +34,7 @@ import { ClientRegistry } from "./runtime/server/clientRegistry.js";
 import { broadcastTo, writeTo } from "./runtime/server/writer.js";
 import { McpClientManager, McpConfigStore, McpSecretStore, catalogEntryById, createMcpTools, isMcpToolName, mcpStarterCatalog, mcpContextChars, previewMcpValue, setMcpToolMappings, summarizeMcpArgs, summarizeMcpResult } from "./runtime/mcp/index.js";
 import { createPromptBuilder, normalizePromptMode } from "./runtime/promptBuilder.js";
+import { buildCompactionInput, compactSummaryWithPreservedEdits, compactionProviderMessage, compactionSummaryFromMetadata } from "./runtime/compaction.js";
 
 const entryDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = basename(entryDir) === "dist" ? dirname(entryDir) : entryDir;
@@ -425,6 +426,22 @@ class QubitAgentRuntime extends AgentRuntime {
 
 function createQubitRuntime(config) {
   return new QubitAgentRuntime(config);
+}
+
+function createCompactionAwareProvider(provider, providerName) {
+  return {
+    async generate(input) {
+      const summary = input?.ephemeral ? "" : compactionSummaryFromMetadata(input?.previousSessionMetadata);
+      const contextMessage = compactionProviderMessage(summary, providerName);
+      if (!contextMessage) return await provider.generate(input);
+      const messages = Array.isArray(input.messages) ? input.messages : [];
+      const insertAt = Math.min(messages.length, Math.max(1, messages.findLastIndex?.((message) => message.role === "system" || message.role === "developer") + 1 || 1));
+      return await provider.generate({
+        ...input,
+        messages: [...messages.slice(0, insertAt), contextMessage, ...messages.slice(insertAt)],
+      });
+    },
+  };
 }
 
 let apiKeyIndex = await loadApiKeyIndex();
@@ -999,6 +1016,21 @@ async function handleLine(line) {
     return;
   }
 
+  if (request.type === "chat.compact") {
+    const responseTarget = currentResponseTarget;
+    const requestContext = currentRequestContext;
+    void handleChatCompactRequest(request, responseTarget, requestContext).catch((error) => {
+      write({
+        type: "error",
+        id: request.id,
+        runId: request.runId,
+        sessionId: request.sessionId,
+        error: redactSecrets(error instanceof Error ? error.message : String(error)),
+      }, responseTarget);
+    });
+    return;
+  }
+
   if (request.type === "chat" && typeof request.input === "string") {
     const responseTarget = currentResponseTarget;
     const requestContext = currentRequestContext;
@@ -1015,6 +1047,76 @@ async function handleLine(line) {
   }
 
   write({ type: "error", id: request.id, error: "Unknown runtime command. Expected chat/session/key/model/MCP/session command." });
+}
+
+async function handleChatCompactRequest(request, responseTarget = null, requestContext = { target: responseTarget }) {
+  const sourceSessionId = String(request.sessionId || requestContext?.clientState?.selectedSessionId || defaultSelectedSessionId());
+  if ([...activeRuns.values()].some((run) => run.sessionId === sourceSessionId)) {
+    write({ type: "error", id: request.id, runId: request.runId, sessionId: sourceSessionId, error: "Cannot compact while a model response is active for this session." }, responseTarget);
+    return;
+  }
+  const source = visibleSessionById(sourceSessionId);
+  if (!source) {
+    write({ type: "error", id: request.id, runId: request.runId, sessionId: sourceSessionId, error: `Unknown session: ${sourceSessionId}` }, responseTarget);
+    return;
+  }
+
+  const sourceMessages = await storage.loadMessages(sourceSessionId);
+  if (!sourceMessages.some((message) => ["user", "assistant", "tool"].includes(message?.role))) {
+    write({ type: "error", id: request.id, runId: request.runId, sessionId: sourceSessionId, error: "Nothing to compact in this session yet." }, responseTarget);
+    return;
+  }
+
+  const compactInput = buildCompactionInput(sourceMessages, source.title);
+  const summary = await runCompactionSummary(compactInput.prompt, request);
+  const compactSummary = compactSummaryWithPreservedEdits(summary, compactInput.preservedEditHistory);
+  const session = await createCompactedForkSession({ source, marker: compactInput.marker, summary: compactSummary });
+  setSelectedSessionForCurrentClient(session.id);
+  const messages = await loadSessionMessages(session.id);
+  write({
+    type: "chat.compacted",
+    id: request.id,
+    runId: request.runId,
+    sourceSessionId,
+    sessionId: session.id,
+    sessionTitle: session.title,
+    session,
+    messages,
+    marker: compactInput.marker,
+    summaryPreview: previewText(compactSummary, 800),
+    pendingInput: typeof request.pendingInput === "string" ? request.pendingInput : "",
+    autoContinue: Boolean(request.pendingInput),
+    contextBeforeTokens: Math.ceil(compactInput.contextChars / 4),
+    maxContext: activeModelMaxContext(),
+    thresholdPercent: 80,
+  }, responseTarget);
+  writeSessionList(request.id);
+}
+
+async function runCompactionSummary(prompt, request = {}) {
+  if (process.env.QUBIT_STUB === "1") {
+    return "Stub compaction summary: prior session context was compacted for continuation.";
+  }
+  const promptMode = normalizePromptMode(request.systemPromptMode || request.mode || runtimeState?.promptMode || "plan");
+  const compactorState = await createRuntimeStateFor({
+    providerName: activeProviderName,
+    model,
+    instructions: "You are Qubit's internal context compaction agent. Return only a concise continuation summary in Markdown. Do not call tools.",
+    promptMode,
+    requireRealProvider: false,
+    agentName: "qubit-compactor",
+    tools: [],
+  });
+  const result = await compactorState.runtime.run({
+    runId: `compact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    sessionId: `compact_hidden_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    input: prompt,
+    maxSteps: 1,
+    ephemeral: true,
+    metadata: { workspaceCwd: getDefaultToolCwd(), compaction: true },
+  });
+  const assistant = [...result.messages].reverse().find((message) => message.role === "assistant" && String(message.content || "").trim());
+  return assistant?.content || "";
 }
 
 async function handleChatRequest(request, responseTarget = null, requestContext = { target: responseTarget }) {
@@ -1479,15 +1581,15 @@ async function createRuntimeState(promptMode = "plan") {
   });
 }
 
-async function createRuntimeStateFor({ providerName, model: modelName, instructions, promptMode = "plan", requireRealProvider = false, agentName = "qubit-chat" }) {
-  await rebuildMcpTools();
+async function createRuntimeStateFor({ providerName, model: modelName, instructions, promptMode = "plan", requireRealProvider = false, agentName = "qubit-chat", tools = undefined }) {
+  if (tools === undefined) await rebuildMcpTools();
   const normalizedPromptMode = normalizePromptMode(promptMode);
   const normalizedProvider = normalizeProvider(providerName || defaultProviderName);
   const normalizedModel = normalizeModel(modelName || defaultModelForProvider(normalizedProvider));
   const providerConfig = await resolveProviderConfig(normalizedProvider, { requireRealProvider });
-  const provider = createProvider(providerConfig);
+  const provider = createCompactionAwareProvider(createProvider(providerConfig), normalizedProvider);
   const runtime = createQubitRuntime({
-    agent: createQubitAgent({ name: agentName, instructions, model: normalizedModel, tools: activeTools }),
+    agent: createQubitAgent({ name: agentName, instructions, model: normalizedModel, tools: tools === undefined ? activeTools : tools }),
     provider,
     storage,
     toolPermission: {
@@ -2452,6 +2554,43 @@ async function createHiddenSubagentSession(options = {}) {
     model: options.model || subagentModelName(options.provider),
   };
   sessionIndex.sessions.unshift(session);
+  await saveSessionIndex();
+  return session;
+}
+
+async function createCompactedForkSession({ source, marker, summary }) {
+  const now = new Date().toISOString();
+  const forkTitle = `Compact: ${source.title || "Untitled chat"}`;
+  const markerMessage = {
+    role: "assistant",
+    content: marker,
+    date: new Date(now),
+    metadata: { qubit: { kind: "compaction_marker", sourceSessionId: source.id, sourceTitle: source.title || "Untitled chat" } },
+  };
+  const session = {
+    ...newSession(createSessionId(), forkTitle, now),
+    forkedFromSessionId: source.id,
+    forkedFromMessageIndex: Number.isFinite(source.messageCount) ? source.messageCount : 0,
+    forkedAt: now,
+    messageCount: 1,
+  };
+  await storage.saveMessages(session.id, [markerMessage]);
+  if (storage.setSessionMetadata) {
+    await storage.setSessionMetadata(session.id, {
+      updatedAt: now,
+      custom: {
+        qubit: {
+          kind: "compaction",
+          sourceSessionId: source.id,
+          sourceTitle: source.title || "Untitled chat",
+          compactionSummary: summary,
+          compactedAt: now,
+        },
+      },
+    });
+  }
+  sessionIndex.sessions.unshift(session);
+  if (serverAddress === "") setDefaultSelectedSessionId(session.id);
   await saveSessionIndex();
   return session;
 }

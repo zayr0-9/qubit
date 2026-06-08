@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -171,6 +172,13 @@ func (m model) updateRuntime(ev runtimeEvent) (tea.Model, tea.Cmd) {
 		m = m.openPlanClarification(ev)
 	case "generated.image":
 		m.applyGeneratedImage(ev)
+	case "chat.compacted":
+		m.applyChatCompacted(ev)
+		cmds := []tea.Cmd{waitRuntimeEvent(m.runtime), sendRuntime(m.runtime, map[string]any{"type": "session.list"})}
+		if ev.AutoContinue && strings.TrimSpace(ev.PendingInput) != "" {
+			return m.startChatRunWithExtra(ev.PendingInput, cmds...)
+		}
+		return m, tea.Batch(cmds...)
 	case "session.created":
 		m.clearFakeStream()
 		m.activeRunID = ""

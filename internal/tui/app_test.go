@@ -4126,3 +4126,70 @@ func TestForkEditAtDisplayedMessageElevenDoesNotKeepOriginalEleven(t *testing.T)
 		t.Fatalf("replaceFromMessageIndex = %#v, want 10 for displayed message 11", payload["replaceFromMessageIndex"])
 	}
 }
+
+func TestSlashCompactSendsRuntimeRequest(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.session = "sess_1"
+	updated, cmd := m.handleSlashCommand("/compact")
+	got := updated.(model)
+	payload := runBatchSendCommand(t, cmd, stdin, "chat.compact")
+	assertPayload(t, payload, "chat.compact", "sess_1")
+	if got.status != "compacting" || !got.compacting {
+		t.Fatalf("status=%q compacting=%v, want compacting", got.status, got.compacting)
+	}
+}
+
+func TestAutoCompactionTriggersAboveThreshold(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.autoNewSessionOnChat = false
+	m.session = "sess_1"
+	m.maxContext = 10
+	m.messages = []chatMessage{{Role: "user", Content: strings.Repeat("x", 40)}}
+	m.composer.SetValue("continue")
+
+	updated, cmd := m.submitInput()
+	got := updated.(model)
+	payload := runBatchSendCommand(t, cmd, stdin, "chat.compact")
+	assertPayload(t, payload, "chat.compact", "sess_1")
+	if payload["pendingInput"] != "continue" {
+		t.Fatalf("pendingInput=%#v, want continue", payload["pendingInput"])
+	}
+	if len(got.messages) != 1 {
+		t.Fatalf("messages len=%d, want no local user append before compact", len(got.messages))
+	}
+}
+
+func TestChatCompactedAutoContinuesPendingInput(t *testing.T) {
+	rt, stdin := newTestRuntime(t)
+	m := initialModel(rt)
+	m.ready = true
+	m.busy = true
+	m.compacting = true
+	m.activeRunID = "run_compact"
+	m.session = "sess_old"
+	m.title = "Old"
+
+	updated, cmd := m.updateRuntime(runtimeEvent{
+		Type:            "chat.compacted",
+		RunID:           "run_compact",
+		SourceSessionID: "sess_old",
+		SessionID:       "sess_new",
+		SessionTitle:    "Compact: Old",
+		PendingInput:    "continue now",
+		AutoContinue:    true,
+		Messages:        []chatMessage{{Role: "assistant", Content: ">summarised session from hello"}},
+	})
+	got := updated.(model)
+	payload := runBatchSendCommand(t, cmd, stdin, "chat")
+	assertPayload(t, payload, "chat", "sess_new")
+	if payload["input"] != "continue now" {
+		t.Fatalf("input=%#v, want pending input", payload["input"])
+	}
+	if got.session != "sess_new" || got.messages[0].MessageKind != messageKindCompaction || got.messages[len(got.messages)-1].Role != "user" {
+		t.Fatalf("unexpected compacted state: session=%q messages=%#v", got.session, got.messages)
+	}
+}

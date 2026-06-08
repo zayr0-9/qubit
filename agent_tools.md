@@ -84,7 +84,7 @@ planMd
   Supports create/list/read/edit/display/clarify actions and is always-allowed so planning can create/update/display plans or ask clarifying questions without opening a permission modal. The clarify action emits a plan.clarification.request event so Go can collect one or more user answers in the bottom overlay above the input and return them as the tool result. The display action emits a UI-only plan.view event so Go can render the selected Markdown plan in chat; Qubit's runtime replaces the tool result sent back to the model with a short acknowledgement so the displayed plan Markdown is not sent to the model as tool-call output. On transcript reload, stored planMd display tool calls are hydrated back into UI-only plan preview messages from the current plan file so displayed plans remain visible after restarting Qubit. In hidden subagent runs, display/clarify must not emit UI events or wait for user input; clarify returns a safe cancelled result.
 
 subagent
-  Delegates one or more tasks to hidden persisted Qubit child sessions. Supports parallel and linear execution, uses `prompts/subagent.md`, and permission mode ask for the parent tool call. Once the parent call is allowed, hidden child runs auto-borrow gated tool permission while preserving never-deny tools. Child run internals are not rendered in Go; the parent sees only the subagent tool lifecycle and result summary.
+  Delegates one or more tasks to hidden persisted Qubit child sessions. Supports parallel and linear execution, uses `prompts/subagent.md` as a standalone child-session system prompt (not appended to the parent/main prompt), and permission mode ask for the parent tool call. Subagents are intended as small fast helper models for codebase exploration and web research; they should return concise evidence, paths, links, and summaries rather than deep plans. Once the parent call is allowed, hidden child runs auto-borrow gated tool permission while preserving never-deny tools. Child run internals are not rendered in Go; the parent sees only the subagent tool lifecycle and result summary.
 ```
 
 ## Important Files
@@ -372,7 +372,7 @@ pnpm run check:runtime
 go test ./...
 ```
 
-When changing `multiCall`, test read-only chains, gated nested tools in both plan and edit permission modes, stopOnError behavior, and unknown/nested multiCall rejection. When changing `subagent`, test argument validation, executor injection, hidden-run permission borrowing/suppression, linear stop-on-error, parallel all-results behavior, and Go tool-row summaries.
+When changing `multiCall`, test read-only chains, gated nested tools in both plan and edit permission modes, stopOnError behavior, and unknown/nested multiCall rejection. Compaction relies on reduced tool history: preserve `editFile`, `multiEdit`, and nested `multiCall` editFile operations exactly enough for future agents, but reduce `readFile`/`readFiles`/`readFileContinuation` to file names/ranges only. When changing `subagent`, test argument validation, executor injection, hidden-run permission borrowing/suppression, linear stop-on-error, parallel all-results behavior, and Go tool-row summaries.
 
 When changing path handling, also test representative cases where available:
 

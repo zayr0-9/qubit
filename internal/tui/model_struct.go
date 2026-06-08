@@ -67,6 +67,9 @@ type model struct {
 	lastCodexUsage        *codexUsage
 	transcriptLoadRunID   string
 	transcriptLoadSession string
+	pendingCompactInput   string
+	compacting            bool
+	lastCompactedSource   string
 
 	mode                       uiMode
 	previousMode               uiMode

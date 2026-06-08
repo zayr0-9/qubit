@@ -127,3 +127,25 @@ func formatTokenCount(tokens int) string {
 	}
 	return fmt.Sprintf("%d", tokens)
 }
+
+func (m model) shouldAutoCompactBeforeSend(input string) bool {
+	maxTokens := m.activeModelMaxContext()
+	if maxTokens <= 0 || strings.TrimSpace(input) == "" {
+		return false
+	}
+	if m.compacting || m.lastCompactedSource == m.session {
+		return false
+	}
+	pendingTokens := (len([]rune(input)) + charsPerToken - 1) / charsPerToken
+	usedTokens := estimateContextTokens(m.messages) + pendingTokens
+	if usage := m.codexUsageForStatus(); usage != nil {
+		usageTokens := usage.InputTokens + usage.OutputTokens
+		if usageTokens <= 0 {
+			usageTokens = usage.TotalTokens
+		}
+		if usageTokens > 0 {
+			usedTokens = max(usedTokens, usageTokens+pendingTokens)
+		}
+	}
+	return usedTokens*100 >= maxTokens*80
+}

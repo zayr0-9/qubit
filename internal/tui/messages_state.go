@@ -1,8 +1,9 @@
 package tui
 
 const (
-	messageKindStatus   = "status"
-	messageKindReminder = "reminder"
+	messageKindStatus     = "status"
+	messageKindReminder   = "reminder"
+	messageKindCompaction = "compaction"
 )
 
 type queuedMessageKind string
