@@ -46,11 +46,12 @@ func (m model) updateMouseWheelRouted(msg tea.MouseWheelMsg) tea.Model {
 }
 
 func (m model) updateChatMouseWheel(msg tea.MouseWheelMsg) tea.Model {
+	delta := m.chatWheelDelta()
 	switch msg.Mouse().Button {
 	case tea.MouseWheelUp:
-		m.chatScrollUp(max(1, m.viewport.MouseWheelDelta))
+		m.chatScrollUp(delta)
 	case tea.MouseWheelDown:
-		m.chatScrollDown(max(1, m.viewport.MouseWheelDelta))
+		m.chatScrollDown(delta)
 	}
 	return m
 }
@@ -313,11 +314,12 @@ func (m model) scrollTranscriptSelectionAtEdges(mouse tea.Mouse) model {
 	if m.chatList.Height <= 0 {
 		return m
 	}
+	delta := m.chatWheelDelta()
 	if mouse.Y <= m.chatTopY {
-		m.chatScrollUp(max(1, m.viewport.MouseWheelDelta))
+		m.chatScrollUp(delta)
 		m.transcriptSelection.Cursor = m.clampMouseToTranscriptPoint(tea.Mouse{X: mouse.X, Y: m.chatTopY})
 	} else if mouse.Y >= m.chatTopY+m.chatList.Height-1 {
-		m.chatScrollDown(max(1, m.viewport.MouseWheelDelta))
+		m.chatScrollDown(delta)
 		m.transcriptSelection.Cursor = m.clampMouseToTranscriptPoint(tea.Mouse{X: mouse.X, Y: m.chatTopY + m.chatList.Height - 1})
 	}
 	return m

@@ -40,8 +40,6 @@ type messageRenderSegmentKey struct {
 type messageRenderSegment struct {
 	Key       messageRenderSegmentKey
 	Text      string
-	Lines     []transcriptRenderLine
-	Links     []linkHitbox
 	Tools     []toolHitbox
 	LineCount int
 	LastIndex int
@@ -59,8 +57,6 @@ type streamingTranscriptCache struct {
 	MessageIndex    int
 	Width           int
 	Prefix          string
-	PrefixLines     []transcriptRenderLine
-	PrefixLinks     []linkHitbox
 	PrefixTools     []toolHitbox
 	PrefixLineCount int
 }
